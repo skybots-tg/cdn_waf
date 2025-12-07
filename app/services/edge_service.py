@@ -301,6 +301,31 @@ class EdgeNodeService:
                 status_text="Active" if result.success else "Missing venv"
             )
             
+        if component == "certbot":
+             # Check certbot version
+             cmd = "certbot --version"
+             result = await EdgeNodeService.execute_command(node, cmd)
+             
+             installed = result.success
+             version = None
+             if installed and result.stdout:
+                 # Output format: certbot 1.21.0
+                 parts = result.stdout.strip().split()
+                 if len(parts) >= 2:
+                     version = parts[1]
+             
+             # Certbot isn't a running service, it's a tool. 
+             # So we consider it 'running' (available) if installed.
+             # Or better: running=False but installed=True is normal state.
+             
+             return EdgeComponentStatus(
+                component=component,
+                installed=installed,
+                running=installed, # For CLI tools, installed means ready/running
+                version=version,
+                status_text="Ready" if installed else "Not installed"
+            )
+            
         service_name = component
         if component == "agent":
              service_name = "cdn-waf-agent"
