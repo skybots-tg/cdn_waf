@@ -136,6 +136,67 @@ install_deps() {
         systemctl enable postgresql
         systemctl start postgresql
     fi
+    
+    # Configure PostgreSQL from .env if available
+    if [[ -f "${APP_DIR}/.env" ]]; then
+        log "Configuring PostgreSQL from .env..."
+        
+        # Parse DB config using python
+        cat > /tmp/parse_db_url.py << 'EOF'
+import os
+import sys
+from urllib.parse import urlparse
+
+env_file = sys.argv[1]
+db_url = None
+
+with open(env_file, 'r') as f:
+    for line in f:
+        if line.startswith('DATABASE_URL='):
+            db_url = line.strip().split('=', 1)[1]
+            db_url = db_url.strip("'").strip('"')
+            break
+
+if db_url:
+    if "+asyncpg" in db_url:
+        db_url = db_url.replace("+asyncpg", "")
+    try:
+        u = urlparse(db_url)
+        print(f"DB_USER={u.username}")
+        print(f"DB_PASS={u.password}")
+        print(f"DB_NAME={u.path.lstrip('/')}")
+        print(f"DB_HOST={u.hostname}")
+    except:
+        pass
+EOF
+        
+        # Read variables
+        eval $("${PYTHON_BIN}" /tmp/parse_db_url.py "${APP_DIR}/.env")
+        rm -f /tmp/parse_db_url.py
+        
+        if [[ -n "${DB_USER:-}" && -n "${DB_PASS:-}" && -n "${DB_NAME:-}" ]]; then
+            # Only configure if local
+            if [[ "${DB_HOST}" == "localhost" || "${DB_HOST}" == "127.0.0.1" ]]; then
+                log "Setting up DB user ${DB_USER}..."
+                
+                # Create user if not exists
+                sudo -u postgres psql -tc "SELECT 1 FROM pg_roles WHERE rolname = '${DB_USER}'" | grep -q 1 || \
+                    sudo -u postgres psql -c "CREATE USER \"${DB_USER}\" WITH PASSWORD '${DB_PASS}';"
+                
+                # Update password to match .env
+                sudo -u postgres psql -c "ALTER USER \"${DB_USER}\" WITH PASSWORD '${DB_PASS}';"
+                
+                # Create DB if not exists
+                sudo -u postgres psql -tc "SELECT 1 FROM pg_database WHERE datname = '${DB_NAME}'" | grep -q 1 || \
+                    sudo -u postgres psql -c "CREATE DATABASE \"${DB_NAME}\" OWNER \"${DB_USER}\";"
+                    
+                # Grant privileges
+                sudo -u postgres psql -c "GRANT ALL PRIVILEGES ON DATABASE \"${DB_NAME}\" TO \"${DB_USER}\";"
+                
+                log "PostgreSQL configured for ${DB_USER}."
+            fi
+        fi
+    fi
 }
 
 deploy_code() {
