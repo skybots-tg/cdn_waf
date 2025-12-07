@@ -4,7 +4,7 @@ import logging
 import os
 import tempfile
 import shutil
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Tuple
 from datetime import datetime
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -178,7 +178,7 @@ class DNSNodeService:
             )
 
     @staticmethod
-    async def upload_file(node: DNSNode, local_path: str, remote_path: str) -> bool:
+    async def upload_file(node: DNSNode, local_path: str, remote_path: str) -> Tuple[bool, str]:
         """Upload file via SCP"""
         ssh_host = node.ssh_host or node.ip_address
         ssh_port = node.ssh_port or 22
@@ -199,10 +199,10 @@ class DNSNodeService:
 
             async with asyncssh.connect(**connect_kwargs) as conn:
                 await asyncssh.scp(local_path, (conn, remote_path))
-                return True
+                return True, ""
         except Exception as e:
             logger.error(f"Upload failed to {node.name}: {e}")
-            return False
+            return False, str(e)
 
     @staticmethod
     async def get_logs(node: DNSNode, lines: int = 100) -> str:
@@ -220,8 +220,9 @@ class DNSNodeService:
              return DNSNodeCommandResult(success=False, stdout="", stderr="Setup script missing", exit_code=1, execution_time=0)
         
         # Check if remote exists? Just upload.
-        if not await DNSNodeService.upload_file(node, setup_script, "/tmp/setup_dns.sh"):
-             return DNSNodeCommandResult(success=False, stdout="", stderr="Upload setup script failed", exit_code=1, execution_time=0)
+        success, error = await DNSNodeService.upload_file(node, setup_script, "/tmp/setup_dns.sh")
+        if not success:
+             return DNSNodeCommandResult(success=False, stdout="", stderr=f"Upload setup script failed: {error}", exit_code=1, execution_time=0)
         
         return await DNSNodeService.execute_command(node, "chmod +x /tmp/setup_dns.sh")
 
@@ -237,11 +238,13 @@ class DNSNodeService:
         if not res.success: return res
         
         # Upload requirements
-        if not await DNSNodeService.upload_file(node, "requirements.txt", "/opt/cdn_waf/requirements.txt"):
+        success, error = await DNSNodeService.upload_file(node, "requirements.txt", "/opt/cdn_waf/requirements.txt")
+        if not success:
              # Try creating dir first
              await DNSNodeService.execute_command(node, "mkdir -p /opt/cdn_waf")
-             if not await DNSNodeService.upload_file(node, "requirements.txt", "/opt/cdn_waf/requirements.txt"):
-                 return DNSNodeCommandResult(success=False, stdout="", stderr="Requirements upload failed", exit_code=1, execution_time=0)
+             success, error = await DNSNodeService.upload_file(node, "requirements.txt", "/opt/cdn_waf/requirements.txt")
+             if not success:
+                 return DNSNodeCommandResult(success=False, stdout="", stderr=f"Requirements upload failed: {error}", exit_code=1, execution_time=0)
         
         return await DNSNodeService.execute_command(node, "/tmp/setup_dns.sh install_python")
 
@@ -252,7 +255,6 @@ class DNSNodeService:
         
         # Zip the app
         with tempfile.NamedTemporaryFile(suffix=".zip", delete=False) as tmp_zip:
-             # Zip 'app' folder and 'dns_node' folder potentially? No, just 'app'.
              shutil.make_archive(tmp_zip.name.replace('.zip', ''), 'zip', root_dir='.', base_dir='app')
              zip_path = tmp_zip.name
         
@@ -260,8 +262,9 @@ class DNSNodeService:
              # Ensure dir exists
              await DNSNodeService.execute_command(node, "mkdir -p /opt/cdn_waf")
              
-             if not await DNSNodeService.upload_file(node, zip_path, "/opt/cdn_waf/app.zip"):
-                 return DNSNodeCommandResult(success=False, stdout="", stderr="App upload failed", exit_code=1, execution_time=0)
+             success, error = await DNSNodeService.upload_file(node, zip_path, "/opt/cdn_waf/app.zip")
+             if not success:
+                 return DNSNodeCommandResult(success=False, stdout="", stderr=f"App upload failed: {error}", exit_code=1, execution_time=0)
         finally:
              if os.path.exists(zip_path):
                  os.unlink(zip_path)
@@ -283,8 +286,9 @@ class DNSNodeService:
         
         try:
              await DNSNodeService.execute_command(node, "mkdir -p /opt/cdn_waf")
-             if not await DNSNodeService.upload_file(node, env_path, "/opt/cdn_waf/.env"):
-                  return DNSNodeCommandResult(success=False, stdout="", stderr="Config upload failed", exit_code=1, execution_time=0)
+             success, error = await DNSNodeService.upload_file(node, env_path, "/opt/cdn_waf/.env")
+             if not success:
+                  return DNSNodeCommandResult(success=False, stdout="", stderr=f"Config upload failed: {error}", exit_code=1, execution_time=0)
         finally:
              if os.path.exists(env_path):
                  os.unlink(env_path)
