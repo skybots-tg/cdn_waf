@@ -4,7 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from typing import Optional
 
 from app.core.database import get_db
-from app.core.security import get_current_user
+from app.core.security import get_optional_current_user
 from app.models.user import User
 
 router = APIRouter()
@@ -13,7 +13,7 @@ router = APIRouter()
 @router.get("/stats/global")
 async def get_global_stats(
     range: str = "24h",
-    current_user: User = Depends(get_current_user),
+    current_user: Optional[User] = Depends(get_optional_current_user),
     db: AsyncSession = Depends(get_db)
 ):
     """Get global statistics across all domains"""
@@ -32,7 +32,7 @@ async def get_global_stats(
 
 @router.get("/stats/domains")
 async def get_domains_stats(
-    current_user: User = Depends(get_current_user),
+    current_user: Optional[User] = Depends(get_optional_current_user),
     db: AsyncSession = Depends(get_db)
 ):
     """Get statistics for all domains"""
@@ -59,7 +59,7 @@ async def get_domains_stats(
 
 @router.get("/stats/geo")
 async def get_geo_stats(
-    current_user: User = Depends(get_current_user),
+    current_user: Optional[User] = Depends(get_optional_current_user),
     db: AsyncSession = Depends(get_db)
 ):
     """Get geographic distribution statistics"""
@@ -75,7 +75,7 @@ async def get_geo_stats(
 
 @router.get("/stats/edge-nodes")
 async def get_edge_nodes_stats(
-    current_user: User = Depends(get_current_user),
+    current_user: Optional[User] = Depends(get_optional_current_user),
     db: AsyncSession = Depends(get_db)
 ):
     """Get edge nodes performance statistics"""
@@ -106,7 +106,7 @@ async def get_edge_nodes_stats(
 async def get_domain_basic_stats(
     domain_id: int,
     range: str = "24h",
-    current_user: User = Depends(get_current_user),
+    current_user: Optional[User] = Depends(get_optional_current_user),
     db: AsyncSession = Depends(get_db)
 ):
     """Get basic statistics for a specific domain"""
@@ -130,7 +130,7 @@ async def get_domain_basic_stats(
 async def get_domain_top_paths(
     domain_id: int,
     limit: int = 10,
-    current_user: User = Depends(get_current_user),
+    current_user: Optional[User] = Depends(get_optional_current_user),
     db: AsyncSession = Depends(get_db)
 ):
     """Get top paths for a specific domain"""
@@ -152,7 +152,7 @@ async def get_domain_top_paths(
 @router.get("/domains/{domain_id}/stats/geo")
 async def get_domain_geo_stats(
     domain_id: int,
-    current_user: User = Depends(get_current_user),
+    current_user: Optional[User] = Depends(get_optional_current_user),
     db: AsyncSession = Depends(get_db)
 ):
     """Get geographic distribution for a specific domain"""
@@ -172,7 +172,7 @@ async def get_domain_logs(
     limit: int = 100,
     offset: int = 0,
     status: Optional[int] = None,
-    current_user: User = Depends(get_current_user),
+    current_user: Optional[User] = Depends(get_optional_current_user),
     db: AsyncSession = Depends(get_db)
 ):
     """Get request logs for a specific domain"""

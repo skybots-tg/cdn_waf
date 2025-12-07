@@ -97,3 +97,40 @@ async def get_current_active_user(current_user = Depends(get_current_user)):
     return current_user
 
 
+async def get_optional_current_user(
+    db: AsyncSession = Depends(get_db),
+    credentials: Optional[HTTPAuthorizationCredentials] = Security(security, auto_error=False)
+):
+    """Get current user if authenticated, None otherwise (for optional auth endpoints)"""
+    if credentials is None:
+        return None
+    
+    try:
+        token = credentials.credentials
+        payload = decode_token(token)
+        
+        if payload.get("type") != "access":
+            return None
+        
+        try:
+            user_id = int(payload.get("sub"))
+        except (TypeError, ValueError):
+            return None
+            
+        if user_id is None:
+            return None
+        
+        # Import here to avoid circular dependency
+        from app.services.user_service import UserService
+        
+        user_service = UserService(db)
+        user = await user_service.get_by_id(user_id)
+        
+        if user is None or not user.is_active:
+            return None
+        
+        return user
+    except:
+        return None
+
+
