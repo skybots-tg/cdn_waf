@@ -143,13 +143,13 @@
 
         <div class="grid grid-2 gap-3">
             <!-- System -->
-            <div class="glass-card">
+            <div class="glass-card" id="card-system">
                 <div class="flex-between mb-3">
                     <div style="display: flex; gap: 12px; align-items: center;">
                         <div class="component-icon"><i class="fab fa-linux"></i></div>
                         <div>
                             <h4 style="font-weight: 600;">System Dependencies</h4>
-                            <span class="status-dot status-success"></span> <span style="font-size: 12px; color: var(--text-muted);">Installed</span>
+                            <span class="status-dot status-warning"></span> <span class="status-text" style="font-size: 12px; color: var(--text-muted);">Checking...</span>
                         </div>
                     </div>
                     <div class="dropdown">
@@ -162,13 +162,13 @@
             </div>
 
             <!-- Nginx -->
-            <div class="glass-card">
+            <div class="glass-card" id="card-nginx">
                 <div class="flex-between mb-3">
                     <div style="display: flex; gap: 12px; align-items: center;">
                         <div class="component-icon"><i class="fas fa-server"></i></div>
                         <div>
                             <h4 style="font-weight: 600;">Nginx & Modules</h4>
-                            <span class="status-dot status-warning"></span> <span style="font-size: 12px; color: var(--text-muted);">Outdated config</span>
+                            <span class="status-dot status-warning"></span> <span class="status-text" style="font-size: 12px; color: var(--text-muted);">Checking...</span>
                         </div>
                     </div>
                     <div class="flex gap-1">
@@ -177,18 +177,18 @@
                     </div>
                 </div>
                 <p style="font-size: 13px; color: var(--text-secondary);">
-                    Веб-сервер и WAF модули. Версия 1.24.0
+                    Веб-сервер и WAF модули.
                 </p>
             </div>
 
             <!-- Python Env -->
-            <div class="glass-card">
+            <div class="glass-card" id="card-python">
                 <div class="flex-between mb-3">
                     <div style="display: flex; gap: 12px; align-items: center;">
                         <div class="component-icon"><i class="fab fa-python"></i></div>
                         <div>
                             <h4 style="font-weight: 600;">Python Environment</h4>
-                            <span class="status-dot status-success"></span> <span style="font-size: 12px; color: var(--text-muted);">Active</span>
+                            <span class="status-dot status-warning"></span> <span class="status-text" style="font-size: 12px; color: var(--text-muted);">Checking...</span>
                         </div>
                     </div>
                     <button class="btn btn-sm btn-secondary" onclick="runAction('update_python')">Обновить venv</button>
@@ -199,13 +199,13 @@
             </div>
 
             <!-- Agent -->
-            <div class="glass-card">
+            <div class="glass-card" id="card-agent">
                 <div class="flex-between mb-3">
                     <div style="display: flex; gap: 12px; align-items: center;">
                         <div class="component-icon"><i class="fas fa-robot"></i></div>
                         <div>
                             <h4 style="font-weight: 600;">WAF Agent</h4>
-                            <span class="status-dot status-error"></span> <span style="font-size: 12px; color: var(--text-muted);">Stopped</span>
+                            <span class="status-dot status-warning"></span> <span class="status-text" style="font-size: 12px; color: var(--text-muted);">Checking...</span>
                         </div>
                     </div>
                     <div class="flex gap-1">
@@ -219,13 +219,13 @@
             </div>
             
             <!-- SSL -->
-            <div class="glass-card">
+            <div class="glass-card" id="card-certbot">
                 <div class="flex-between mb-3">
                     <div style="display: flex; gap: 12px; align-items: center;">
                         <div class="component-icon"><i class="fas fa-lock"></i></div>
                         <div>
                             <h4 style="font-weight: 600;">Certbot & SSL</h4>
-                            <span class="status-dot status-success"></span> <span style="font-size: 12px; color: var(--text-muted);">Ready</span>
+                            <span class="status-dot status-warning"></span> <span class="status-text" style="font-size: 12px; color: var(--text-muted);">Checking...</span>
                         </div>
                     </div>
                     <button class="btn btn-sm btn-secondary" onclick="runAction('install_certbot')">Install</button>
@@ -474,12 +474,94 @@ async function checkConnection() {
         const response = await api.post(`/edge-nodes/${NODE_ID}/health-check`);
         if (response.status === 'online') {
             showNotification('Связь с нодой установлена', 'success');
-            // Update CPU/Memory/Disk in UI if elements exist (optional)
+            // Update UI status badge
+            const badge = document.querySelector('.badge');
+            if (badge) {
+                badge.className = 'badge badge-success';
+                badge.innerText = 'online';
+            }
         } else {
              showNotification(`Связь отсутствует: ${response.error || 'Unknown error'}`, 'error');
+             const badge = document.querySelector('.badge');
+             if (badge) {
+                badge.className = 'badge badge-error';
+                badge.innerText = 'offline';
+            }
         }
     } catch (error) {
         showNotification(`Ошибка связи: ${error.message}`, 'error');
+    }
+}
+
+async function updateComponentStatus(component, cardId) {
+    const card = document.getElementById(cardId);
+    if (!card) return;
+    
+    const dot = card.querySelector('.status-dot');
+    const text = card.querySelector('.status-text');
+    
+    try {
+        const response = await api.get(`/edge-nodes/${NODE_ID}/component/${component}`);
+        
+        // Update dot
+        dot.className = 'status-dot';
+        if (response.running) {
+            dot.classList.add('status-success');
+        } else if (response.installed) {
+             dot.classList.add('status-warning'); // Installed but stopped
+        } else {
+             dot.classList.add('status-error'); // Not installed or error
+        }
+        
+        // Update text
+        let statusStr = response.status_text || (response.running ? 'Active' : 'Inactive');
+        if (response.version) statusStr += ` (${response.version})`;
+        
+        text.innerText = statusStr;
+        text.style.color = response.running ? 'var(--success)' : 'var(--text-muted)';
+        
+    } catch (error) {
+        dot.className = 'status-dot status-error';
+        text.innerText = 'Error checking status';
+    }
+}
+
+async function checkAllComponents() {
+    const components = [
+        { id: 'system', card: 'card-system' },
+        { id: 'nginx', card: 'card-nginx' },
+        { id: 'python', card: 'card-python' },
+        { id: 'agent', card: 'card-agent' },
+        { id: 'certbot', card: 'card-certbot' }
+    ];
+    
+    for (const comp of components) {
+        updateComponentStatus(comp.id, comp.card);
+    }
+}
+
+// Check components on load and when tab is switched
+document.addEventListener('DOMContentLoaded', () => {
+    // Optional: check immediately if tab is active
+    if (document.getElementById('tab-components').style.display !== 'none') {
+        checkAllComponents();
+    }
+});
+
+const originalSwitchTab = window.switchTab;
+window.switchTab = function(tabName) {
+    // Call original logic (implemented in HTML previously, but we replaced it?) 
+    // Wait, the original switchTab was defined above. We are overriding it here to add hooks.
+    
+    // Re-implementing switchTab logic because 'originalSwitchTab' might not capture the global function properly if defined in same scope
+    document.querySelectorAll('.tab-content').forEach(el => el.style.display = 'none');
+    document.querySelectorAll('.tab-link').forEach(el => el.classList.remove('active'));
+    document.getElementById(`tab-${tabName}`).style.display = 'block';
+    const btn = Array.from(document.querySelectorAll('.tab-link')).find(b => b.onclick.toString().includes(tabName));
+    if (btn) btn.classList.add('active');
+    
+    if (tabName === 'components') {
+        checkAllComponents();
     }
 }
 </script>
