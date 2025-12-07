@@ -110,3 +110,30 @@ async def settings_page(request: Request):
     })
 
 
+@router.get("/dns", response_class=HTMLResponse)
+async def dns_management_page(request: Request):
+    """DNS management page - shows all domains"""
+    return templates.TemplateResponse("dns_management.html", {
+        "request": request,
+        "user": {"email": "user@example.com"}  # TODO: Get real user
+    })
+
+
+@router.get("/waf", response_class=HTMLResponse)
+async def waf_management_page(request: Request):
+    """WAF management page - shows all domains"""
+    return templates.TemplateResponse("waf_management.html", {
+        "request": request,
+        "user": {"email": "user@example.com"}  # TODO: Get real user
+    })
+
+
+@router.get("/cdn", response_class=HTMLResponse)
+async def cdn_management_page(request: Request):
+    """CDN management page - shows all domains"""
+    return templates.TemplateResponse("cdn_management.html", {
+        "request": request,
+        "user": {"email": "user@example.com"}  # TODO: Get real user
+    })
+
+

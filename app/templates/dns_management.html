@@ -1,0 +1,223 @@
+{% extends "base.html" %}
+
+{% block title %}DNS Management - CDN WAF{% endblock %}
+
+{% block content %}
+<div class="container" style="padding: 32px 24px;">
+    <!-- Header -->
+    <div class="flex-between mb-4">
+        <div>
+            <h1 style="font-size: 32px; font-weight: 700;">DNS Management</h1>
+            <p style="color: var(--text-secondary); font-size: 14px;">
+                Manage DNS records across all your domains
+            </p>
+        </div>
+        <button class="btn btn-primary" onclick="showAddDomainModal()">
+            <i class="fas fa-plus"></i> Add Domain
+        </button>
+    </div>
+
+    <!-- Search and Filters -->
+    <div class="glass-card mb-4">
+        <div class="grid grid-3 gap-3">
+            <input type="text" class="form-input" placeholder="Search domains..." id="search-domains">
+            <select class="form-select" id="filter-status">
+                <option value="">All Statuses</option>
+                <option value="active">Active</option>
+                <option value="pending">Pending</option>
+                <option value="suspended">Suspended</option>
+            </select>
+            <select class="form-select" id="filter-proxied">
+                <option value="">All Records</option>
+                <option value="proxied">Proxied Only</option>
+                <option value="dns-only">DNS Only</option>
+            </select>
+        </div>
+    </div>
+
+    <!-- Domains List -->
+    <div id="domains-list">
+        <p style="text-align: center; color: var(--text-muted); padding: 64px;">
+            <i class="fas fa-spinner fa-spin" style="font-size: 32px; margin-bottom: 16px;"></i>
+            <br>Loading domains...
+        </p>
+    </div>
+</div>
+
+<style>
+.domain-card {
+    background: var(--glass-bg);
+    backdrop-filter: blur(20px) saturate(180%);
+    -webkit-backdrop-filter: blur(20px) saturate(180%);
+    border: 1px solid var(--glass-border);
+    border-radius: var(--border-radius);
+    padding: 20px;
+    margin-bottom: 16px;
+    transition: all var(--transition-base);
+}
+
+.domain-card:hover {
+    box-shadow: var(--shadow-lg);
+    transform: translateY(-2px);
+}
+
+.dns-record {
+    padding: 12px;
+    background: var(--bg-tertiary);
+    border-radius: var(--border-radius-sm);
+    margin-bottom: 8px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+</style>
+
+<script>
+async function loadDomains() {
+    try {
+        const response = await fetch('/api/v1/domains');
+        const domains = await response.json();
+        
+        const container = document.getElementById('domains-list');
+        
+        if (domains.length === 0) {
+            container.innerHTML = `
+                <div style="text-align: center; padding: 64px; color: var(--text-muted);">
+                    <i class="fas fa-globe" style="font-size: 64px; margin-bottom: 24px; opacity: 0.3;"></i>
+                    <h3 style="margin-bottom: 12px;">No domains yet</h3>
+                    <p style="margin-bottom: 24px;">Get started by adding your first domain</p>
+                    <button class="btn btn-primary" onclick="showAddDomainModal()">
+                        <i class="fas fa-plus"></i> Add Domain
+                    </button>
+                </div>
+            `;
+            return;
+        }
+        
+        container.innerHTML = domains.map(domain => `
+            <div class="domain-card">
+                <div class="flex-between mb-3">
+                    <div>
+                        <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 8px;">
+                            <h3 style="font-size: 20px; font-weight: 600; margin: 0;">${domain.name}</h3>
+                            <span class="badge ${domain.status === 'active' ? 'badge-success' : 'badge-secondary'}">
+                                ${domain.status}
+                            </span>
+                            ${domain.ns_verified ? '<i class="fas fa-check-circle" style="color: var(--success);" title="NS Verified"></i>' : ''}
+                        </div>
+                        <div style="font-size: 13px; color: var(--text-secondary);">
+                            <i class="fas fa-clock"></i> Added ${new Date(domain.created_at).toLocaleDateString()}
+                        </div>
+                    </div>
+                    <div style="display: flex; gap: 8px;">
+                        <a href="/domains/${domain.id}/dns" class="btn btn-primary btn-sm">
+                            <i class="fas fa-cog"></i> Manage DNS
+                        </a>
+                        <button class="btn btn-secondary btn-sm" onclick="loadDomainRecords(${domain.id})">
+                            <i class="fas fa-eye"></i> View Records
+                        </button>
+                    </div>
+                </div>
+                <div id="records-${domain.id}" style="display: none;">
+                    <div style="border-top: 1px solid var(--glass-border); margin-top: 12px; padding-top: 12px;">
+                        <p style="text-align: center; color: var(--text-muted); padding: 16px;">
+                            <i class="fas fa-spinner fa-spin"></i> Loading records...
+                        </p>
+                    </div>
+                </div>
+            </div>
+        `).join('');
+        
+    } catch (error) {
+        console.error('Error loading domains:', error);
+        showNotification('Failed to load domains', 'error');
+    }
+}
+
+async function loadDomainRecords(domainId) {
+    const recordsContainer = document.getElementById(`records-${domainId}`);
+    const isVisible = recordsContainer.style.display !== 'none';
+    
+    if (isVisible) {
+        recordsContainer.style.display = 'none';
+        return;
+    }
+    
+    recordsContainer.style.display = 'block';
+    
+    try {
+        const response = await fetch(`/api/v1/dns/domains/${domainId}/records`);
+        const records = await response.json();
+        
+        if (records.length === 0) {
+            recordsContainer.innerHTML = `
+                <div style="border-top: 1px solid var(--glass-border); margin-top: 12px; padding-top: 12px;">
+                    <p style="text-align: center; color: var(--text-muted); padding: 16px;">
+                        No DNS records configured
+                    </p>
+                </div>
+            `;
+            return;
+        }
+        
+        recordsContainer.innerHTML = `
+            <div style="border-top: 1px solid var(--glass-border); margin-top: 12px; padding-top: 12px;">
+                ${records.slice(0, 5).map(record => `
+                    <div class="dns-record">
+                        ${record.proxied ? 
+                            '<i class="fas fa-cloud" style="color: var(--accent-primary);" title="Proxied"></i>' :
+                            '<i class="fas fa-globe" style="color: var(--text-muted);" title="DNS Only"></i>'
+                        }
+                        <div style="flex: 1;">
+                            <div style="font-family: monospace; font-weight: 600;">${record.name}</div>
+                            <div style="font-size: 12px; color: var(--text-secondary);">
+                                ${record.type} → ${record.content}
+                            </div>
+                        </div>
+                        <span class="badge badge-secondary">${record.ttl}s</span>
+                    </div>
+                `).join('')}
+                ${records.length > 5 ? `
+                    <div style="text-align: center; margin-top: 12px;">
+                        <a href="/domains/${domainId}/dns" class="btn btn-secondary btn-sm">
+                            View all ${records.length} records
+                        </a>
+                    </div>
+                ` : ''}
+            </div>
+        `;
+    } catch (error) {
+        console.error('Error loading DNS records:', error);
+        recordsContainer.innerHTML = `
+            <div style="border-top: 1px solid var(--glass-border); margin-top: 12px; padding-top: 12px;">
+                <p style="text-align: center; color: var(--error); padding: 16px;">
+                    Failed to load DNS records
+                </p>
+            </div>
+        `;
+    }
+}
+
+function showAddDomainModal() {
+    showNotification('Add domain modal coming soon', 'info');
+}
+
+// Initialize
+document.addEventListener('DOMContentLoaded', () => {
+    loadDomains();
+    
+    // Search functionality
+    document.getElementById('search-domains').addEventListener('input', (e) => {
+        // TODO: Implement search
+    });
+    
+    document.getElementById('filter-status').addEventListener('change', (e) => {
+        // TODO: Implement filter
+    });
+    
+    document.getElementById('filter-proxied').addEventListener('change', (e) => {
+        // TODO: Implement filter
+    });
+});
+</script>
+{% endblock %}
