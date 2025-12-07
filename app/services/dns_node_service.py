@@ -444,7 +444,15 @@ ACME_EMAIL={settings.ACME_EMAIL}
             # as our setup script creates it this way.
             
             cmd = "sudo -u postgres psql cdn_waf -f /tmp/sync_db.sql"
-            return await DNSNodeService.execute_command(node, cmd, timeout=60)
+            # Capture both stdout and stderr to debug sql errors
+            res = await DNSNodeService.execute_command(node, cmd, timeout=60)
+            
+            if not res.success:
+                 # If sync failed, log the output and return error
+                 logger.error(f"DB Sync failed on {node.name}. Output: {res.stdout} Error: {res.stderr}")
+                 return res
+            
+            return res
             
         finally:
             if os.path.exists(tmp_sql_path):
