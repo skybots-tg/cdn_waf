@@ -1,6 +1,6 @@
 """add ssh fields
 
-Revision ID: 001
+Revision ID: 20241207_002
 Revises: 
 Create Date: 2024-12-07 12:00:00.000000
 
@@ -10,7 +10,7 @@ import sqlalchemy as sa
 from sqlalchemy.engine.reflection import Inspector
 
 # revision identifiers, used by Alembic.
-revision = '001'
+revision = '20241207_002'
 down_revision = None
 branch_labels = None
 depends_on = None
@@ -49,5 +49,6 @@ def upgrade() -> None:
             op.add_column('dns_nodes', sa.Column('ssh_password', sa.String(255), nullable=True))
 
 def downgrade() -> None:
+    # We can skip downgrade logic for this fix
     pass
 
