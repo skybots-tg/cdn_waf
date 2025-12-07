@@ -364,123 +364,71 @@ ACME_EMAIL={settings.ACME_EMAIL}
     
     @staticmethod
     async def sync_database(node: DNSNode, db_session: AsyncSession) -> DNSNodeCommandResult:
-        """Sync domains and records from central DB to node DB"""
+        """Sync domains and records from central DB to node DB via API"""
+        import httpx
+        from app.schemas.sync import (
+            DNSSyncPayload, UserSync, OrganizationSync, DomainSync, 
+            DNSRecordSync, EdgeNodeSync
+        )
         
-        # 1. Fetch data from central DB
-        # We need to sync users first because of foreign key constraints in organizations
-        users = await db_session.execute(text("SELECT * FROM users"))
-        users_data = users.all()
-
-        organizations = await db_session.execute(text("SELECT * FROM organizations"))
-        organizations_data = organizations.all()
-        
-        domains = await db_session.execute(text("SELECT * FROM domains"))
-        domains_data = domains.all()
-        
-        dns_records = await db_session.execute(text("SELECT * FROM dns_records"))
-        dns_records_data = dns_records.all()
-        
-        # 2. Generate SQL Dump
-        # Using pg_dump would be cleaner but requires connection string matching. 
-        # Generating INSERTs is safer for mismatched environments (e.g. if we want to overwrite everything)
-        # But for sync, TRUNCATE + INSERT is easiest way to ensure consistency
-        
-        sql_lines = [
-            "\\set ON_ERROR_STOP on",
-            "BEGIN;",
-            # Truncate in correct order (dependent tables first if we didn't use CASCADE, but CASCADE handles it)
-            # However, to be safe and clear:
-            # dns_records -> domains
-            # domains -> organizations
-            # organizations -> users
-            # So truncating users CASCADE should clear everything if everything is linked.
-            # But explicit list is better.
-            "TRUNCATE TABLE dns_records, domains, organizations, users, domain_tls_settings, origins, cache_rules, waf_rules, rate_limits, ip_access_rules, certificates CASCADE;",
-        ]
-        
-        # Users
-        for user in users_data:
-            # Handle booleans and NULLs
-            is_active = 'TRUE' if user.is_active else 'FALSE'
-            is_superuser = 'TRUE' if user.is_superuser else 'FALSE'
-            last_login = f"'{user.last_login}'" if user.last_login else "NULL"
-            
-            sql_lines.append(
-                f"INSERT INTO users (id, email, password_hash, full_name, is_active, is_superuser, last_login, created_at, updated_at) "
-                f"VALUES ({user.id}, '{user.email}', '{user.password_hash}', '{user.full_name}', {is_active}, {is_superuser}, {last_login}, '{user.created_at}', '{user.updated_at}');"
-            )
-
-        # Organizations
-        for org in organizations_data:
-            # Manually map columns instead of using mapped metadata to avoid reflection issues
-            sql_lines.append(
-                f"INSERT INTO organizations (id, name, owner_id, created_at, updated_at) "
-                f"VALUES ({org.id}, '{org.name}', {org.owner_id}, '{org.created_at}', '{org.updated_at}');"
-            )
-
-        # Domains
-        for domain in domains_data:
-            # Handle potentially null values safely
-            ns_verified_at = f"'{domain.ns_verified_at}'" if domain.ns_verified_at else "NULL"
-            verification_token = f"'{domain.verification_token}'" if domain.verification_token else "NULL"
-            
-            sql_lines.append(
-                f"INSERT INTO domains (id, organization_id, name, status, verification_token, ns_verified, ns_verified_at, created_at, updated_at) "
-                f"VALUES ({domain.id}, {domain.organization_id}, '{domain.name}', '{domain.status}', {verification_token}, {'TRUE' if domain.ns_verified else 'FALSE'}, {ns_verified_at}, '{domain.created_at}', '{domain.updated_at}');"
-            )
-            
-        # DNS Records
-        for record in dns_records_data:
-            priority = str(record.priority) if record.priority is not None else "NULL"
-            weight = str(record.weight) if record.weight is not None else "NULL"
-            comment = f"'{record.comment.replace(chr(39), chr(39)+chr(39))}'" if record.comment else "NULL"
-            
-            # Escape content properly
-            content = record.content.replace("'", "''")
-            
-            sql_lines.append(
-                f"INSERT INTO dns_records (id, domain_id, type, name, content, ttl, priority, weight, proxied, comment, created_at, updated_at) "
-                f"VALUES ({record.id}, {record.domain_id}, '{record.type}', '{record.name}', '{content}', {record.ttl}, {priority}, {weight}, {'TRUE' if record.proxied else 'FALSE'}, {comment}, '{record.created_at}', '{record.updated_at}');"
-            )
-
-        sql_lines.append("COMMIT;")
-        
-        sql_content = "\n".join(sql_lines)
-        
-        # 3. Upload and Execute
-        with tempfile.NamedTemporaryFile(mode='w', suffix=".sql", delete=False, encoding='utf-8') as tmp_sql:
-            tmp_sql.write(sql_content)
-            tmp_sql_path = tmp_sql.name
-            
         try:
-            # Upload
-            success, error = await DNSNodeService.upload_file(node, tmp_sql_path, "/tmp/sync_db.sql")
-            if not success:
-                return DNSNodeCommandResult(success=False, stdout="", stderr=f"Failed to upload SQL: {error}", exit_code=1, execution_time=0)
+            # 1. Fetch data from central DB
+            users = (await db_session.execute(text("SELECT * FROM users"))).all()
+            organizations = (await db_session.execute(text("SELECT * FROM organizations"))).all()
+            domains = (await db_session.execute(text("SELECT * FROM domains"))).all()
+            dns_records = (await db_session.execute(text("SELECT * FROM dns_records"))).all()
+            edge_nodes = (await db_session.execute(text("SELECT * FROM edge_nodes"))).all()
             
-            # Fix permissions so postgres user can read it
-            await DNSNodeService.execute_command(node, "chmod 644 /tmp/sync_db.sql")
+            # 2. Construct Payload
+            # Helper to safely convert row to dict handling datetime serialization
+            def row_to_dict(row):
+                return dict(row._mapping)
 
-            # Execute
-            # Assume DB name is cdn_waf and user cdn_user (standard from setup)
-            # OR we can parse .env on the node.
-            # But simpler: use 'sudo -u postgres psql cdn_waf -f /tmp/sync_db.sql' 
-            # as our setup script creates it this way.
+            payload = DNSSyncPayload(
+                users=[UserSync(**row_to_dict(u)) for u in users],
+                organizations=[OrganizationSync(**row_to_dict(o)) for o in organizations],
+                domains=[DomainSync(**row_to_dict(d)) for d in domains],
+                records=[DNSRecordSync(**row_to_dict(r)) for r in dns_records],
+                edge_nodes=[EdgeNodeSync(**row_to_dict(n)) for n in edge_nodes]
+            )
             
-            cmd = "sudo -u postgres psql cdn_waf -f /tmp/sync_db.sql"
-            # Capture both stdout and stderr to debug sql errors
-            res = await DNSNodeService.execute_command(node, cmd, timeout=60)
+            # 3. Send to Node API
+            # Need to determine port, assuming 8000 for now
+            api_url = f"http://{node.ip_address}:8000/api/v1/sync"
             
-            if not res.success:
-                 # If sync failed, log the output and return error
-                 logger.error(f"DB Sync failed on {node.name}. Output: {res.stdout} Error: {res.stderr}")
-                 return res
-            
-            return res
-            
-        finally:
-            if os.path.exists(tmp_sql_path):
-                os.unlink(tmp_sql_path)
+            async with httpx.AsyncClient() as client:
+                response = await client.post(
+                    api_url, 
+                    json=payload.model_dump(mode='json'),
+                    timeout=60.0
+                )
+                
+                if response.status_code == 200:
+                    return DNSNodeCommandResult(
+                        success=True,
+                        stdout=str(response.json()),
+                        stderr="",
+                        exit_code=0,
+                        execution_time=response.elapsed.total_seconds()
+                    )
+                else:
+                    return DNSNodeCommandResult(
+                        success=False,
+                        stdout=response.text,
+                        stderr=f"API Error: {response.status_code}",
+                        exit_code=1,
+                        execution_time=response.elapsed.total_seconds()
+                    )
+                    
+        except Exception as e:
+            logger.error(f"Sync failed to {node.name}: {e}")
+            return DNSNodeCommandResult(
+                success=False,
+                stdout="",
+                stderr=str(e),
+                exit_code=1,
+                execution_time=0.0
+            )
 
     @staticmethod
     async def issue_certificate(node: DNSNode) -> DNSNodeCommandResult:

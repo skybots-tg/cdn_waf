@@ -3,6 +3,7 @@ import logging
 import os
 import signal
 import sys
+import threading
 from datetime import datetime
 from typing import List, Optional
 
@@ -11,14 +12,19 @@ from dnslib import (
     RCODE, CLASS, DNSLabel
 )
 from dnslib.server import DNSServer, BaseResolver
-from sqlalchemy import create_engine, select, and_, or_
+from sqlalchemy import create_engine, select, and_, or_, text
 from sqlalchemy.orm import sessionmaker, Session
+from fastapi import FastAPI, HTTPException, BackgroundTasks
+import uvicorn
 
 from app.core.config import settings
 from app.models.domain import Domain, DomainStatus
 from app.models.dns import DNSRecord as DNSModel
 from app.models.edge_node import EdgeNode
 from app.models.dns_node import DNSNode
+from app.models.user import User
+from app.models.organization import Organization
+from app.schemas.sync import DNSSyncPayload
 
 # Configure logging
 logging.basicConfig(
@@ -52,19 +58,28 @@ class DBResolver(BaseResolver):
         
     def get_nameservers(self, db: Session) -> List[str]:
         """Get hostnames of active DNS nodes"""
-        nodes = db.execute(
-            select(DNSNode).where(DNSNode.enabled == True)
-        ).scalars().all()
-        return [node.hostname for node in nodes]
+        # Since we might not sync DNSNode table, we use hardcoded or try to fetch
+        try:
+            nodes = db.execute(
+                select(DNSNode).where(DNSNode.enabled == True)
+            ).scalars().all()
+            if nodes:
+                return [node.hostname for node in nodes]
+        except Exception:
+            pass
+        return [self.ns1, self.ns2]
 
     def get_edge_nodes_ips(self, db: Session) -> List[str]:
         """Get IPs of active edge nodes"""
-        nodes = db.execute(
-            select(EdgeNode).where(
-                and_(EdgeNode.status == "online", EdgeNode.enabled == True)
-            )
-        ).scalars().all()
-        return [node.ip_address for node in nodes]
+        try:
+            nodes = db.execute(
+                select(EdgeNode).where(
+                    and_(EdgeNode.status == "online", EdgeNode.enabled == True)
+                )
+            ).scalars().all()
+            return [node.ip_address for node in nodes]
+        except Exception:
+            return []
 
     def resolve(self, request: DNSRecord, handler) -> DNSRecord:
         reply = request.reply()
@@ -74,7 +89,7 @@ class DBResolver(BaseResolver):
         
         domain_name = str(qname).rstrip('.')
         
-        logger.info(f"Query: {qname} ({qtype_name})")
+        # logger.info(f"Query: {qname} ({qtype_name})")
         
         with SessionLocal() as db:
             # 1. Find the domain (zone)
@@ -98,15 +113,15 @@ class DBResolver(BaseResolver):
                     break
             
             if not zone:
-                logger.debug(f"Domain not found: {domain_name}")
+                # logger.debug(f"Domain not found: {domain_name}")
                 reply.header.rcode = RCODE.REFUSED # We are not authoritative
                 return reply
             
-            logger.info(f"Found zone: {zone.name}, status: {zone.status}")
+            # logger.info(f"Found zone: {zone.name}, status: {zone.status}")
 
             # Allow ACTIVE and PENDING states
             if zone.status not in [DomainStatus.ACTIVE, DomainStatus.PENDING]:
-                logger.debug(f"Domain inactive: {zone.name} ({zone.status})")
+                # logger.debug(f"Domain inactive: {zone.name} ({zone.status})")
                 reply.header.rcode = RCODE.REFUSED
                 return reply
 
@@ -229,7 +244,69 @@ class DBResolver(BaseResolver):
 
         return reply
 
-def main():
+# FastAPI App for management
+app = FastAPI(title="DNS Node API")
+
+@app.post("/api/v1/sync")
+async def sync_data(payload: DNSSyncPayload):
+    """Sync data from central server"""
+    logger.info("Received sync request")
+    try:
+        with SessionLocal() as db:
+            # 1. Truncate tables
+            # We use TRUNCATE CASCADE to clear everything
+            # Note: We include edge_nodes and dns_nodes if we sync them
+            db.execute(text("TRUNCATE TABLE dns_records, domains, organizations, users, edge_nodes RESTART IDENTITY CASCADE"))
+            
+            # 2. Insert Users
+            if payload.users:
+                db.execute(
+                    User.__table__.insert(),
+                    [u.dict() for u in payload.users]
+                )
+            
+            # 3. Insert Organizations
+            if payload.organizations:
+                db.execute(
+                    Organization.__table__.insert(),
+                    [o.dict() for o in payload.organizations]
+                )
+            
+            # 4. Insert Domains
+            if payload.domains:
+                db.execute(
+                    Domain.__table__.insert(),
+                    [d.dict() for d in payload.domains]
+                )
+            
+            # 5. Insert DNS Records
+            if payload.records:
+                db.execute(
+                    DNSModel.__table__.insert(),
+                    [r.dict() for r in payload.records]
+                )
+            
+            # 6. Insert Edge Nodes
+            if payload.edge_nodes:
+                db.execute(
+                    EdgeNode.__table__.insert(),
+                    [n.dict() for n in payload.edge_nodes]
+                )
+
+            db.commit()
+            logger.info("Sync completed successfully")
+            return {"status": "success", "count": {
+                "users": len(payload.users),
+                "domains": len(payload.domains),
+                "records": len(payload.records),
+                "edge_nodes": len(payload.edge_nodes)
+            }}
+            
+    except Exception as e:
+        logger.error(f"Sync failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+def start_dns_server():
     resolver = DBResolver()
     
     # Create UDP Server
@@ -237,20 +314,19 @@ def main():
     # Create TCP Server
     tcp_server = DNSServer(resolver, port=53, address="0.0.0.0", tcp=True)
 
-    logger.info("Starting DNS Server on port 53 (v1.1 - PENDING fix)...")
+    logger.info("Starting DNS Server on port 53...")
     
     udp_server.start_thread()
     tcp_server.start_thread()
+    
+    return udp_server, tcp_server
 
-    try:
-        while udp_server.isAlive():
-            import time
-            time.sleep(1)
-    except KeyboardInterrupt:
-        pass
-    finally:
-        udp_server.stop()
-        tcp_server.stop()
+@app.on_event("startup")
+def startup_event():
+    # Start DNS server in background
+    start_dns_server()
 
 if __name__ == "__main__":
-    main()
+    # Run API server
+    # This entry point is used when running python -m app.dns_server
+    uvicorn.run(app, host="0.0.0.0", port=8000)
