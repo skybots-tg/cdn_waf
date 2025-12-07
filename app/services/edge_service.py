@@ -258,8 +258,38 @@ class EdgeNodeService:
         component: str
     ) -> EdgeComponentStatus:
         """Get status of component on edge node"""
+        
+        # Virtual components handling
+        if component == "system":
+             # Check if basic tools are installed
+             cmd = "which curl && which git"
+             result = await EdgeNodeService.execute_command(node, cmd)
+             return EdgeComponentStatus(
+                component=component,
+                installed=result.success,
+                running=True, # System is always running
+                version=None,
+                status_text="Installed" if result.success else "Not installed"
+            )
+        
+        if component == "python":
+             # Check venv
+             cmd = "[ -f /opt/cdn_waf/venv/bin/python ] && echo 'exists'"
+             result = await EdgeNodeService.execute_command(node, cmd)
+             return EdgeComponentStatus(
+                component=component,
+                installed=result.success,
+                running=True,
+                version=None,
+                status_text="Active" if result.success else "Missing venv"
+            )
+            
+        service_name = component
+        if component == "agent":
+             service_name = "cdn-waf-agent"
+
         # Command to check if service is running
-        cmd = f"systemctl is-active {component}"
+        cmd = f"systemctl is-active {service_name}"
         result = await EdgeNodeService.execute_command(node, cmd)
         
         running = result.success and result.stdout.strip() == "active"
@@ -286,6 +316,8 @@ class EdgeNodeService:
             check_cmd = f"command -v {component}"
             if component == "redis":
                 check_cmd = "command -v redis-server"
+            elif component == "agent":
+                check_cmd = "systemctl list-unit-files | grep cdn-waf-agent"
                 
             c_res = await EdgeNodeService.execute_command(node, check_cmd)
             installed = c_res.success

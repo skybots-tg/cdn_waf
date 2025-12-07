@@ -24,25 +24,31 @@ async def migrate_schema():
     """Run manual schema migrations"""
     try:
         async with AsyncSessionLocal() as session:
-            # Check if ssh_host column exists in edge_nodes using information_schema
-            # This avoids transaction abortion if the column is missing
+            # 1. Check/Add ssh_host and related fields (older migration)
             result = await session.execute(text(
                 "SELECT column_name FROM information_schema.columns "
                 "WHERE table_name='edge_nodes' AND column_name='ssh_host'"
             ))
             
             if not result.scalar():
-                logger.info("Migrating edge_nodes table schema...")
-                # Add columns safely
+                logger.info("Migrating edge_nodes table schema (ssh fields)...")
                 await session.execute(text("ALTER TABLE edge_nodes ADD COLUMN IF NOT EXISTS ssh_host VARCHAR(255)"))
                 await session.execute(text("ALTER TABLE edge_nodes ADD COLUMN IF NOT EXISTS ssh_port INTEGER DEFAULT 22"))
                 await session.execute(text("ALTER TABLE edge_nodes ADD COLUMN IF NOT EXISTS ssh_user VARCHAR(255)"))
                 await session.execute(text("ALTER TABLE edge_nodes ADD COLUMN IF NOT EXISTS ssh_key TEXT"))
+                await session.commit()
+            
+            # 2. Check/Add ssh_password (new migration)
+            result_pwd = await session.execute(text(
+                "SELECT column_name FROM information_schema.columns "
+                "WHERE table_name='edge_nodes' AND column_name='ssh_password'"
+            ))
+            
+            if not result_pwd.scalar():
+                logger.info("Adding ssh_password column to edge_nodes...")
                 await session.execute(text("ALTER TABLE edge_nodes ADD COLUMN IF NOT EXISTS ssh_password VARCHAR(255)"))
                 await session.commit()
-                logger.info("Schema migration completed")
-            else:
-                logger.info("Schema is up to date")
+                
     except Exception as e:
         logger.error(f"Schema migration error: {e}")
 

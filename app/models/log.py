@@ -37,3 +37,4 @@ class RequestLog(Base):
     
     # Geo
     country_code = Column(String(2), nullable=True)
+
