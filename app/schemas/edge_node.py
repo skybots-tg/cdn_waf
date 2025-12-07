@@ -1,6 +1,6 @@
 """Edge node schemas"""
 from datetime import datetime
-from typing import Optional
+from typing import Optional, Dict, Any
 from pydantic import BaseModel, Field, IPvAnyAddress, validator
 
 
@@ -98,6 +98,7 @@ class EdgeComponentAction(BaseModel):
     """Action for edge node component"""
     component: str = Field(..., description="nginx, redis, certbot, etc.")
     action: str = Field(..., description="start, stop, restart, reload, status, install, update")
+    params: Optional[Dict[str, Any]] = None
 
 
 class EdgeComponentStatus(BaseModel):

@@ -99,11 +99,14 @@
                 <div class="form-group">
                     <label class="form-label">Control Plane URL</label>
                     <div class="input-group">
-                        <input type="text" class="form-input" value="{{ control_plane_url }}" readonly id="cp-url">
-                        <button class="btn btn-secondary" onclick="copyToClipboard('cp-url')" type="button">
+                        <input type="text" class="form-input" value="{{ control_plane_url }}" id="cp-url" placeholder="https://control.example.com">
+                        <button class="btn btn-secondary" onclick="copyToClipboard('cp-url')" type="button" title="Копировать">
                             <i class="fas fa-copy"></i>
                         </button>
                     </div>
+                    <p style="color: var(--text-secondary); font-size: 12px; margin-top: 4px;">
+                        Этот URL будет записан в config.yaml при установке агента. Если он некорректен, измените его перед установкой.
+                    </p>
                 </div>
                 <div class="form-group">
                     <label class="form-label">API Key</label>
@@ -501,13 +504,23 @@ async function runAction(action) {
     else if (action.startsWith('update_')) cmd = 'update';
     else cmd = action;
 
+    const params = {};
+    if (component === 'agent') {
+        // Pass the Control Plane URL from the input
+        const cpUrl = document.getElementById('cp-url').value;
+        if (cpUrl) {
+            params.control_plane_url = cpUrl;
+        }
+    }
+
     try {
         log(`Sending command to node: ${component} ${cmd}...`);
         
         // Call real API
         const response = await api.post(`/edge-nodes/${NODE_ID}/component`, {
             component: component,
-            action: cmd
+            action: cmd,
+            params: params
         });
         
         if (response.success) {

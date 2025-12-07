@@ -210,7 +210,8 @@ async def manage_component(
     result = await EdgeNodeService.manage_component(
         node,
         action_data.component,
-        action_data.action
+        action_data.action,
+        params=action_data.params
     )
     return result
 

@@ -469,7 +469,8 @@ class EdgeNodeService:
     async def manage_component(
         node: EdgeNode,
         component: str,
-        action: str
+        action: str,
+        params: Optional[Dict[str, Any]] = None
     ) -> EdgeNodeCommandResult:
         """Manage component on edge node (start, stop, restart, etc.)"""
         
@@ -504,7 +505,11 @@ class EdgeNodeService:
                 config_content = config_content.replace('location: "RU-MSK"', f'location: "{node.location_code}"')
                 
                 # Replace Control Plane URL and API Key
-                config_content = config_content.replace('url: "https://control.yourcdn.ru"', f'url: "{settings.PUBLIC_URL}"')
+                control_plane_url = params.get("control_plane_url") if params else settings.PUBLIC_URL
+                if not control_plane_url:
+                    control_plane_url = settings.PUBLIC_URL
+                
+                config_content = config_content.replace('url: "https://control.yourcdn.ru"', f'url: "{control_plane_url}"')
                 if node.api_key:
                     config_content = config_content.replace('api_key: "your-api-key-here"', f'api_key: "{node.api_key}"')
                 
