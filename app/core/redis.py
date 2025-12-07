@@ -43,12 +43,25 @@ class RedisClient:
             return
         await self.redis.set(key, value, ex=expire)
     
+    async def setex(self, key: str, time: int, value: str):
+        """Set value in Redis with expiration"""
+        if not self.redis:
+            return
+        # Use set with ex parameter which is preferred over setex
+        await self.redis.set(key, value, ex=time)
+
     async def delete(self, key: str):
         """Delete key from Redis"""
         if not self.redis:
             return
         await self.redis.delete(key)
     
+    async def exists(self, key: str) -> bool:
+        """Check if key exists in Redis"""
+        if not self.redis:
+            return False
+        return await self.redis.exists(key) > 0
+
     async def publish(self, channel: str, message: str):
         """Publish message to channel"""
         if not self.redis:
@@ -57,5 +70,3 @@ class RedisClient:
 
 
 redis_client = RedisClient()
-
-

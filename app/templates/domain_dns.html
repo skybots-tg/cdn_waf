@@ -89,19 +89,263 @@
     </div>
 </div>
 
+<!-- Add Record Modal -->
+<div id="add-record-modal" class="modal">
+    <div class="modal-content glass-card">
+        <div class="flex-between mb-3">
+            <h3 style="margin: 0;">Add DNS Record</h3>
+            <button class="btn btn-icon btn-secondary" onclick="closeAddRecordModal()">
+                <i class="fas fa-times"></i>
+            </button>
+        </div>
+        
+        <form id="add-record-form" onsubmit="handleCreateRecord(event)">
+            <div class="grid grid-2 mb-3">
+                <div class="form-group mb-0">
+                    <label class="form-label">Type</label>
+                    <select class="form-select" id="record-type" onchange="handleTypeChange()">
+                        <option value="A">A</option>
+                        <option value="AAAA">AAAA</option>
+                        <option value="CNAME">CNAME</option>
+                        <option value="MX">MX</option>
+                        <option value="TXT">TXT</option>
+                        <option value="NS">NS</option>
+                    </select>
+                </div>
+                <div class="form-group mb-0">
+                    <label class="form-label">TTL</label>
+                    <select class="form-select" id="record-ttl">
+                        <option value="1">Auto</option>
+                        <option value="60">1 min</option>
+                        <option value="300">5 min</option>
+                        <option value="1800">30 min</option>
+                        <option value="3600">1 hour</option>
+                        <option value="86400">1 day</option>
+                    </select>
+                </div>
+            </div>
+
+            <div class="form-group">
+                <label class="form-label">Name</label>
+                <div style="display: flex; align-items: center; gap: 8px;">
+                    <input type="text" class="form-input" id="record-name" placeholder="@" required>
+                    <span style="color: var(--text-secondary); font-size: 14px;">.{{ domain.name }}</span>
+                </div>
+                <p style="font-size: 12px; color: var(--text-secondary); margin-top: 4px;">
+                    Use @ for root
+                </p>
+            </div>
+
+            <div class="form-group">
+                <label class="form-label">Content</label>
+                <input type="text" class="form-input" id="record-content" placeholder="192.0.2.1" required>
+            </div>
+
+            <div class="form-group" id="priority-group" style="display: none;">
+                <label class="form-label">Priority</label>
+                <input type="number" class="form-input" id="record-priority" placeholder="10" min="0" max="65535">
+            </div>
+
+            <div class="glass-card-sm bg-tertiary mb-4">
+                <div class="flex-between">
+                    <div>
+                        <div class="flex gap-2" style="align-items: center;">
+                            <span style="font-weight: 600;">Proxy Status</span>
+                            <span class="badge badge-orange" id="proxy-badge">
+                                <i class="fas fa-cloud"></i> Proxied
+                            </span>
+                        </div>
+                        <p style="font-size: 12px; color: var(--text-secondary); margin-top: 4px;" id="proxy-desc">
+                            Traffic is proxied through our global network
+                        </p>
+                    </div>
+                    <label class="toggle-switch">
+                        <input type="checkbox" id="record-proxied" checked onchange="toggleProxyState()">
+                        <span class="toggle-slider"></span>
+                    </label>
+                </div>
+            </div>
+
+            <div class="flex gap-2" style="justify-content: flex-end;">
+                <button type="button" class="btn btn-secondary" onclick="closeAddRecordModal()">Cancel</button>
+                <button type="submit" class="btn btn-primary" id="btn-save-record">
+                    <i class="fas fa-save"></i> Save Record
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<style>
+.modal {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.5);
+    backdrop-filter: blur(4px);
+    z-index: 2000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.3s ease;
+}
+
+.modal.active {
+    opacity: 1;
+    pointer-events: auto;
+}
+
+.modal-content {
+    width: 100%;
+    max-width: 500px;
+    transform: translateY(20px);
+    transition: transform 0.3s ease;
+    margin: 20px;
+}
+
+.modal.active .modal-content {
+    transform: translateY(0);
+}
+
+.bg-tertiary {
+    background: var(--bg-tertiary);
+}
+</style>
+
 <script>
     const domainId = {{ domain.id }};
+    const domainName = "{{ domain.name }}";
     
     document.addEventListener('DOMContentLoaded', () => {
         loadDNSRecords(domainId);
+        handleTypeChange(); // Initialize form state
     });
     
     function showAddRecordModal() {
-        showNotification('Add record modal coming soon!', 'info');
+        document.getElementById('add-record-modal').classList.add('active');
+        document.getElementById('record-name').focus();
+    }
+    
+    function closeAddRecordModal() {
+        document.getElementById('add-record-modal').classList.remove('active');
+        document.getElementById('add-record-form').reset();
+        handleTypeChange();
+    }
+    
+    // Close modal on click outside
+    document.getElementById('add-record-modal').addEventListener('click', (e) => {
+        if (e.target === document.getElementById('add-record-modal')) {
+            closeAddRecordModal();
+        }
+    });
+
+    function handleTypeChange() {
+        const type = document.getElementById('record-type').value;
+        const priorityGroup = document.getElementById('priority-group');
+        const proxySwitch = document.getElementById('record-proxied');
+        const proxyBadge = document.getElementById('proxy-badge');
+        
+        // Show/hide priority for MX
+        if (type === 'MX') {
+            priorityGroup.style.display = 'block';
+            document.getElementById('record-priority').required = true;
+        } else {
+            priorityGroup.style.display = 'none';
+            document.getElementById('record-priority').required = false;
+        }
+
+        // Handle proxy availability
+        const canProxy = ['A', 'AAAA', 'CNAME'].includes(type);
+        proxySwitch.disabled = !canProxy;
+        
+        if (!canProxy) {
+            proxySwitch.checked = false;
+            updateProxyVisuals(false);
+        } else {
+            // Restore default or previous state if needed, for now default to checked for A/CNAME
+            if (!proxySwitch.checked && canProxy) {
+                proxySwitch.checked = true; 
+            }
+            updateProxyVisuals(proxySwitch.checked);
+        }
+    }
+
+    function toggleProxyState() {
+        const isChecked = document.getElementById('record-proxied').checked;
+        updateProxyVisuals(isChecked);
+    }
+
+    function updateProxyVisuals(isProxied) {
+        const badge = document.getElementById('proxy-badge');
+        const desc = document.getElementById('proxy-desc');
+        
+        if (isProxied) {
+            badge.className = 'badge badge-orange';
+            badge.innerHTML = '<i class="fas fa-cloud"></i> Proxied';
+            desc.textContent = 'Traffic is proxied through our global network';
+        } else {
+            badge.className = 'badge';
+            badge.style.background = 'var(--bg-tertiary)';
+            badge.style.color = 'var(--text-muted)';
+            badge.innerHTML = '<i class="fas fa-globe"></i> DNS Only';
+            desc.textContent = 'Traffic bypasses the CDN and goes directly to origin';
+        }
     }
     
     function editRecord(recordId) {
-        showNotification('Edit record coming soon!', 'info');
+        showNotification('Edit record functionality coming in next update', 'info');
+    }
+    
+    async function handleCreateRecord(e) {
+        e.preventDefault();
+        
+        const btn = document.getElementById('btn-save-record');
+        const originalText = btn.innerHTML;
+        btn.disabled = true;
+        btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Saving...';
+
+        try {
+            const type = document.getElementById('record-type').value;
+            const name = document.getElementById('record-name').value.trim();
+            const content = document.getElementById('record-content').value.trim();
+            const ttl = parseInt(document.getElementById('record-ttl').value);
+            const proxied = document.getElementById('record-proxied').checked;
+            const priority = document.getElementById('record-priority').value;
+
+            // Normalize name
+            let finalName = name;
+            if (name === '@' || name === '') {
+                finalName = '@';
+            }
+
+            const data = {
+                type,
+                name: finalName,
+                content,
+                ttl: ttl === 1 ? 3600 : ttl, // Default to 1 hour if Auto
+                proxied: ['A', 'AAAA', 'CNAME'].includes(type) ? proxied : false
+            };
+
+            if (type === 'MX' && priority) {
+                data.priority = parseInt(priority);
+            }
+
+            await api.post(`/domains/${domainId}/records`, data);
+            
+            showNotification('DNS record created successfully', 'success');
+            closeAddRecordModal();
+            loadDNSRecords(domainId);
+        } catch (error) {
+            console.error('Error creating record:', error);
+            showNotification(error.message || 'Failed to create record', 'error');
+        } finally {
+            btn.disabled = false;
+            btn.innerHTML = originalText;
+        }
     }
     
     async function deleteRecord(recordId) {
