@@ -118,11 +118,41 @@
 
 <script>
 async function loadCDNStats() {
-    // TODO: Load real stats from API
-    document.getElementById('avg-cache-ratio').textContent = '85.3%';
-    document.getElementById('bandwidth-saved').textContent = '42.5 GB';
-    document.getElementById('cache-rules').textContent = '18';
-    document.getElementById('edge-nodes').textContent = '3';
+    try {
+        const response = await fetch('/api/v1/stats/global');
+        const stats = await response.json();
+        
+        document.getElementById('avg-cache-ratio').textContent = (stats.avg_cache_ratio || 0) + '%';
+        document.getElementById('bandwidth-saved').textContent = formatBytes(stats.total_bandwidth || 0);
+        
+        // Count cache rules from all domains
+        const domainsResponse = await fetch('/api/v1/domains');
+        const domains = await domainsResponse.json();
+        
+        let totalRules = 0;
+        for (const domain of domains) {
+            try {
+                const rulesResponse = await fetch(`/api/v1/domains/${domain.id}/cache/rules`);
+                const rules = await rulesResponse.json();
+                totalRules += rules.length || 0;
+            } catch (e) {
+                console.error(`Error loading cache rules for domain ${domain.id}:`, e);
+            }
+        }
+        
+        document.getElementById('cache-rules').textContent = totalRules;
+        
+        // Get edge nodes count
+        const nodesResponse = await fetch('/api/v1/edge-nodes');
+        const nodes = await nodesResponse.json();
+        document.getElementById('edge-nodes').textContent = nodes.length || '0';
+    } catch (error) {
+        console.error('Error loading CDN stats:', error);
+        document.getElementById('avg-cache-ratio').textContent = '0%';
+        document.getElementById('bandwidth-saved').textContent = '0 B';
+        document.getElementById('cache-rules').textContent = '0';
+        document.getElementById('edge-nodes').textContent = '0';
+    }
 }
 
 async function loadDomainsCDN() {
@@ -146,92 +176,116 @@ async function loadDomainsCDN() {
             return;
         }
         
-        container.innerHTML = domains.map(domain => {
-            // Mock CDN stats
-            const cacheRatio = (Math.random() * 30 + 70).toFixed(1);
-            const bandwidth = (Math.random() * 50 + 10).toFixed(1);
-            const requests = Math.floor(Math.random() * 900000 + 100000);
-            const cacheRules = Math.floor(Math.random() * 8 + 2);
-            const devMode = Math.random() > 0.8;
-            
-            return `
-                <div class="cdn-domain-card">
-                    <div class="flex-between mb-3">
-                        <div style="flex: 1;">
-                            <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 8px;">
-                                <h3 style="font-size: 18px; font-weight: 600; margin: 0;">${domain.name}</h3>
-                                ${devMode ? '<span class="badge badge-warning">Dev Mode</span>' : ''}
-                                <span class="badge badge-success">${domain.status}</span>
+        const domainCards = await Promise.all(domains.map(async domain => {
+            try {
+                // Get real stats for domain
+                const statsResponse = await fetch(`/api/v1/domains/${domain.id}/stats/basic`);
+                const stats = await statsResponse.json();
+                
+                // Get cache rules count
+                const rulesResponse = await fetch(`/api/v1/domains/${domain.id}/cache/rules`);
+                const rules = await rulesResponse.json();
+                const cacheRules = rules.length || 0;
+                
+                const cacheRatio = stats.cache_hit_ratio || 0;
+                const bandwidth = stats.total_bandwidth || 0;
+                const requests = stats.total_requests || 0;
+                
+                return `
+                    <div class="cdn-domain-card">
+                        <div class="flex-between mb-3">
+                            <div style="flex: 1;">
+                                <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 8px;">
+                                    <h3 style="font-size: 18px; font-weight: 600; margin: 0;">${domain.name}</h3>
+                                    <span class="badge badge-success">${domain.status}</span>
+                                </div>
+                            </div>
+                            <div style="display: flex; gap: 8px;">
+                                <a href="/domains/${domain.id}/settings" class="btn btn-primary btn-sm">
+                                    <i class="fas fa-cog"></i> Configure
+                                </a>
+                                <button class="btn btn-secondary btn-sm" onclick="purgeDomainCache(${domain.id})">
+                                    <i class="fas fa-trash"></i> Purge
+                                </button>
                             </div>
                         </div>
-                        <div style="display: flex; gap: 8px;">
+                        
+                        <div class="grid grid-4 gap-3 mb-3">
+                            <div>
+                                <div style="font-size: 12px; color: var(--text-secondary); margin-bottom: 4px;">
+                                    Cache Ratio
+                                </div>
+                                <div style="font-size: 20px; font-weight: 700; color: var(--success);">
+                                    ${cacheRatio.toFixed(1)}%
+                                </div>
+                                <div class="progress-bar">
+                                    <div class="progress-fill" style="width: ${cacheRatio}%;"></div>
+                                </div>
+                            </div>
+                            
+                            <div>
+                                <div style="font-size: 12px; color: var(--text-secondary); margin-bottom: 4px;">
+                                    Bandwidth (24h)
+                                </div>
+                                <div style="font-size: 20px; font-weight: 700;">
+                                    ${formatBytes(bandwidth)}
+                                </div>
+                            </div>
+                            
+                            <div>
+                                <div style="font-size: 12px; color: var(--text-secondary); margin-bottom: 4px;">
+                                    Requests (24h)
+                                </div>
+                                <div style="font-size: 20px; font-weight: 700;">
+                                    ${formatNumber(requests)}
+                                </div>
+                            </div>
+                            
+                            <div>
+                                <div style="font-size: 12px; color: var(--text-secondary); margin-bottom: 4px;">
+                                    Cache Rules
+                                </div>
+                                <div style="font-size: 20px; font-weight: 700;">
+                                    ${cacheRules}
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div style="display: flex; gap: 16px; font-size: 13px; color: var(--text-secondary);">
+                            <span>
+                                <i class="fas fa-check-circle" style="color: var(--success);"></i>
+                                ${stats.cache_hits || 0} hits
+                            </span>
+                            <span>
+                                <i class="fas fa-times-circle" style="color: var(--error);"></i>
+                                ${stats.cache_misses || 0} misses
+                            </span>
+                            <span>
+                                <i class="fas fa-save" style="color: var(--info);"></i>
+                                ${formatBytes((bandwidth * cacheRatio / 100))} saved
+                            </span>
+                        </div>
+                    </div>
+                `;
+            } catch (error) {
+                console.error(`Error loading CDN stats for domain ${domain.id}:`, error);
+                return `
+                    <div class="cdn-domain-card">
+                        <div class="flex-between">
+                            <div>
+                                <h3 style="font-size: 18px; font-weight: 600;">${domain.name}</h3>
+                                <p style="font-size: 13px; color: var(--text-muted);">Unable to load stats</p>
+                            </div>
                             <a href="/domains/${domain.id}/settings" class="btn btn-primary btn-sm">
                                 <i class="fas fa-cog"></i> Configure
                             </a>
-                            <button class="btn btn-secondary btn-sm" onclick="purgeDomainCache(${domain.id})">
-                                <i class="fas fa-trash"></i> Purge
-                            </button>
                         </div>
                     </div>
-                    
-                    <div class="grid grid-4 gap-3 mb-3">
-                        <div>
-                            <div style="font-size: 12px; color: var(--text-secondary); margin-bottom: 4px;">
-                                Cache Ratio
-                            </div>
-                            <div style="font-size: 20px; font-weight: 700; color: var(--success);">
-                                ${cacheRatio}%
-                            </div>
-                            <div class="progress-bar">
-                                <div class="progress-fill" style="width: ${cacheRatio}%;"></div>
-                            </div>
-                        </div>
-                        
-                        <div>
-                            <div style="font-size: 12px; color: var(--text-secondary); margin-bottom: 4px;">
-                                Bandwidth (24h)
-                            </div>
-                            <div style="font-size: 20px; font-weight: 700;">
-                                ${bandwidth} GB
-                            </div>
-                        </div>
-                        
-                        <div>
-                            <div style="font-size: 12px; color: var(--text-secondary); margin-bottom: 4px;">
-                                Requests (24h)
-                            </div>
-                            <div style="font-size: 20px; font-weight: 700;">
-                                ${formatNumber(requests)}
-                            </div>
-                        </div>
-                        
-                        <div>
-                            <div style="font-size: 12px; color: var(--text-secondary); margin-bottom: 4px;">
-                                Cache Rules
-                            </div>
-                            <div style="font-size: 20px; font-weight: 700;">
-                                ${cacheRules}
-                            </div>
-                        </div>
-                    </div>
-                    
-                    <div style="display: flex; gap: 16px; font-size: 13px; color: var(--text-secondary);">
-                        <span>
-                            <i class="fas fa-check-circle" style="color: var(--success);"></i>
-                            ${Math.floor(requests * cacheRatio / 100)} hits
-                        </span>
-                        <span>
-                            <i class="fas fa-times-circle" style="color: var(--error);"></i>
-                            ${Math.floor(requests * (100 - cacheRatio) / 100)} misses
-                        </span>
-                        <span>
-                            <i class="fas fa-save" style="color: var(--info);"></i>
-                            ${(bandwidth * cacheRatio / 100).toFixed(1)} GB saved
-                        </span>
-                    </div>
-                </div>
-            `;
-        }).join('');
+                `;
+            }
+        }));
+        
+        container.innerHTML = domainCards.join('');
         
     } catch (error) {
         console.error('Error loading domains CDN:', error);
@@ -243,6 +297,13 @@ function formatNumber(num) {
     if (num >= 1000000) return (num / 1000000).toFixed(1) + 'M';
     if (num >= 1000) return (num / 1000).toFixed(1) + 'K';
     return num.toString();
+}
+
+function formatBytes(bytes) {
+    if (bytes >= 1073741824) return (bytes / 1073741824).toFixed(2) + ' GB';
+    if (bytes >= 1048576) return (bytes / 1048576).toFixed(2) + ' MB';
+    if (bytes >= 1024) return (bytes / 1024).toFixed(2) + ' KB';
+    return bytes + ' B';
 }
 
 async function purgeDomainCache(domainId) {

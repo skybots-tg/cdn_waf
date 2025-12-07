@@ -37,7 +37,7 @@ app.add_middleware(
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
 
 # Import and include routers
-from app.api.v1 import auth, domains, dns, edge_nodes, cdn, security, analytics
+from app.api.v1 import auth, domains, dns, edge_nodes, cdn, security, analytics, organization
 from app.api import web, internal
 
 # API routes
@@ -48,6 +48,7 @@ app.include_router(edge_nodes.router, prefix="/api/v1/edge-nodes", tags=["edge-n
 app.include_router(cdn.router, prefix="/api/v1/domains", tags=["cdn"])
 app.include_router(security.router, prefix="/api/v1/domains", tags=["security"])
 app.include_router(analytics.router, prefix="/api/v1", tags=["analytics"])
+app.include_router(organization.router, prefix="/api/v1/organization", tags=["organization"])
 
 # Internal API for edge nodes
 app.include_router(internal.router, prefix="/internal/edge", tags=["internal"])

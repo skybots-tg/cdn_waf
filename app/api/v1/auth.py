@@ -96,3 +96,50 @@ async def get_current_user_info(
     return current_user
 
 
+@router.get("/api-keys")
+async def get_api_keys(
+    current_user: User = Depends(get_current_active_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """Get all API keys for current user
+    
+    Note: API keys table not yet implemented. Returns empty list.
+    """
+    # TODO: Implement API keys table and service
+    return []
+
+
+@router.post("/api-keys")
+async def create_api_key(
+    name: str,
+    current_user: User = Depends(get_current_active_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """Create new API key for current user
+    
+    Note: API keys table not yet implemented.
+    """
+    # TODO: Implement API key creation
+    raise HTTPException(
+        status_code=status.HTTP_501_NOT_IMPLEMENTED,
+        detail="API key creation not yet implemented"
+    )
+
+
+@router.delete("/api-keys/{key_id}")
+async def delete_api_key(
+    key_id: str,
+    current_user: User = Depends(get_current_active_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """Delete API key
+    
+    Note: API keys table not yet implemented.
+    """
+    # TODO: Implement API key deletion
+    raise HTTPException(
+        status_code=status.HTTP_501_NOT_IMPLEMENTED,
+        detail="API key deletion not yet implemented"
+    )
+
+

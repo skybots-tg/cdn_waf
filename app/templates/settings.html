@@ -233,59 +233,74 @@
                 Email Notifications
             </h2>
             <div class="form-group">
-                <label style="display: flex; align-items: center; gap: 12px; cursor: pointer;">
-                    <input type="checkbox" id="notify-security" checked>
+                <div style="display: flex; align-items: center; justify-content: space-between;">
                     <div>
-                        <div style="font-weight: 500;">Security Alerts</div>
+                        <div style="font-weight: 500; margin-bottom: 4px;">Security Alerts</div>
                         <div style="font-size: 13px; color: var(--text-secondary);">
                             Get notified about suspicious activity and security events
                         </div>
                     </div>
-                </label>
+                    <label class="toggle-switch">
+                        <input type="checkbox" id="notify-security" checked>
+                        <span class="toggle-slider"></span>
+                    </label>
+                </div>
             </div>
             <div class="form-group">
-                <label style="display: flex; align-items: center; gap: 12px; cursor: pointer;">
-                    <input type="checkbox" id="notify-downtime">
+                <div style="display: flex; align-items: center; justify-content: space-between;">
                     <div>
-                        <div style="font-weight: 500;">Downtime Alerts</div>
+                        <div style="font-weight: 500; margin-bottom: 4px;">Downtime Alerts</div>
                         <div style="font-size: 13px; color: var(--text-secondary);">
                             Receive alerts when your sites are down or experiencing issues
                         </div>
                     </div>
-                </label>
+                    <label class="toggle-switch">
+                        <input type="checkbox" id="notify-downtime">
+                        <span class="toggle-slider"></span>
+                    </label>
+                </div>
             </div>
             <div class="form-group">
-                <label style="display: flex; align-items: center; gap: 12px; cursor: pointer;">
-                    <input type="checkbox" id="notify-ssl">
+                <div style="display: flex; align-items: center; justify-content: space-between;">
                     <div>
-                        <div style="font-weight: 500;">SSL Certificate Expiry</div>
+                        <div style="font-weight: 500; margin-bottom: 4px;">SSL Certificate Expiry</div>
                         <div style="font-size: 13px; color: var(--text-secondary);">
                             Get reminders before your SSL certificates expire
                         </div>
                     </div>
-                </label>
+                    <label class="toggle-switch">
+                        <input type="checkbox" id="notify-ssl">
+                        <span class="toggle-slider"></span>
+                    </label>
+                </div>
             </div>
             <div class="form-group">
-                <label style="display: flex; align-items: center; gap: 12px; cursor: pointer;">
-                    <input type="checkbox" id="notify-usage">
+                <div style="display: flex; align-items: center; justify-content: space-between;">
                     <div>
-                        <div style="font-weight: 500;">Usage & Quota Warnings</div>
+                        <div style="font-weight: 500; margin-bottom: 4px;">Usage & Quota Warnings</div>
                         <div style="font-size: 13px; color: var(--text-secondary);">
                             Alerts when approaching bandwidth or request limits
                         </div>
                     </div>
-                </label>
+                    <label class="toggle-switch">
+                        <input type="checkbox" id="notify-usage">
+                        <span class="toggle-slider"></span>
+                    </label>
+                </div>
             </div>
             <div class="form-group">
-                <label style="display: flex; align-items: center; gap: 12px; cursor: pointer;">
-                    <input type="checkbox" id="notify-weekly">
+                <div style="display: flex; align-items: center; justify-content: space-between;">
                     <div>
-                        <div style="font-weight: 500;">Weekly Reports</div>
+                        <div style="font-weight: 500; margin-bottom: 4px;">Weekly Reports</div>
                         <div style="font-size: 13px; color: var(--text-secondary);">
                             Receive weekly summary of your traffic and performance
                         </div>
                     </div>
-                </label>
+                    <label class="toggle-switch">
+                        <input type="checkbox" id="notify-weekly">
+                        <span class="toggle-slider"></span>
+                    </label>
+                </div>
             </div>
             <button class="btn btn-primary" onclick="saveNotificationSettings()">
                 <i class="fas fa-save"></i> Save Preferences
