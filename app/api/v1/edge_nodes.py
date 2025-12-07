@@ -21,6 +21,15 @@ from app.api.deps import get_current_superuser
 router = APIRouter()
 
 
+@router.get("/stats", response_model=EdgeNodeStats)
+async def get_edge_nodes_stats(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_superuser)
+):
+    """Get edge nodes statistics (superuser only)"""
+    return await EdgeNodeService.get_stats(db)
+
+
 @router.get("/", response_model=List[EdgeNodeResponse])
 async def get_edge_nodes(
     skip: int = 0,
@@ -39,15 +48,6 @@ async def get_edge_nodes(
     """
     nodes = await EdgeNodeService.get_nodes(db, skip, limit, status, location)
     return nodes
-
-
-@router.get("/stats", response_model=EdgeNodeStats)
-async def get_edge_nodes_stats(
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_superuser)
-):
-    """Get edge nodes statistics (superuser only)"""
-    return await EdgeNodeService.get_stats(db)
 
 
 @router.get("/{node_id}", response_model=EdgeNodeResponse)

@@ -48,12 +48,14 @@ class WAFService:
         rule_data: WAFRuleCreate
     ) -> WAFRule:
         """Create WAF rule"""
+        import json
+        
         rule = WAFRule(
             domain_id=domain_id,
             name=rule_data.name,
             priority=rule_data.priority,
             action=rule_data.action,
-            conditions=rule_data.conditions,
+            conditions=json.dumps(rule_data.conditions),  # JSON-serialize dict
             enabled=rule_data.enabled
         )
         
@@ -70,11 +72,18 @@ class WAFService:
         rule_data: WAFRuleUpdate
     ) -> Optional[WAFRule]:
         """Update WAF rule"""
+        import json
+        
         rule = await WAFService.get_rule(db, rule_id)
         if not rule:
             return None
         
         update_data = rule_data.model_dump(exclude_unset=True)
+        
+        # JSON-serialize conditions if present
+        if 'conditions' in update_data and update_data['conditions'] is not None:
+            update_data['conditions'] = json.dumps(update_data['conditions'])
+        
         for field, value in update_data.items():
             if hasattr(rule, field):
                 setattr(rule, field, value)

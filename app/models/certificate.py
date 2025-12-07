@@ -34,6 +34,8 @@ class Certificate(Base):
     # Certificate details
     common_name = Column(String(255), nullable=False)
     san = Column(Text, nullable=True)  # JSON array of Subject Alternative Names
+    issuer = Column(String(500), nullable=True)
+    subject = Column(String(500), nullable=True)
     
     # Validity
     not_before = Column(DateTime, nullable=True)
@@ -47,6 +49,7 @@ class Certificate(Base):
     # ACME specific
     acme_order_url = Column(String(512), nullable=True)
     acme_account_key = Column(Text, nullable=True)  # Should be encrypted!
+    acme_challenge_type = Column(String(20), nullable=True)  # http-01, dns-01
     
     # Auto-renewal
     auto_renew = Column(Boolean, default=True, nullable=False)

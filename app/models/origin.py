@@ -16,6 +16,7 @@ class Origin(Base):
     name = Column(String(255), nullable=False)
     origin_host = Column(String(255), nullable=False)  # IP or hostname
     origin_port = Column(Integer, default=443, nullable=False)
+    protocol = Column(String(10), default="https", nullable=False)  # http or https
     
     # Load balancing
     weight = Column(Integer, default=100, nullable=False)
@@ -31,8 +32,11 @@ class Origin(Base):
     health_check_healthy_threshold = Column(Integer, default=2, nullable=False)
     
     # Current health status
+    health_status = Column(String(20), default="unknown", nullable=False)  # healthy, unhealthy, unknown
     is_healthy = Column(Boolean, default=True, nullable=False)
-    last_check_at = Column(DateTime, nullable=True)
+    last_health_check = Column(DateTime, nullable=True)
+    last_check_at = Column(DateTime, nullable=True)  # Alias for compatibility
+    last_health_check_response_time = Column(Float, nullable=True)  # milliseconds
     last_check_duration = Column(Float, nullable=True)  # milliseconds
     consecutive_failures = Column(Integer, default=0, nullable=False)
     

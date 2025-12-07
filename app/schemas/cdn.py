@@ -48,7 +48,9 @@ class OriginResponse(BaseModel):
     is_backup: bool
     enabled: bool
     health_status: Optional[str] = "unknown"
+    is_healthy: bool = True
     last_health_check: Optional[datetime] = None
+    last_check_at: Optional[datetime] = None
     created_at: datetime
     updated_at: Optional[datetime] = None
     

@@ -117,13 +117,19 @@ class OriginService:
         response_time: Optional[int] = None
     ) -> bool:
         """Update origin health status"""
+        from datetime import datetime
+        
         origin = await OriginService.get_origin(db, origin_id)
         if not origin:
             return False
         
         origin.health_status = "healthy" if is_healthy else "unhealthy"
+        origin.is_healthy = is_healthy
+        origin.last_health_check = datetime.utcnow()
+        origin.last_check_at = datetime.utcnow()
         if response_time is not None:
             origin.last_health_check_response_time = response_time
+            origin.last_check_duration = response_time
         
         await db.commit()
         return True

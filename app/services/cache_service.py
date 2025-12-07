@@ -46,6 +46,8 @@ class CacheService:
         rule_data: CacheRuleCreate
     ) -> CacheRule:
         """Create cache rule"""
+        import json
+        
         rule = CacheRule(
             domain_id=domain_id,
             pattern=rule_data.pattern,
@@ -53,8 +55,8 @@ class CacheService:
             ttl=rule_data.ttl,
             priority=rule_data.priority,
             respect_origin_headers=rule_data.respect_origin_headers,
-            bypass_cookies=rule_data.bypass_cookies,
-            bypass_query_params=rule_data.bypass_query_params,
+            bypass_cookies=json.dumps(rule_data.bypass_cookies) if rule_data.bypass_cookies else None,
+            bypass_query_params=json.dumps(rule_data.bypass_query_params) if rule_data.bypass_query_params else None,
             enabled=rule_data.enabled
         )
         
@@ -74,11 +76,20 @@ class CacheService:
         rule_data: CacheRuleUpdate
     ) -> Optional[CacheRule]:
         """Update cache rule"""
+        import json
+        
         rule = await CacheService.get_rule(db, rule_id)
         if not rule:
             return None
         
         update_data = rule_data.model_dump(exclude_unset=True)
+        
+        # JSON-serialize list fields
+        if 'bypass_cookies' in update_data and update_data['bypass_cookies'] is not None:
+            update_data['bypass_cookies'] = json.dumps(update_data['bypass_cookies'])
+        if 'bypass_query_params' in update_data and update_data['bypass_query_params'] is not None:
+            update_data['bypass_query_params'] = json.dumps(update_data['bypass_query_params'])
+        
         for field, value in update_data.items():
             if hasattr(rule, field):
                 setattr(rule, field, value)
@@ -112,6 +123,8 @@ class CacheService:
         initiated_by: int
     ) -> CachePurge:
         """Purge all cache for domain"""
+        import json
+        
         purge = CachePurge(
             domain_id=domain_id,
             purge_type="all",
@@ -123,10 +136,10 @@ class CacheService:
         await db.commit()
         await db.refresh(purge)
         
-        # Send purge command to edge nodes via Redis
+        # Send purge command to edge nodes via Redis (JSON-serialize dict)
         await redis_client.publish(
             f"cache_purge:{domain_id}",
-            {"type": "all", "purge_id": purge.id}
+            json.dumps({"type": "all", "purge_id": purge.id})
         )
         
         return purge
@@ -139,10 +152,12 @@ class CacheService:
         initiated_by: int
     ) -> CachePurge:
         """Purge cache by specific URLs"""
+        import json
+        
         purge = CachePurge(
             domain_id=domain_id,
             purge_type="url",
-            targets=urls,
+            targets=json.dumps(urls),  # JSON-serialize list
             initiated_by=initiated_by,
             status="pending"
         )
@@ -153,7 +168,7 @@ class CacheService:
         
         await redis_client.publish(
             f"cache_purge:{domain_id}",
-            {"type": "url", "urls": urls, "purge_id": purge.id}
+            json.dumps({"type": "url", "urls": urls, "purge_id": purge.id})  # JSON-serialize dict
         )
         
         return purge
@@ -166,10 +181,12 @@ class CacheService:
         initiated_by: int
     ) -> CachePurge:
         """Purge cache by pattern"""
+        import json
+        
         purge = CachePurge(
             domain_id=domain_id,
             purge_type="pattern",
-            targets=[pattern],
+            targets=json.dumps([pattern]),  # JSON-serialize list
             initiated_by=initiated_by,
             status="pending"
         )
@@ -180,7 +197,7 @@ class CacheService:
         
         await redis_client.publish(
             f"cache_purge:{domain_id}",
-            {"type": "pattern", "pattern": pattern, "purge_id": purge.id}
+            json.dumps({"type": "pattern", "pattern": pattern, "purge_id": purge.id})  # JSON-serialize dict
         )
         
         return purge
@@ -242,8 +259,10 @@ class CacheService:
     @staticmethod
     async def _trigger_config_update(domain_id: int):
         """Trigger configuration update for edge nodes"""
-        # Publish update notification via Redis
+        import json
+        
+        # Publish update notification via Redis (JSON-serialize dict)
         await redis_client.publish(
             "config_update",
-            {"domain_id": domain_id, "timestamp": datetime.utcnow().isoformat()}
+            json.dumps({"domain_id": domain_id, "timestamp": datetime.utcnow().isoformat()})
         )

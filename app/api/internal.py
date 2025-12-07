@@ -105,10 +105,12 @@ async def get_edge_config(
         rate_limits = rate_limits_result.scalars().all()
         
         # Get certificate
+        from app.models.certificate import CertificateStatus
+        
         cert_result = await db.execute(
             select(Certificate).where(
                 Certificate.domain_id == domain.id,
-                Certificate.status == "active"
+                Certificate.status == CertificateStatus.ISSUED
             ).order_by(Certificate.not_after.desc())
         )
         certificate = cert_result.scalar_one_or_none()

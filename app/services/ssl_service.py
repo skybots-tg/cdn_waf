@@ -48,10 +48,12 @@ class SSLService:
         domain_id: int
     ) -> Optional[Certificate]:
         """Get active certificate for domain"""
+        from app.models.certificate import CertificateStatus
+        
         result = await db.execute(
             select(Certificate).where(
                 Certificate.domain_id == domain_id,
-                Certificate.status == "active"
+                Certificate.status == CertificateStatus.ISSUED
             ).order_by(Certificate.not_after.desc())
         )
         return result.scalar_one_or_none()
@@ -66,34 +68,34 @@ class SSLService:
         # Parse certificate to extract info
         cert_info = SSLService._parse_certificate(cert_data.cert_pem)
         
+        from app.models.certificate import CertificateStatus, CertificateType
+        
+        # Parse cert_type string to enum
+        cert_type_enum = CertificateType.ACME if cert_data.cert_type == "acme" else CertificateType.MANUAL
+        
         certificate = Certificate(
             domain_id=domain_id,
-            cert_type=cert_data.cert_type,
+            type=cert_type_enum,
             cert_pem=cert_data.cert_pem,
             key_pem=cert_data.key_pem,  # TODO: Encrypt before storing
             chain_pem=cert_data.chain_pem,
-            status="active",
+            status=CertificateStatus.ISSUED,
+            common_name=domain.name if 'domain' in locals() else '',
             not_before=cert_info.get("not_before"),
             not_after=cert_info.get("not_after"),
             issuer=cert_info.get("issuer"),
             subject=cert_info.get("subject")
         )
         
-        # Deactivate other certificates for this domain
-        await db.execute(
-            select(Certificate).where(
-                Certificate.domain_id == domain_id,
-                Certificate.status == "active"
-            )
-        )
+        # Mark old certificates as expired
         old_certs = await db.execute(
             select(Certificate).where(
                 Certificate.domain_id == domain_id,
-                Certificate.status == "active"
+                Certificate.status == CertificateStatus.ISSUED
             )
         )
         for old_cert in old_certs.scalars():
-            old_cert.status = "inactive"
+            old_cert.status = CertificateStatus.EXPIRED
         
         db.add(certificate)
         await db.commit()
@@ -108,6 +110,8 @@ class SSLService:
         wildcard: bool = False
     ) -> Certificate:
         """Request Let's Encrypt certificate via ACME"""
+        from app.models.certificate import CertificateStatus, CertificateType
+        
         domain = await db.execute(
             select(Domain).where(Domain.id == domain_id)
         )
@@ -118,8 +122,9 @@ class SSLService:
         
         certificate = Certificate(
             domain_id=domain_id,
-            cert_type="acme",
-            status="pending",
+            type=CertificateType.ACME,
+            status=CertificateStatus.PENDING,
+            common_name=domain.name,
             acme_challenge_type="dns-01" if wildcard else "http-01"
         )
         
@@ -139,15 +144,17 @@ class SSLService:
         cert_id: int
     ) -> Optional[Certificate]:
         """Renew certificate"""
+        from app.models.certificate import CertificateStatus, CertificateType
+        
         cert = await SSLService.get_certificate(db, cert_id)
         if not cert:
             return None
         
-        if cert.cert_type != "acme":
+        if cert.type != CertificateType.ACME:
             raise ValueError("Only ACME certificates can be auto-renewed")
         
         # TODO: Trigger renewal task
-        cert.status = "renewing"
+        cert.status = CertificateStatus.PENDING
         await db.commit()
         await db.refresh(cert)
         
@@ -156,11 +163,13 @@ class SSLService:
     @staticmethod
     async def delete_certificate(db: AsyncSession, cert_id: int) -> bool:
         """Delete certificate"""
+        from app.models.certificate import CertificateStatus
+        
         cert = await SSLService.get_certificate(db, cert_id)
         if not cert:
             return False
         
-        if cert.status == "active":
+        if cert.status == CertificateStatus.ISSUED:
             raise ValueError("Cannot delete active certificate")
         
         await db.delete(cert)
@@ -173,10 +182,12 @@ class SSLService:
         days: int = 30
     ) -> List[Certificate]:
         """Get certificates expiring in X days"""
+        from app.models.certificate import CertificateStatus
+        
         expiry_date = datetime.utcnow() + timedelta(days=days)
         
         query = select(Certificate).where(
-            Certificate.status == "active",
+            Certificate.status == CertificateStatus.ISSUED,
             Certificate.not_after <= expiry_date,
             Certificate.not_after > datetime.utcnow()
         )

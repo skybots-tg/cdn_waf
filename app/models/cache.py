@@ -48,3 +48,23 @@ class CacheRule(Base):
     domain = relationship("Domain", back_populates="cache_rules")
 
 
+class CachePurge(Base):
+    """Cache purge operation model"""
+    __tablename__ = "cache_purges"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    domain_id = Column(Integer, ForeignKey("domains.id"), nullable=False, index=True)
+    
+    purge_type = Column(String(20), nullable=False)  # all, url, pattern
+    targets = Column(Text, nullable=True)  # JSON array of URLs/patterns
+    
+    status = Column(String(20), default="pending", nullable=False)  # pending, completed, failed
+    initiated_by = Column(Integer, ForeignKey("users.id"), nullable=False)
+    
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    completed_at = Column(DateTime, nullable=True)
+    
+    # Relationships
+    domain = relationship("Domain")
+    user = relationship("User")
+
