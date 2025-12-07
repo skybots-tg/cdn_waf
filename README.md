@@ -5,7 +5,6 @@
 [![Python](https://img.shields.io/badge/Python-3.11+-blue.svg)](https://www.python.org/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.109-green.svg)](https://fastapi.tiangolo.com/)
 [![License](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
 
 ## ✨ Возможности
 
@@ -80,52 +79,14 @@
 └─────────────────────────────────────┘
 ```
 
-## 🚀 Быстрый старт
+## 🚀 Быстрый старт (Без Docker)
 
-### Вариант 1: Docker Compose (Рекомендуется)
-
-Самый простой способ запустить всё одной командой:
-
-**Windows:**
-```cmd
-start.bat
-```
-
-**Linux/macOS:**
-```bash
-./start.sh
-```
-
-Скрипт автоматически:
-- ✅ Создаст `.env` с случайными секретами
-- ✅ Запустит PostgreSQL, Redis, FastAPI, Celery
-- ✅ Применит миграции БД
-- ✅ Откроет приложение на http://localhost:8000
-
-### Вариант 2: Makefile
-
-```bash
-# Запуск с Docker
-make docker-up
-
-# Просмотр логов
-make docker-logs
-
-# Остановка
-make docker-down
-```
-
-### Вариант 3: Ручная установка
-
-<details>
-<summary>Развернуть инструкцию</summary>
-
-#### Требования
+### Требования
 - Python 3.11+
 - PostgreSQL 14+
 - Redis 7+
 
-#### Шаги
+### Установка
 
 1. **Клонирование:**
 ```bash
@@ -133,10 +94,14 @@ git clone https://github.com/yourusername/cdn_waf.git
 cd cdn_waf
 ```
 
-2. **Виртуальное окружение:**
+2. **Настройка окружения:**
 ```bash
-python3.11 -m venv venv
-source venv/bin/activate  # Windows: venv\Scripts\activate
+# Создаем venv
+python -m venv venv
+# Активируем (Windows)
+venv\Scripts\activate
+# Активируем (Linux/macOS)
+source venv/bin/activate
 ```
 
 3. **Установка зависимостей:**
@@ -144,34 +109,40 @@ source venv/bin/activate  # Windows: venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
-4. **Настройка .env:**
+4. **Конфигурация:**
 ```bash
+# Копируем пример конфига
 cp .env.example .env
-nano .env  # Отредактируйте переменные
+# Отредактируйте .env (укажите доступы к БД и Redis)
 ```
 
 5. **База данных:**
 ```bash
-createdb cdn_waf
+# Применяем миграции
 alembic upgrade head
 ```
 
 6. **Запуск:**
-```bash
-# API сервер
-uvicorn app.main:app --reload
+В разных терминалах запустите:
 
-# В отдельных терминалах:
-celery -A app.tasks.celery_app worker -l info
-celery -A app.tasks.celery_app beat -l info
+**Терминал 1 (API Сервер):**
+```bash
+uvicorn app.main:app --reload
 ```
 
-</details>
+**Терминал 2 (Celery Worker):**
+```bash
+celery -A app.tasks.celery_app worker -l info
+```
+
+**Терминал 3 (Celery Beat - планировщик):**
+```bash
+celery -A app.tasks.celery_app beat -l info
+```
 
 ---
 
 **После запуска откройте:**
-
 - 🌐 Приложение: http://localhost:8000
 - 📚 API Docs: http://localhost:8000/docs
 - 🌸 Flower (Celery): http://localhost:5555
@@ -182,17 +153,7 @@ celery -A app.tasks.celery_app beat -l info
 cdn_waf/
 ├── app/
 │   ├── api/              # API endpoints
-│   │   ├── v1/
-│   │   │   ├── auth.py
-│   │   │   ├── domains.py
-│   │   │   ├── dns.py
-│   │   │   ├── cdn.py
-│   │   │   ├── waf.py
-│   │   │   └── analytics.py
 │   ├── core/             # Ядро приложения
-│   │   ├── config.py
-│   │   ├── security.py
-│   │   └── database.py
 │   ├── models/           # SQLAlchemy модели
 │   ├── schemas/          # Pydantic схемы
 │   ├── services/         # Бизнес-логика
@@ -207,153 +168,21 @@ cdn_waf/
 └── README.md
 ```
 
-## Разработка
-
-### Запуск тестов
-```bash
-pytest
-```
-
-### Создание миграции
-```bash
-alembic revision --autogenerate -m "Description"
-```
-
-### Запуск Celery worker
-```bash
-celery -A app.tasks.celery_app worker -l info
-```
-
-### Запуск Celery beat (для периодических задач)
-```bash
-celery -A app.tasks.celery_app beat -l info
-```
-
 ## 📖 Документация
 
 | Документ | Описание |
 |----------|----------|
 | [API Documentation](docs/API.md) | Подробное описание REST API endpoints |
-| [Deployment Guide](docs/DEPLOYMENT.md) | Инструкции по деплою в production |
-| [Development Guide](docs/DEVELOPMENT.md) | Гайд для разработчиков |
 | [Edge Node Setup](edge_node/README.md) | Настройка edge-нод |
-| [Contributing](CONTRIBUTING.md) | Как внести вклад в проект |
 | [Changelog](CHANGELOG.md) | История изменений |
-
-### Интерактивная документация API
-
-После запуска доступна по адресам:
-- **Swagger UI:** http://localhost:8000/docs
-- **ReDoc:** http://localhost:8000/redoc
-
-## 🎨 Дизайн
-
-Проект использует **iOS Liquid Glass** дизайн:
-
-### Особенности UI
-- 🌓 Светлая и тёмная темы
-- 💧 Эффект матового стекла (glassmorphism)
-- 🎯 Минималистичный подход
-- 🍊 Оранжевый акцентный цвет
-- 📱 Адаптивный дизайн
-- ⚡ Плавные анимации
-
-### Технологии фронтенда
-- Vanilla JavaScript (без тяжёлых фреймворков)
-- CSS с кастомными переменными
-- Font Awesome для иконок
-- Локальные статические файлы (без CDN)
-
-## 🧪 Тестирование
-
-```bash
-# Запуск всех тестов
-pytest
-
-# С покрытием кода
-pytest --cov=app --cov-report=html
-
-# Только определённые тесты
-pytest tests/test_auth.py -v
-
-# С Makefile
-make test
-make test-cov
-```
-
-## 🛠️ Разработка
-
-### Code Style
-
-Проект следует PEP 8 с использованием:
-
-```bash
-# Форматирование
-black app/ tests/
-
-# Линтинг
-ruff check app/ tests/
-
-# С Makefile
-make format
-make lint
-```
-
-### Создание миграции
-
-```bash
-# Автоматическая миграция
-alembic revision --autogenerate -m "Add new table"
-
-# Применение
-alembic upgrade head
-
-# Откат
-alembic downgrade -1
-
-# С Makefile
-make migrate-auto
-make migrate
-```
 
 ## 🤝 Contributing
 
 Мы рады любым вкладам! Пожалуйста:
-
 1. Fork репозиторий
-2. Создайте feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit изменения (`git commit -m 'Add amazing feature'`)
-4. Push в branch (`git push origin feature/amazing-feature`)
-5. Откройте Pull Request
-
-Подробнее см. [CONTRIBUTING.md](CONTRIBUTING.md)
+2. Создайте feature branch
+3. Откройте Pull Request
 
 ## 📝 Лицензия
 
 Этот проект лицензирован под лицензией MIT - см. файл [LICENSE](LICENSE) для деталей.
-
-## 🙏 Благодарности
-
-- [FastAPI](https://fastapi.tiangolo.com/) - современный веб-фреймворк
-- [SQLAlchemy](https://www.sqlalchemy.org/) - мощная ORM
-- [Cloudflare](https://www.cloudflare.com/) - за вдохновение
-- Сообщество Open Source
-
-## 📞 Поддержка
-
-- 📧 **Email:** support@yourcdn.ru
-- 💬 **Telegram:** @yourcdn_support
-- 🐛 **Issues:** [GitHub Issues](https://github.com/yourusername/cdn_waf/issues)
-- 📖 **Docs:** https://docs.yourcdn.ru
-
-## ⭐ Star History
-
-Если проект вам нравится - поставьте звезду! ⭐
-
----
-
-<p align="center">
-  Made with ❤️ in Russia<br>
-  <sub>Version 0.1.0 | Status: MVP Ready</sub>
-</p>
-
