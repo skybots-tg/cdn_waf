@@ -88,19 +88,20 @@
     </div>
 </div>
 
-<!-- Add Record Modal -->
-<div id="add-record-modal" class="modal">
-    <div class="modal-content glass-card">
-        <div class="flex-between mb-3">
-            <h3 style="margin: 0;">Add DNS Record</h3>
-            <button class="btn btn-icon btn-secondary" onclick="closeAddRecordModal()">
-                <i class="fas fa-times"></i>
-            </button>
-        </div>
-        
-        <form id="add-record-form" onsubmit="handleCreateRecord(event)">
-            <div class="grid grid-2 mb-3">
-                <div class="form-group mb-0">
+    <!-- Add Record Modal -->
+    <div id="add-record-modal" class="modal">
+        <div class="modal-content glass-card">
+            <div class="flex-between mb-3">
+                <h3 style="margin: 0;" id="modal-title">Add DNS Record</h3>
+                <button class="btn btn-icon btn-secondary" onclick="closeAddRecordModal()">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            
+            <form id="add-record-form" onsubmit="handleCreateRecord(event)">
+                <input type="hidden" id="record-id">
+                <div class="grid grid-2 mb-3">
+                    <div class="form-group mb-0">
                     <label class="form-label">Type</label>
                     <select class="form-select" id="record-type" onchange="handleTypeChange()">
                         <option value="A">A</option>
@@ -227,11 +228,17 @@
     function showAddRecordModal() {
         document.getElementById('add-record-modal').classList.add('active');
         document.getElementById('record-name').focus();
+        
+        // Reset to Add mode
+        document.getElementById('modal-title').textContent = 'Add DNS Record';
+        document.getElementById('btn-save-record').innerHTML = '<i class="fas fa-save"></i> Save Record';
+        document.getElementById('record-id').value = '';
     }
     
     function closeAddRecordModal() {
         document.getElementById('add-record-modal').classList.remove('active');
         document.getElementById('add-record-form').reset();
+        document.getElementById('record-id').value = '';
         handleTypeChange();
     }
     
@@ -295,8 +302,49 @@
         }
     }
     
-    function editRecord(recordId) {
-        showNotification('Edit record functionality coming in next update', 'info');
+    async function editRecord(recordId) {
+        try {
+            // Fetch record details
+            const record = await api.get(`/dns/records/${recordId}`);
+            
+            // Populate form
+            document.getElementById('record-id').value = record.id;
+            document.getElementById('record-type').value = record.type;
+            
+            // Handle name (@ or subdomain)
+            let displayName = record.name;
+            if (displayName === '@') {
+                // leave as @ or empty? Placeholder says @. 
+                // Logic in backend normalizes it. 
+                // Let's keep it as is from backend.
+            } 
+            document.getElementById('record-name').value = displayName;
+            
+            document.getElementById('record-content').value = record.content;
+            document.getElementById('record-ttl').value = record.ttl;
+            
+            // Handle priority
+            if (record.priority !== null) {
+                document.getElementById('record-priority').value = record.priority;
+            }
+            
+            // Handle proxied
+            document.getElementById('record-proxied').checked = record.proxied;
+            
+            // Update visuals
+            handleTypeChange();
+            
+            // Set modal to Edit mode
+            document.getElementById('modal-title').textContent = 'Edit DNS Record';
+            document.getElementById('btn-save-record').innerHTML = '<i class="fas fa-save"></i> Update Record';
+            
+            // Show modal
+            document.getElementById('add-record-modal').classList.add('active');
+            
+        } catch (error) {
+            console.error('Error fetching record:', error);
+            showNotification('Failed to load record details', 'error');
+        }
     }
     
     async function handleCreateRecord(e) {
@@ -308,6 +356,7 @@
         btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Saving...';
 
         try {
+            const recordId = document.getElementById('record-id').value;
             const type = document.getElementById('record-type').value;
             const name = document.getElementById('record-name').value.trim();
             const content = document.getElementById('record-content').value.trim();
@@ -333,14 +382,21 @@
                 data.priority = parseInt(priority);
             }
 
-            await api.post(`/dns/domains/${domainId}/records`, data);
+            if (recordId) {
+                // Update existing record
+                await api.patch(`/dns/records/${recordId}`, data);
+                showNotification('DNS record updated successfully', 'success');
+            } else {
+                // Create new record
+                await api.post(`/dns/domains/${domainId}/records`, data);
+                showNotification('DNS record created successfully', 'success');
+            }
             
-            showNotification('DNS record created successfully', 'success');
             closeAddRecordModal();
             loadDNSRecords(domainId);
         } catch (error) {
-            console.error('Error creating record:', error);
-            showNotification(error.message || 'Failed to create record', 'error');
+            console.error('Error saving record:', error);
+            showNotification(error.message || 'Failed to save record', 'error');
         } finally {
             btn.disabled = false;
             btn.innerHTML = originalText;
