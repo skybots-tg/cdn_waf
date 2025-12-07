@@ -7,6 +7,15 @@ router = APIRouter()
 templates = Jinja2Templates(directory="app/templates")
 
 
+def get_mock_user(request: Request):
+    """Get mock user for templates"""
+    from app.core.config import settings
+    if settings.DEBUG:
+        # Return admin user in debug mode
+        return {"email": "admin@example.com", "is_superuser": True, "id": 1, "is_active": True}
+    return {"email": "user@example.com", "is_superuser": False}
+
+
 @router.get("/", response_class=HTMLResponse)
 async def index(request: Request):
     """Landing page"""
@@ -30,7 +39,7 @@ async def dashboard(request: Request):
     """Dashboard page"""
     return templates.TemplateResponse("dashboard.html", {
         "request": request,
-        "user": {"email": "user@example.com"}  # TODO: Get real user from session
+        "user": get_mock_user(request)
     })
 
 
@@ -39,7 +48,7 @@ async def domains_page(request: Request):
     """Domains page"""
     return templates.TemplateResponse("domains.html", {
         "request": request,
-        "user": {"email": "user@example.com"}
+        "user": get_mock_user(request)
     })
 
 
@@ -48,7 +57,7 @@ async def add_domain_page(request: Request):
     """Add domain page"""
     return templates.TemplateResponse("domain_add.html", {
         "request": request,
-        "user": {"email": "user@example.com"}
+        "user": get_mock_user(request)
     })
 
 
@@ -57,7 +66,7 @@ async def domain_dns_page(request: Request, domain_id: int):
     """Domain DNS page"""
     return templates.TemplateResponse("domain_dns.html", {
         "request": request,
-        "user": {"email": "user@example.com"},
+        "user": get_mock_user(request),
         "domain": {"id": domain_id, "name": "example.com"}  # TODO: Get real domain
     })
 
@@ -67,7 +76,7 @@ async def edge_nodes_page(request: Request):
     """Edge nodes management page (superuser only)"""
     return templates.TemplateResponse("edge_nodes.html", {
         "request": request,
-        "user": {"email": "admin@example.com", "is_superuser": True}  # TODO: Get real user
+        "user": get_mock_user(request)
     })
 
 
@@ -76,7 +85,7 @@ async def domain_settings_page(request: Request, domain_id: int):
     """Domain settings page"""
     return templates.TemplateResponse("domain_settings.html", {
         "request": request,
-        "user": {"email": "user@example.com"},
+        "user": get_mock_user(request),
         "domain": {"id": domain_id, "name": "example.com"}  # TODO: Get real domain
     })
 
@@ -86,7 +95,7 @@ async def domain_waf_page(request: Request, domain_id: int):
     """Domain WAF page"""
     return templates.TemplateResponse("domain_waf.html", {
         "request": request,
-        "user": {"email": "user@example.com"},
+        "user": get_mock_user(request),
         "domain": {"id": domain_id, "name": "example.com"}  # TODO: Get real domain
     })
 
@@ -96,7 +105,7 @@ async def domain_analytics_page(request: Request, domain_id: int):
     """Domain analytics page"""
     return templates.TemplateResponse("domain_analytics.html", {
         "request": request,
-        "user": {"email": "user@example.com"},
+        "user": get_mock_user(request),
         "domain": {"id": domain_id, "name": "example.com"}  # TODO: Get real domain
     })
 
@@ -106,7 +115,7 @@ async def global_analytics_page(request: Request):
     """Global analytics page"""
     return templates.TemplateResponse("analytics.html", {
         "request": request,
-        "user": {"email": "user@example.com"}  # TODO: Get real user
+        "user": get_mock_user(request)
     })
 
 
@@ -115,7 +124,7 @@ async def settings_page(request: Request):
     """User settings page"""
     return templates.TemplateResponse("settings.html", {
         "request": request,
-        "user": {"email": "user@example.com"}  # TODO: Get real user
+        "user": get_mock_user(request)
     })
 
 
@@ -124,7 +133,7 @@ async def dns_management_page(request: Request):
     """DNS management page - shows all domains"""
     return templates.TemplateResponse("dns_management.html", {
         "request": request,
-        "user": {"email": "user@example.com"}  # TODO: Get real user
+        "user": get_mock_user(request)
     })
 
 
@@ -133,7 +142,7 @@ async def waf_management_page(request: Request):
     """WAF management page - shows all domains"""
     return templates.TemplateResponse("waf_management.html", {
         "request": request,
-        "user": {"email": "user@example.com"}  # TODO: Get real user
+        "user": get_mock_user(request)
     })
 
 
@@ -142,7 +151,7 @@ async def cdn_management_page(request: Request):
     """CDN management page - shows all domains"""
     return templates.TemplateResponse("cdn_management.html", {
         "request": request,
-        "user": {"email": "user@example.com"}  # TODO: Get real user
+        "user": get_mock_user(request)
     })
 
 
