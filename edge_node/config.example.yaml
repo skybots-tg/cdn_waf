@@ -1,0 +1,19 @@
+edge_node:
+  id: 1
+  name: "ru-msk-01"
+  location: "RU-MSK"
+  
+control_plane:
+  url: "https://control.yourcdn.ru"
+  api_key: "your-api-key-here"
+  
+update_interval: 30  # seconds
+
+nginx:
+  config_path: "/usr/local/openresty/nginx/conf/cdn.conf"
+  reload_command: "sudo systemctl reload openresty"
+  
+monitoring:
+  enabled: true
+  endpoint: "https://control.yourcdn.ru/api/v1/edge/metrics"
+

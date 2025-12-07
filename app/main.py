@@ -1,0 +1,66 @@
+"""Main FastAPI application"""
+from fastapi import FastAPI
+from fastapi.staticfiles import StaticFiles
+from fastapi.middleware.cors import CORSMiddleware
+from contextlib import asynccontextmanager
+
+from app.core.config import settings
+from app.core.redis import redis_client
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Application lifespan events"""
+    # Startup
+    await redis_client.connect()
+    yield
+    # Shutdown
+    await redis_client.disconnect()
+
+
+app = FastAPI(
+    title=settings.APP_NAME,
+    debug=settings.DEBUG,
+    lifespan=lifespan,
+)
+
+# CORS middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=settings.CORS_ORIGINS,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Mount static files
+app.mount("/static", StaticFiles(directory="app/static"), name="static")
+
+# Import and include routers
+from app.api.v1 import auth, domains, dns
+from app.api import web
+
+# API routes
+app.include_router(auth.router, prefix="/api/v1/auth", tags=["auth"])
+app.include_router(domains.router, prefix="/api/v1/domains", tags=["domains"])
+app.include_router(dns.router, prefix="/api/v1/dns", tags=["dns"])
+
+# Web routes
+app.include_router(web.router)
+
+
+@app.get("/")
+async def root():
+    """Root endpoint"""
+    return {
+        "message": "CDN WAF Control Panel API",
+        "version": "0.1.0",
+        "docs": "/docs",
+    }
+
+
+@app.get("/health")
+async def health_check():
+    """Health check endpoint"""
+    return {"status": "ok"}
+

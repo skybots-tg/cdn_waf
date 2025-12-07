@@ -1,0 +1,113 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard - CDN WAF{% endblock %}
+
+{% block content %}
+<div class="container" style="margin-top: 40px;">
+    <!-- Stats Overview -->
+    <div class="grid grid-4 mb-4">
+        <div class="glass-card">
+            <div class="flex-between mb-2">
+                <div>
+                    <p class="text-secondary" style="font-size: 13px; margin-bottom: 4px;">TOTAL DOMAINS</p>
+                    <h2 style="font-size: 32px; font-weight: 700;">0</h2>
+                </div>
+                <div style="width: 48px; height: 48px; background: rgba(51, 154, 240, 0.15); border-radius: 12px; display: flex; align-items: center; justify-content: center;">
+                    <i class="fas fa-globe" style="font-size: 24px; color: var(--info);"></i>
+                </div>
+            </div>
+            <p class="text-secondary" style="font-size: 13px;">
+                <i class="fas fa-arrow-up"></i> Active and configured
+            </p>
+        </div>
+        
+        <div class="glass-card">
+            <div class="flex-between mb-2">
+                <div>
+                    <p class="text-secondary" style="font-size: 13px; margin-bottom: 4px;">REQUESTS (24H)</p>
+                    <h2 style="font-size: 32px; font-weight: 700;">0</h2>
+                </div>
+                <div style="width: 48px; height: 48px; background: rgba(81, 207, 102, 0.15); border-radius: 12px; display: flex; align-items: center; justify-content: center;">
+                    <i class="fas fa-chart-line" style="font-size: 24px; color: var(--success);"></i>
+                </div>
+            </div>
+            <p class="text-secondary" style="font-size: 13px;">
+                <i class="fas fa-arrow-up"></i> Last 24 hours
+            </p>
+        </div>
+        
+        <div class="glass-card">
+            <div class="flex-between mb-2">
+                <div>
+                    <p class="text-secondary" style="font-size: 13px; margin-bottom: 4px;">BANDWIDTH</p>
+                    <h2 style="font-size: 32px; font-weight: 700;">0 GB</h2>
+                </div>
+                <div style="width: 48px; height: 48px; background: rgba(255, 107, 53, 0.15); border-radius: 12px; display: flex; align-items: center; justify-content: center;">
+                    <i class="fas fa-network-wired" style="font-size: 24px; color: var(--accent-primary);"></i>
+                </div>
+            </div>
+            <p class="text-secondary" style="font-size: 13px;">
+                <i class="fas fa-arrow-up"></i> Last 30 days
+            </p>
+        </div>
+        
+        <div class="glass-card">
+            <div class="flex-between mb-2">
+                <div>
+                    <p class="text-secondary" style="font-size: 13px; margin-bottom: 4px;">CACHE HIT RATE</p>
+                    <h2 style="font-size: 32px; font-weight: 700;">0%</h2>
+                </div>
+                <div style="width: 48px; height: 48px; background: rgba(255, 212, 59, 0.15); border-radius: 12px; display: flex; align-items: center; justify-content: center;">
+                    <i class="fas fa-rocket" style="font-size: 24px; color: var(--warning);"></i>
+                </div>
+            </div>
+            <p class="text-secondary" style="font-size: 13px;">
+                <i class="fas fa-arrow-up"></i> Optimization active
+            </p>
+        </div>
+    </div>
+    
+    <!-- Quick Actions -->
+    <div class="glass-card mb-4">
+        <div class="flex-between mb-3">
+            <h2><i class="fas fa-bolt"></i> Quick Actions</h2>
+        </div>
+        <div class="flex gap-2">
+            <a href="/domains/add" class="btn btn-primary">
+                <i class="fas fa-plus"></i> Add Domain
+            </a>
+            <a href="/dns" class="btn btn-secondary">
+                <i class="fas fa-network-wired"></i> Manage DNS
+            </a>
+            <a href="/waf" class="btn btn-secondary">
+                <i class="fas fa-shield-alt"></i> Configure WAF
+            </a>
+            <a href="/analytics" class="btn btn-secondary">
+                <i class="fas fa-chart-bar"></i> View Analytics
+            </a>
+        </div>
+    </div>
+    
+    <!-- Domains List -->
+    <div class="glass-card">
+        <div class="flex-between mb-3">
+            <h2><i class="fas fa-globe"></i> Your Domains</h2>
+            <a href="/domains" class="btn btn-secondary btn-sm">View All</a>
+        </div>
+        <div id="domains-list" class="grid grid-2">
+            <!-- Domains will be loaded here -->
+            <div class="text-center text-secondary" style="grid-column: 1 / -1; padding: 40px 0;">
+                <i class="fas fa-spinner fa-spin" style="font-size: 32px; margin-bottom: 16px;"></i>
+                <p>Loading domains...</p>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    document.addEventListener('DOMContentLoaded', () => {
+        loadDomains();
+    });
+</script>
+{% endblock %}
+

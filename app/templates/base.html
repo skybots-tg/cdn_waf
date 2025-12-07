@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}CDN WAF{% endblock %}</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    {% block extra_css %}{% endblock %}
+</head>
+<body>
+    {% block header %}
+    <header class="header">
+        <div class="container">
+            <div class="header-content">
+                <a href="/" class="logo">
+                    <div class="logo-icon">
+                        <i class="fas fa-shield-alt"></i>
+                    </div>
+                    <span>CDN WAF</span>
+                </a>
+                
+                <nav class="nav">
+                    {% if user %}
+                    <a href="/dashboard" class="nav-link">
+                        <i class="fas fa-home"></i> Dashboard
+                    </a>
+                    <a href="/domains" class="nav-link">
+                        <i class="fas fa-globe"></i> Domains
+                    </a>
+                    <a href="/analytics" class="nav-link">
+                        <i class="fas fa-chart-line"></i> Analytics
+                    </a>
+                    <a href="/settings" class="nav-link">
+                        <i class="fas fa-cog"></i> Settings
+                    </a>
+                    {% else %}
+                    <a href="/login" class="btn btn-secondary btn-sm">Login</a>
+                    <a href="/signup" class="btn btn-primary btn-sm">Sign Up</a>
+                    {% endif %}
+                    
+                    <label class="toggle-switch">
+                        <input type="checkbox" id="theme-toggle">
+                        <span class="toggle-slider"></span>
+                    </label>
+                </nav>
+            </div>
+        </div>
+    </header>
+    {% endblock %}
+    
+    <div id="notifications" style="position: fixed; top: 80px; right: 20px; z-index: 9999;"></div>
+    
+    <main>
+        {% block content %}{% endblock %}
+    </main>
+    
+    <script src="/static/js/main.js"></script>
+    {% block extra_js %}{% endblock %}
+</body>
+</html>
+
