@@ -16,6 +16,7 @@ class Settings(BaseSettings):
     # Server
     HOST: str = "0.0.0.0"
     PORT: int = 8000
+    PUBLIC_URL: str = "http://localhost:8000"
     
     # Database
     DATABASE_URL: PostgresDsn

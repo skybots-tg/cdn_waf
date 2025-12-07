@@ -10,8 +10,8 @@ control_plane:
 update_interval: 30  # seconds
 
 nginx:
-  config_path: "/usr/local/openresty/nginx/conf/cdn.conf"
-  reload_command: "sudo systemctl reload openresty"
+  config_path: "/etc/nginx/conf.d/cdn.conf"
+  reload_command: "systemctl reload nginx"
   
 monitoring:
   enabled: true

@@ -20,6 +20,7 @@ from app.schemas.edge_node import (
 )
 
 from app.models.log import RequestLog
+from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -480,6 +481,9 @@ class EdgeNodeService:
                 config_content = config_content.replace("id: 1", f"id: {node.id}")
                 config_content = config_content.replace('name: "ru-msk-01"', f'name: "{node.name}"')
                 config_content = config_content.replace('location: "RU-MSK"', f'location: "{node.location_code}"')
+                
+                # Replace Control Plane URL
+                config_content = config_content.replace('url: "https://control.yourcdn.ru"', f'url: "{settings.PUBLIC_URL}"')
                 
                 # Write to temp file
                 with tempfile.NamedTemporaryFile(mode='w', delete=False) as tmp:

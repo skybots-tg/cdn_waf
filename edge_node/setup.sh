@@ -232,6 +232,11 @@ install_agent_service() {
         exit 1
     fi
 
+    if [[ -f "${APP_DIR}/requirements.txt" ]]; then
+        log "Installing dependencies..."
+        "${APP_DIR}/venv/bin/pip" install -r "${APP_DIR}/requirements.txt"
+    fi
+
     if [[ ! -f "${APP_DIR}/edge_config_updater.py" ]]; then
         err "Файл ${APP_DIR}/edge_config_updater.py не найден. Убедись, что код агента выложен в ${APP_DIR}."
         exit 1
@@ -295,3 +300,4 @@ case "${1:-}" in
         exit 1
         ;;
 esac
+
