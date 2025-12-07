@@ -28,7 +28,7 @@
                     <a href="/domains" class="nav-link {% if request.url.path.startswith('/domains') %}active{% endif %}">
                         <i class="fas fa-globe"></i> Domains
                     </a>
-                    <a href="/dns" class="nav-link {% if request.url.path.startswith('/dns') %}active{% endif %}">
+                    <a href="/dns" class="nav-link {% if request.url.path == '/dns' or (request.url.path.startswith('/dns') and not request.url.path.startswith('/dns-nodes')) %}active{% endif %}">
                         <i class="fas fa-network-wired"></i> DNS
                     </a>
                     <a href="/waf" class="nav-link {% if request.url.path.startswith('/waf') %}active{% endif %}">
