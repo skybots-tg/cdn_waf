@@ -96,7 +96,7 @@ async def manage_component(
     if not node:
         raise HTTPException(status_code=404, detail="Node not found")
         
-    return await DNSNodeService.manage_component_action(node, action.component, action.action)
+    return await DNSNodeService.manage_component_action(node, action.component, action.action, db)
 
 @router.post("/{node_id}/command", response_model=DNSNodeCommandResult)
 async def execute_command(

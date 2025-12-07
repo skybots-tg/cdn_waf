@@ -4,9 +4,10 @@ import logging
 import os
 import tempfile
 import shutil
+import csv
 from typing import List, Optional, Dict, Any, Tuple
 from datetime import datetime
-from sqlalchemy import select, func
+from sqlalchemy import select, func, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.dns_node import DNSNode
@@ -360,6 +361,119 @@ ACME_EMAIL={settings.ACME_EMAIL}
 
         cmd = "cd /opt/cdn_waf && ./venv/bin/alembic upgrade head"
         return await DNSNodeService.execute_command(node, cmd, timeout=120)
+    
+    @staticmethod
+    async def sync_database(node: DNSNode, db_session: AsyncSession) -> DNSNodeCommandResult:
+        """Sync domains and records from central DB to node DB"""
+        
+        # 1. Fetch data from central DB
+        organizations = await db_session.execute(text("SELECT * FROM organizations"))
+        organizations_data = organizations.all()
+        
+        domains = await db_session.execute(text("SELECT * FROM domains"))
+        domains_data = domains.all()
+        
+        dns_records = await db_session.execute(text("SELECT * FROM dns_records"))
+        dns_records_data = dns_records.all()
+        
+        # 2. Generate SQL Dump
+        # Using pg_dump would be cleaner but requires connection string matching. 
+        # Generating INSERTs is safer for mismatched environments (e.g. if we want to overwrite everything)
+        # But for sync, TRUNCATE + INSERT is easiest way to ensure consistency
+        
+        sql_lines = [
+            "BEGIN;",
+            "TRUNCATE TABLE dns_records, domains, organizations CASCADE;",
+        ]
+        
+        # Organizations
+        for org in organizations_data:
+            cols = list(org._mapping.keys())
+            vals = []
+            for col in cols:
+                val = getattr(org, col)
+                if val is None:
+                    vals.append("NULL")
+                elif isinstance(val, bool):
+                    vals.append("TRUE" if val else "FALSE")
+                elif isinstance(val, (int, float)):
+                    vals.append(str(val))
+                elif isinstance(val, datetime):
+                    vals.append(f"'{val.isoformat()}'")
+                else:
+                    # Escape single quotes
+                    cleaned = str(val).replace("'", "''")
+                    vals.append(f"'{cleaned}'")
+            
+            sql_lines.append(f"INSERT INTO organizations ({', '.join(cols)}) VALUES ({', '.join(vals)});")
+
+        # Domains
+        for domain in domains_data:
+            cols = list(domain._mapping.keys())
+            vals = []
+            for col in cols:
+                val = getattr(domain, col)
+                if val is None:
+                    vals.append("NULL")
+                elif isinstance(val, bool):
+                    vals.append("TRUE" if val else "FALSE")
+                elif isinstance(val, (int, float)):
+                    vals.append(str(val))
+                elif isinstance(val, datetime):
+                    vals.append(f"'{val.isoformat()}'")
+                else:
+                    cleaned = str(val).replace("'", "''")
+                    vals.append(f"'{cleaned}'")
+            
+            sql_lines.append(f"INSERT INTO domains ({', '.join(cols)}) VALUES ({', '.join(vals)});")
+            
+        # DNS Records
+        for record in dns_records_data:
+            cols = list(record._mapping.keys())
+            vals = []
+            for col in cols:
+                val = getattr(record, col)
+                if val is None:
+                    vals.append("NULL")
+                elif isinstance(val, bool):
+                    vals.append("TRUE" if val else "FALSE")
+                elif isinstance(val, (int, float)):
+                    vals.append(str(val))
+                elif isinstance(val, datetime):
+                    vals.append(f"'{val.isoformat()}'")
+                else:
+                    cleaned = str(val).replace("'", "''")
+                    vals.append(f"'{cleaned}'")
+            
+            sql_lines.append(f"INSERT INTO dns_records ({', '.join(cols)}) VALUES ({', '.join(vals)});")
+
+        sql_lines.append("COMMIT;")
+        
+        sql_content = "\n".join(sql_lines)
+        
+        # 3. Upload and Execute
+        with tempfile.NamedTemporaryFile(mode='w', suffix=".sql", delete=False, encoding='utf-8') as tmp_sql:
+            tmp_sql.write(sql_content)
+            tmp_sql_path = tmp_sql.name
+            
+        try:
+            # Upload
+            success, error = await DNSNodeService.upload_file(node, tmp_sql_path, "/tmp/sync_db.sql")
+            if not success:
+                return DNSNodeCommandResult(success=False, stdout="", stderr=f"Failed to upload SQL: {error}", exit_code=1, execution_time=0)
+            
+            # Execute
+            # Assume DB name is cdn_waf and user cdn_user (standard from setup)
+            # OR we can parse .env on the node.
+            # But simpler: use 'sudo -u postgres psql cdn_waf -f /tmp/sync_db.sql' 
+            # as our setup script creates it this way.
+            
+            cmd = "sudo -u postgres psql cdn_waf -f /tmp/sync_db.sql"
+            return await DNSNodeService.execute_command(node, cmd, timeout=60)
+            
+        finally:
+            if os.path.exists(tmp_sql_path):
+                os.unlink(tmp_sql_path)
 
     @staticmethod
     async def issue_certificate(node: DNSNode) -> DNSNodeCommandResult:
@@ -396,7 +510,7 @@ ACME_EMAIL={settings.ACME_EMAIL}
         return DNSNodeCommandResult(success=True, stdout="\n".join(stdout), stderr="", exit_code=0, execution_time=0)
 
     @staticmethod
-    async def manage_component_action(node: DNSNode, component: str, action: str) -> DNSNodeCommandResult:
+    async def manage_component_action(node: DNSNode, component: str, action: str, db: AsyncSession = None) -> DNSNodeCommandResult:
         if action == "install":
             if component == "dependencies":
                 return await DNSNodeService.install_dependencies(node)
@@ -415,6 +529,8 @@ ACME_EMAIL={settings.ACME_EMAIL}
             elif component == "dns_server": # Alias for full install? Or just service?
                  # If user clicks "Install" on "DNS Server" component in old UI
                  return await DNSNodeService.install_node(node)
+            elif component == "database" and db:
+                 return await DNSNodeService.sync_database(node, db)
         
         if component == "certbot" and action == "issue":
              return await DNSNodeService.issue_certificate(node)
@@ -429,6 +545,9 @@ ACME_EMAIL={settings.ACME_EMAIL}
             }
              if action in cmd_map:
                  return await DNSNodeService.execute_command(node, cmd_map[action])
+        
+        if component == "database" and action == "sync" and db:
+             return await DNSNodeService.sync_database(node, db)
 
         return DNSNodeCommandResult(
             success=False,
@@ -479,6 +598,28 @@ ACME_EMAIL={settings.ACME_EMAIL}
                  installed=res.success, 
                  running=True, 
                  status_text="Ready" if res.success else "Missing Alembic"
+             )
+        
+        if component == "database":
+             # Check if we can query the DB
+             res = await DNSNodeService.execute_command(node, "sudo -u postgres psql cdn_waf -c 'SELECT count(*) FROM domains'")
+             if res.success:
+                 try:
+                     count = res.stdout.split('\n')[2].strip()
+                     return DNSComponentStatus(
+                         component=component,
+                         installed=True,
+                         running=True,
+                         status_text=f"OK ({count} domains)"
+                     )
+                 except:
+                     pass
+             
+             return DNSComponentStatus(
+                 component=component,
+                 installed=False,
+                 running=False,
+                 status_text="Error"
              )
 
         # For other components, we can check existence of files

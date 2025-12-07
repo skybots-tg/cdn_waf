@@ -101,7 +101,9 @@ class DBResolver(BaseResolver):
                 logger.debug(f"Domain not found: {domain_name}")
                 reply.header.rcode = RCODE.REFUSED # We are not authoritative
                 return reply
-                
+            
+            logger.info(f"Found zone: {zone.name}, status: {zone.status}")
+
             # Allow ACTIVE and PENDING states
             if zone.status not in [DomainStatus.ACTIVE, DomainStatus.PENDING]:
                 logger.debug(f"Domain inactive: {zone.name} ({zone.status})")
