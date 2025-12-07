@@ -73,8 +73,8 @@
                 </button>
             </div>
         </div>
-        <div id="global-traffic-chart" style="height: 300px; display: flex; align-items: center; justify-content: center; color: var(--text-muted);">
-            <i class="fas fa-spinner fa-spin"></i> Loading chart...
+        <div id="global-traffic-chart-container" style="height: 300px; width: 100%;">
+            <canvas id="global-traffic-chart"></canvas>
         </div>
     </div>
 
@@ -141,8 +141,10 @@
     </div>
 </div>
 
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 <script>
 let globalChartMetric = 'requests';
+let globalTrafficChart = null;
 
 async function loadGlobalAnalytics() {
     const timeRange = document.getElementById('time-range').value;
@@ -162,6 +164,9 @@ async function loadGlobalAnalytics() {
         document.getElementById('global-status-3xx').textContent = formatNumber(stats.status_3xx || 0);
         document.getElementById('global-status-4xx').textContent = formatNumber(stats.status_4xx || 0);
         document.getElementById('global-status-5xx').textContent = formatNumber(stats.status_5xx || 0);
+        
+        // Load chart
+        await loadGlobalChartData(timeRange);
         
     } catch (error) {
         console.error('Error loading global analytics:', error);
@@ -290,7 +295,132 @@ function formatBytes(bytes) {
 
 function changeGlobalChartMetric(metric) {
     globalChartMetric = metric;
-    // TODO: Update chart
+    
+    // Update buttons
+    const buttons = document.querySelectorAll('[onclick^="changeGlobalChartMetric"]');
+    buttons.forEach(btn => {
+        if (btn.getAttribute('onclick').includes(`'${metric}'`)) {
+            btn.classList.remove('btn-secondary');
+            btn.classList.add('btn-primary');
+        } else {
+            btn.classList.remove('btn-primary');
+            btn.classList.add('btn-secondary');
+        }
+    });
+    
+    // Reload chart data
+    const timeRange = document.getElementById('time-range').value;
+    loadGlobalChartData(timeRange);
+}
+
+async function loadGlobalChartData(timeRange) {
+    try {
+        // Mock chart data for now since we don't have real time-series endpoint yet
+        const labels = [];
+        const data = [];
+        
+        const now = new Date();
+        const points = 24; 
+        
+        for (let i = points; i >= 0; i--) {
+            const d = new Date(now.getTime() - i * 3600 * 1000);
+            labels.push(d.getHours() + ':00');
+            
+            // Random data for demo
+            if (globalChartMetric === 'requests') {
+                data.push(Math.floor(Math.random() * 5000) + 500);
+            } else {
+                data.push(Math.floor(Math.random() * 2000) * 1024 * 1024); // Random MB
+            }
+        }
+        
+        renderGlobalChart(labels, data);
+        
+    } catch (error) {
+        console.error('Error loading global chart data:', error);
+    }
+}
+
+function renderGlobalChart(labels, data) {
+    const ctx = document.getElementById('global-traffic-chart').getContext('2d');
+    
+    if (globalTrafficChart) {
+        globalTrafficChart.destroy();
+    }
+    
+    const isBandwidth = globalChartMetric === 'bandwidth';
+    const label = isBandwidth ? 'Bandwidth (Bytes)' : 'Requests';
+    const borderColor = isBandwidth ? '#3b82f6' : '#8b5cf6'; // Purple for global
+    const backgroundColor = isBandwidth ? 'rgba(59, 130, 246, 0.1)' : 'rgba(139, 92, 246, 0.1)';
+    
+    globalTrafficChart = new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels: labels,
+            datasets: [{
+                label: label,
+                data: data,
+                borderColor: borderColor,
+                backgroundColor: backgroundColor,
+                borderWidth: 2,
+                fill: true,
+                tension: 0.4
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: {
+                    display: false
+                },
+                tooltip: {
+                    mode: 'index',
+                    intersect: false,
+                    callbacks: {
+                        label: function(context) {
+                            let label = context.dataset.label || '';
+                            if (label) {
+                                label += ': ';
+                            }
+                            if (isBandwidth) {
+                                label += formatBytes(context.parsed.y);
+                            } else {
+                                label += formatNumber(context.parsed.y);
+                            }
+                            return label;
+                        }
+                    }
+                }
+            },
+            scales: {
+                y: {
+                    beginAtZero: true,
+                    grid: {
+                        color: 'rgba(255, 255, 255, 0.05)'
+                    },
+                    ticks: {
+                        callback: function(value) {
+                            if (isBandwidth) {
+                                return formatBytes(value);
+                            }
+                            return formatNumber(value);
+                        }
+                    }
+                },
+                x: {
+                    grid: {
+                        display: false
+                    }
+                }
+            },
+            interaction: {
+                mode: 'nearest',
+                axis: 'x',
+                intersect: false
+            }
+        }
+    });
 }
 
 function exportGlobalData() {
