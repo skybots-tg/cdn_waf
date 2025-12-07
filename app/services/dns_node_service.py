@@ -388,64 +388,36 @@ ACME_EMAIL={settings.ACME_EMAIL}
         
         # Organizations
         for org in organizations_data:
-            cols = list(org._mapping.keys())
-            vals = []
-            for col in cols:
-                val = getattr(org, col)
-                if val is None:
-                    vals.append("NULL")
-                elif isinstance(val, bool):
-                    vals.append("TRUE" if val else "FALSE")
-                elif isinstance(val, (int, float)):
-                    vals.append(str(val))
-                elif isinstance(val, datetime):
-                    vals.append(f"'{val.isoformat()}'")
-                else:
-                    # Escape single quotes
-                    cleaned = str(val).replace("'", "''")
-                    vals.append(f"'{cleaned}'")
-            
-            sql_lines.append(f"INSERT INTO organizations ({', '.join(cols)}) VALUES ({', '.join(vals)});")
+            # Manually map columns instead of using mapped metadata to avoid reflection issues
+            sql_lines.append(
+                f"INSERT INTO organizations (id, name, owner_id, created_at, updated_at) "
+                f"VALUES ({org.id}, '{org.name}', {org.owner_id}, '{org.created_at}', '{org.updated_at}');"
+            )
 
         # Domains
         for domain in domains_data:
-            cols = list(domain._mapping.keys())
-            vals = []
-            for col in cols:
-                val = getattr(domain, col)
-                if val is None:
-                    vals.append("NULL")
-                elif isinstance(val, bool):
-                    vals.append("TRUE" if val else "FALSE")
-                elif isinstance(val, (int, float)):
-                    vals.append(str(val))
-                elif isinstance(val, datetime):
-                    vals.append(f"'{val.isoformat()}'")
-                else:
-                    cleaned = str(val).replace("'", "''")
-                    vals.append(f"'{cleaned}'")
+            # Handle potentially null values safely
+            ns_verified_at = f"'{domain.ns_verified_at}'" if domain.ns_verified_at else "NULL"
+            verification_token = f"'{domain.verification_token}'" if domain.verification_token else "NULL"
             
-            sql_lines.append(f"INSERT INTO domains ({', '.join(cols)}) VALUES ({', '.join(vals)});")
+            sql_lines.append(
+                f"INSERT INTO domains (id, organization_id, name, status, verification_token, ns_verified, ns_verified_at, created_at, updated_at) "
+                f"VALUES ({domain.id}, {domain.organization_id}, '{domain.name}', '{domain.status}', {verification_token}, {'TRUE' if domain.ns_verified else 'FALSE'}, {ns_verified_at}, '{domain.created_at}', '{domain.updated_at}');"
+            )
             
         # DNS Records
         for record in dns_records_data:
-            cols = list(record._mapping.keys())
-            vals = []
-            for col in cols:
-                val = getattr(record, col)
-                if val is None:
-                    vals.append("NULL")
-                elif isinstance(val, bool):
-                    vals.append("TRUE" if val else "FALSE")
-                elif isinstance(val, (int, float)):
-                    vals.append(str(val))
-                elif isinstance(val, datetime):
-                    vals.append(f"'{val.isoformat()}'")
-                else:
-                    cleaned = str(val).replace("'", "''")
-                    vals.append(f"'{cleaned}'")
+            priority = str(record.priority) if record.priority is not None else "NULL"
+            weight = str(record.weight) if record.weight is not None else "NULL"
+            comment = f"'{record.comment.replace('\'', '\'\'')}'" if record.comment else "NULL"
             
-            sql_lines.append(f"INSERT INTO dns_records ({', '.join(cols)}) VALUES ({', '.join(vals)});")
+            # Escape content properly
+            content = record.content.replace("'", "''")
+            
+            sql_lines.append(
+                f"INSERT INTO dns_records (id, domain_id, type, name, content, ttl, priority, weight, proxied, comment, created_at, updated_at) "
+                f"VALUES ({record.id}, {record.domain_id}, '{record.type}', '{record.name}', '{content}', {record.ttl}, {priority}, {weight}, {'TRUE' if record.proxied else 'FALSE'}, {comment}, '{record.created_at}', '{record.updated_at}');"
+            )
 
         sql_lines.append("COMMIT;")
         
