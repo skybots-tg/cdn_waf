@@ -10,11 +10,12 @@ from app.core.database import get_db
 from app.models.user import User
 from app.services.user_service import UserService
 
-security = HTTPBearer()
+# Allow missing token for debug mode handling
+security = HTTPBearer(auto_error=False)
 
 
 async def get_current_user(
-    credentials: HTTPAuthorizationCredentials = Depends(security),
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security),
     db: AsyncSession = Depends(get_db)
 ) -> User:
     """Get current authenticated user"""
@@ -23,6 +24,22 @@ async def get_current_user(
         detail="Could not validate credentials",
         headers={"WWW-Authenticate": "Bearer"},
     )
+    
+    if not credentials:
+        # In DEBUG mode, allow access as default admin if no token provided
+        if settings.DEBUG:
+            user_service = UserService(db)
+            # Try to get the default admin user (ID 1)
+            user = await user_service.get_by_id(1)
+            if user:
+                return user
+        
+        # If not debug or user not found, require authentication
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Not authenticated",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
     
     try:
         token = credentials.credentials
@@ -37,7 +54,8 @@ async def get_current_user(
     except JWTError:
         raise credentials_exception
     
-    user = await UserService.get_user_by_id(db, user_id)
+    user_service = UserService(db)
+    user = await user_service.get_by_id(user_id)
     if user is None:
         raise credentials_exception
     
