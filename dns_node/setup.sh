@@ -197,19 +197,6 @@ EOF
             fi
         fi
     fi
-    
-    # Run migrations
-    if [[ -x "${APP_DIR}/venv/bin/alembic" ]]; then
-        if [[ -f "${APP_DIR}/alembic.ini" ]]; then
-            log "Running database migrations..."
-            cd "${APP_DIR}"
-            "${APP_DIR}/venv/bin/alembic" upgrade head || warn "Migration failed, check logs."
-        else
-            warn "alembic.ini not found in ${APP_DIR}, skipping migrations."
-        fi
-    else
-        warn "Alembic not found, skipping migrations."
-    fi
 }
 
 deploy_code() {
@@ -290,6 +277,29 @@ install_python() {
     fi
 
     log "Python окружение готово."
+    
+    # Run migrations (moved here as it requires python env)
+    if [[ -x "${APP_DIR}/venv/bin/alembic" ]]; then
+        # Check if alembic.ini exists, if not try to copy from repo root (if present)
+        if [[ ! -f "${APP_DIR}/alembic.ini" ]]; then
+             # Try to find it in current dir or repo root
+             if [[ -f "${REPO_ROOT}/alembic.ini" ]]; then
+                 cp "${REPO_ROOT}/alembic.ini" "${APP_DIR}/"
+             elif [[ -f "alembic.ini" ]]; then
+                 cp "alembic.ini" "${APP_DIR}/"
+             fi
+        fi
+
+        if [[ -f "${APP_DIR}/alembic.ini" ]]; then
+            log "Running database migrations..."
+            cd "${APP_DIR}"
+            "${APP_DIR}/venv/bin/alembic" upgrade head || warn "Migration failed, check logs."
+        else
+            warn "alembic.ini not found in ${APP_DIR}, skipping migrations. Ensure you ran deploy_code."
+        fi
+    else
+        warn "Alembic not found, skipping migrations."
+    fi
 }
 
 # ===== Certbot =====
