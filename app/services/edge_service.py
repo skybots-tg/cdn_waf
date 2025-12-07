@@ -548,9 +548,9 @@ class EdgeNodeService:
                         (tmp_config_path, "/opt/cdn_waf/config.yaml") 
                     ]
                     
-            # Ensure directory exists
-            await EdgeNodeService.execute_command(node, "mkdir -p /opt/cdn_waf || sudo mkdir -p /opt/cdn_waf")
-            await EdgeNodeService.execute_command(node, "chown -R $USER:$USER /opt/cdn_waf || sudo chown -R $USER:$USER /opt/cdn_waf")
+                    # Ensure directory exists
+                    await EdgeNodeService.execute_command(node, "mkdir -p /opt/cdn_waf || sudo mkdir -p /opt/cdn_waf")
+                    await EdgeNodeService.execute_command(node, "chown -R $USER:$USER /opt/cdn_waf || sudo chown -R $USER:$USER /opt/cdn_waf")
                     
                     for local, remote in files_to_upload:
                         if not await EdgeNodeService.upload_file(node, local, remote):
