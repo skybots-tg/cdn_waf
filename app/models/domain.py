@@ -47,6 +47,7 @@ class Domain(Base):
     cache_rules = relationship("CacheRule", back_populates="domain", cascade="all, delete-orphan")
     waf_rules = relationship("WAFRule", back_populates="domain", cascade="all, delete-orphan")
     rate_limits = relationship("RateLimit", back_populates="domain", cascade="all, delete-orphan")
+    ip_access_rules = relationship("IPAccessRule", back_populates="domain", cascade="all, delete-orphan")
     certificates = relationship("Certificate", back_populates="domain", cascade="all, delete-orphan")
 
 

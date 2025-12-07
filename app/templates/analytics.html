@@ -1,0 +1,312 @@
+{% extends "base.html" %}
+
+{% block title %}Analytics - CDN WAF{% endblock %}
+
+{% block content %}
+<div class="container" style="padding: 32px 24px;">
+    <!-- Header -->
+    <div class="flex-between mb-4">
+        <div>
+            <h1 style="font-size: 32px; font-weight: 700;">Analytics</h1>
+            <p style="color: var(--text-secondary); font-size: 14px;">
+                Global traffic analytics across all your domains
+            </p>
+        </div>
+        <div style="display: flex; gap: 12px;">
+            <select class="form-select" id="time-range" style="max-width: 200px;">
+                <option value="1h">Last Hour</option>
+                <option value="24h" selected>Last 24 Hours</option>
+                <option value="7d">Last 7 Days</option>
+                <option value="30d">Last 30 Days</option>
+            </select>
+            <button class="btn btn-secondary" onclick="exportGlobalData()">
+                <i class="fas fa-download"></i> Export
+            </button>
+        </div>
+    </div>
+
+    <!-- Global Metrics -->
+    <div class="grid grid-4 gap-3 mb-4">
+        <div class="glass-card">
+            <div style="font-size: 14px; color: var(--text-secondary); margin-bottom: 8px;">
+                <i class="fas fa-exchange-alt"></i> Total Requests
+            </div>
+            <div style="font-size: 28px; font-weight: 700;" id="global-requests">-</div>
+            <div style="font-size: 12px; color: var(--text-muted); margin-top: 4px;" id="global-requests-change">-</div>
+        </div>
+
+        <div class="glass-card">
+            <div style="font-size: 14px; color: var(--text-secondary); margin-bottom: 8px;">
+                <i class="fas fa-database"></i> Bandwidth
+            </div>
+            <div style="font-size: 28px; font-weight: 700;" id="global-bandwidth">-</div>
+            <div style="font-size: 12px; color: var(--text-muted); margin-top: 4px;" id="global-bandwidth-change">-</div>
+        </div>
+
+        <div class="glass-card">
+            <div style="font-size: 14px; color: var(--text-secondary); margin-bottom: 8px;">
+                <i class="fas fa-bolt"></i> Avg Cache Ratio
+            </div>
+            <div style="font-size: 28px; font-weight: 700; color: var(--success);" id="global-cache">-</div>
+            <div style="font-size: 12px; color: var(--text-muted); margin-top: 4px;">Across all domains</div>
+        </div>
+
+        <div class="glass-card">
+            <div style="font-size: 14px; color: var(--text-secondary); margin-bottom: 8px;">
+                <i class="fas fa-shield-alt"></i> Threats Blocked
+            </div>
+            <div style="font-size: 28px; font-weight: 700; color: var(--error);" id="global-threats">-</div>
+            <div style="font-size: 12px; color: var(--text-muted); margin-top: 4px;" id="global-threats-change">-</div>
+        </div>
+    </div>
+
+    <!-- Main Chart -->
+    <div class="glass-card mb-4">
+        <div class="flex-between mb-3">
+            <h2 style="font-size: 20px; font-weight: 600;">Global Traffic Overview</h2>
+            <div class="flex gap-2">
+                <button class="btn btn-sm btn-primary" onclick="changeGlobalChartMetric('requests')">
+                    Requests
+                </button>
+                <button class="btn btn-sm btn-secondary" onclick="changeGlobalChartMetric('bandwidth')">
+                    Bandwidth
+                </button>
+            </div>
+        </div>
+        <div id="global-traffic-chart" style="height: 300px; display: flex; align-items: center; justify-content: center; color: var(--text-muted);">
+            <i class="fas fa-spinner fa-spin"></i> Loading chart...
+        </div>
+    </div>
+
+    <!-- Domain Performance -->
+    <div class="glass-card mb-4">
+        <h2 style="font-size: 20px; font-weight: 600; margin-bottom: 16px;">
+            <i class="fas fa-globe"></i> Domain Performance
+        </h2>
+        <div id="domain-performance">
+            <p style="text-align: center; color: var(--text-muted); padding: 32px;">
+                <i class="fas fa-spinner fa-spin"></i> Loading...
+            </p>
+        </div>
+    </div>
+
+    <!-- Status & Performance -->
+    <div class="grid grid-2 gap-3 mb-4">
+        <div class="glass-card">
+            <h3 style="font-size: 18px; font-weight: 600; margin-bottom: 16px;">
+                <i class="fas fa-check-circle"></i> Response Status
+            </h3>
+            <div id="global-status-codes">
+                <div class="flex-between mb-2">
+                    <span style="color: var(--text-secondary);">2xx Success</span>
+                    <span style="font-weight: 600; color: var(--success);" id="global-status-2xx">-</span>
+                </div>
+                <div class="flex-between mb-2">
+                    <span style="color: var(--text-secondary);">3xx Redirect</span>
+                    <span style="font-weight: 600; color: var(--info);" id="global-status-3xx">-</span>
+                </div>
+                <div class="flex-between mb-2">
+                    <span style="color: var(--text-secondary);">4xx Client Error</span>
+                    <span style="font-weight: 600; color: var(--warning);" id="global-status-4xx">-</span>
+                </div>
+                <div class="flex-between">
+                    <span style="color: var(--text-secondary);">5xx Server Error</span>
+                    <span style="font-weight: 600; color: var(--error);" id="global-status-5xx">-</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="glass-card">
+            <h3 style="font-size: 18px; font-weight: 600; margin-bottom: 16px;">
+                <i class="fas fa-globe"></i> Top Countries
+            </h3>
+            <div id="global-geo">
+                <p style="text-align: center; color: var(--text-muted); padding: 24px;">
+                    <i class="fas fa-spinner fa-spin"></i> Loading...
+                </p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Edge Nodes Performance -->
+    <div class="glass-card">
+        <h2 style="font-size: 20px; font-weight: 600; margin-bottom: 16px;">
+            <i class="fas fa-server"></i> Edge Nodes Performance
+        </h2>
+        <div id="edge-nodes-performance">
+            <p style="text-align: center; color: var(--text-muted); padding: 32px;">
+                <i class="fas fa-spinner fa-spin"></i> Loading...
+            </p>
+        </div>
+    </div>
+</div>
+
+<script>
+let globalChartMetric = 'requests';
+
+async function loadGlobalAnalytics() {
+    const timeRange = document.getElementById('time-range').value;
+    
+    try {
+        // Load global metrics
+        const response = await fetch(`/api/v1/stats/global?range=${timeRange}`);
+        const stats = await response.json();
+        
+        document.getElementById('global-requests').textContent = formatNumber(stats.total_requests || 0);
+        document.getElementById('global-bandwidth').textContent = formatBytes(stats.total_bandwidth || 0);
+        document.getElementById('global-cache').textContent = `${stats.avg_cache_ratio || 0}%`;
+        document.getElementById('global-threats').textContent = formatNumber(stats.threats_blocked || 0);
+        
+        // Load status codes
+        document.getElementById('global-status-2xx').textContent = formatNumber(stats.status_2xx || 0);
+        document.getElementById('global-status-3xx').textContent = formatNumber(stats.status_3xx || 0);
+        document.getElementById('global-status-4xx').textContent = formatNumber(stats.status_4xx || 0);
+        document.getElementById('global-status-5xx').textContent = formatNumber(stats.status_5xx || 0);
+        
+    } catch (error) {
+        console.error('Error loading global analytics:', error);
+        showNotification('Failed to load analytics data', 'error');
+    }
+}
+
+async function loadDomainPerformance() {
+    try {
+        const response = await fetch('/api/v1/stats/domains');
+        const data = await response.json();
+        
+        const container = document.getElementById('domain-performance');
+        
+        if (data.length === 0) {
+            container.innerHTML = '<p style="text-align: center; color: var(--text-muted); padding: 24px;">No domains yet</p>';
+            return;
+        }
+        
+        container.innerHTML = data.map(domain => `
+            <div class="glass-card-sm mb-2">
+                <div class="flex-between">
+                    <div style="flex: 1;">
+                        <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 8px;">
+                            <a href="/domains/${domain.id}/analytics" style="font-weight: 600; color: var(--text-primary); text-decoration: none;">
+                                ${domain.name}
+                            </a>
+                            <span class="badge ${domain.status === 'active' ? 'badge-success' : 'badge-secondary'}">
+                                ${domain.status}
+                            </span>
+                        </div>
+                        <div style="display: flex; gap: 24px; font-size: 13px; color: var(--text-secondary);">
+                            <span><i class="fas fa-exchange-alt"></i> ${formatNumber(domain.requests)} requests</span>
+                            <span><i class="fas fa-database"></i> ${formatBytes(domain.bandwidth)}</span>
+                            <span><i class="fas fa-bolt"></i> ${domain.cache_ratio}% cached</span>
+                        </div>
+                    </div>
+                    <a href="/domains/${domain.id}/analytics" class="btn btn-secondary btn-sm">
+                        <i class="fas fa-chart-line"></i> View
+                    </a>
+                </div>
+            </div>
+        `).join('');
+    } catch (error) {
+        console.error('Error loading domain performance:', error);
+    }
+}
+
+async function loadGlobalGeo() {
+    try {
+        const response = await fetch('/api/v1/stats/geo');
+        const data = await response.json();
+        
+        const container = document.getElementById('global-geo');
+        
+        if (data.length === 0) {
+            container.innerHTML = '<p style="text-align: center; color: var(--text-muted); padding: 24px;">No data</p>';
+            return;
+        }
+        
+        container.innerHTML = data.slice(0, 5).map((item, index) => `
+            <div class="flex-between mb-2" style="padding: 4px 0;">
+                <span style="font-size: 13px;">
+                    <span style="color: var(--text-muted);">${index + 1}.</span>
+                    ${item.country}
+                </span>
+                <span style="font-weight: 600; font-size: 13px;">${formatNumber(item.requests)}</span>
+            </div>
+        `).join('');
+    } catch (error) {
+        console.error('Error loading geo data:', error);
+    }
+}
+
+async function loadEdgeNodesPerformance() {
+    try {
+        const response = await fetch('/api/v1/stats/edge-nodes');
+        const data = await response.json();
+        
+        const container = document.getElementById('edge-nodes-performance');
+        
+        if (data.length === 0) {
+            container.innerHTML = '<p style="text-align: center; color: var(--text-muted); padding: 24px;">No edge nodes configured</p>';
+            return;
+        }
+        
+        container.innerHTML = data.map(node => `
+            <div class="glass-card-sm mb-2">
+                <div class="flex-between">
+                    <div style="flex: 1;">
+                        <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 8px;">
+                            <span style="font-weight: 600;">${node.name}</span>
+                            <span class="badge ${node.status === 'active' ? 'badge-success' : 'badge-error'}">
+                                ${node.status}
+                            </span>
+                            <span style="font-size: 13px; color: var(--text-muted);">
+                                <i class="fas fa-map-marker-alt"></i> ${node.location}
+                            </span>
+                        </div>
+                        <div style="display: flex; gap: 24px; font-size: 13px; color: var(--text-secondary);">
+                            <span><i class="fas fa-exchange-alt"></i> ${formatNumber(node.requests)} req/s</span>
+                            <span><i class="fas fa-clock"></i> ${node.avg_latency}ms latency</span>
+                            <span><i class="fas fa-memory"></i> ${node.cpu_usage}% CPU</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `).join('');
+    } catch (error) {
+        console.error('Error loading edge nodes performance:', error);
+    }
+}
+
+function formatNumber(num) {
+    if (num >= 1000000) return (num / 1000000).toFixed(1) + 'M';
+    if (num >= 1000) return (num / 1000).toFixed(1) + 'K';
+    return num.toString();
+}
+
+function formatBytes(bytes) {
+    if (bytes >= 1073741824) return (bytes / 1073741824).toFixed(2) + ' GB';
+    if (bytes >= 1048576) return (bytes / 1048576).toFixed(2) + ' MB';
+    if (bytes >= 1024) return (bytes / 1024).toFixed(2) + ' KB';
+    return bytes + ' B';
+}
+
+function changeGlobalChartMetric(metric) {
+    globalChartMetric = metric;
+    // TODO: Update chart
+}
+
+function exportGlobalData() {
+    showNotification('Exporting global data...', 'info');
+    // TODO: Implement export
+}
+
+// Initialize
+document.addEventListener('DOMContentLoaded', () => {
+    loadGlobalAnalytics();
+    loadDomainPerformance();
+    loadGlobalGeo();
+    loadEdgeNodesPerformance();
+    
+    // Listen for time range changes
+    document.getElementById('time-range').addEventListener('change', loadGlobalAnalytics);
+});
+</script>
+{% endblock %}

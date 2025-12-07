@@ -1,0 +1,525 @@
+{% extends "base.html" %}
+
+{% block title %}Settings - CDN WAF{% endblock %}
+
+{% block content %}
+<div class="container" style="padding: 32px 24px; max-width: 1200px;">
+    <!-- Header -->
+    <div class="mb-4">
+        <h1 style="font-size: 32px; font-weight: 700;">Settings</h1>
+        <p style="color: var(--text-secondary); font-size: 14px;">
+            Manage your account, organization, and preferences
+        </p>
+    </div>
+
+    <!-- Settings Tabs -->
+    <div class="tabs mb-4">
+        <button class="tab-link active" onclick="showSettingsTab('account')">
+            <i class="fas fa-user"></i> Account
+        </button>
+        <button class="tab-link" onclick="showSettingsTab('organization')">
+            <i class="fas fa-users"></i> Organization
+        </button>
+        <button class="tab-link" onclick="showSettingsTab('api')">
+            <i class="fas fa-key"></i> API Keys
+        </button>
+        <button class="tab-link" onclick="showSettingsTab('security')">
+            <i class="fas fa-shield-alt"></i> Security
+        </button>
+        <button class="tab-link" onclick="showSettingsTab('notifications')">
+            <i class="fas fa-bell"></i> Notifications
+        </button>
+    </div>
+
+    <!-- Account Tab -->
+    <div id="tab-account" class="settings-tab-content">
+        <div class="glass-card mb-3">
+            <h2 style="font-size: 20px; font-weight: 600; margin-bottom: 16px;">Profile Information</h2>
+            <form id="profile-form">
+                <div class="form-group">
+                    <label class="form-label">Email Address</label>
+                    <input type="email" class="form-input" id="email" value="{{ user.email }}" readonly>
+                    <p style="font-size: 12px; color: var(--text-muted); margin-top: 4px;">
+                        Contact support to change your email address
+                    </p>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Full Name</label>
+                    <input type="text" class="form-input" id="full-name" placeholder="John Doe">
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Company</label>
+                    <input type="text" class="form-input" id="company" placeholder="Acme Inc.">
+                </div>
+                <button type="submit" class="btn btn-primary">
+                    <i class="fas fa-save"></i> Save Profile
+                </button>
+            </form>
+        </div>
+
+        <div class="glass-card mb-3">
+            <h2 style="font-size: 20px; font-weight: 600; margin-bottom: 16px;">Change Password</h2>
+            <form id="password-form">
+                <div class="form-group">
+                    <label class="form-label">Current Password</label>
+                    <input type="password" class="form-input" id="current-password" required>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">New Password</label>
+                    <input type="password" class="form-input" id="new-password" required>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Confirm New Password</label>
+                    <input type="password" class="form-input" id="confirm-password" required>
+                </div>
+                <button type="submit" class="btn btn-primary">
+                    <i class="fas fa-lock"></i> Update Password
+                </button>
+            </form>
+        </div>
+
+        <div class="glass-card">
+            <h2 style="font-size: 20px; font-weight: 600; margin-bottom: 16px; color: var(--error);">
+                <i class="fas fa-exclamation-triangle"></i> Danger Zone
+            </h2>
+            <p style="color: var(--text-secondary); margin-bottom: 16px;">
+                Once you delete your account, there is no going back. Please be certain.
+            </p>
+            <button class="btn btn-error" onclick="confirmDeleteAccount()">
+                <i class="fas fa-trash"></i> Delete Account
+            </button>
+        </div>
+    </div>
+
+    <!-- Organization Tab -->
+    <div id="tab-organization" class="settings-tab-content" style="display: none;">
+        <div class="glass-card mb-3">
+            <h2 style="font-size: 20px; font-weight: 600; margin-bottom: 16px;">Organization Details</h2>
+            <form id="organization-form">
+                <div class="form-group">
+                    <label class="form-label">Organization Name</label>
+                    <input type="text" class="form-input" id="org-name" placeholder="My Organization">
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Organization ID</label>
+                    <input type="text" class="form-input" id="org-id" value="org_12345" readonly>
+                </div>
+                <button type="submit" class="btn btn-primary">
+                    <i class="fas fa-save"></i> Save Organization
+                </button>
+            </form>
+        </div>
+
+        <div class="glass-card mb-3">
+            <div class="flex-between mb-3">
+                <h2 style="font-size: 20px; font-weight: 600;">Team Members</h2>
+                <button class="btn btn-primary btn-sm" onclick="showInviteMemberModal()">
+                    <i class="fas fa-user-plus"></i> Invite Member
+                </button>
+            </div>
+            <div id="team-members">
+                <p style="text-align: center; color: var(--text-muted); padding: 32px;">
+                    <i class="fas fa-spinner fa-spin"></i> Loading...
+                </p>
+            </div>
+        </div>
+
+        <div class="glass-card">
+            <h2 style="font-size: 20px; font-weight: 600; margin-bottom: 16px;">
+                <i class="fas fa-chart-bar"></i> Usage & Billing
+            </h2>
+            <div class="grid grid-3 gap-3 mb-3">
+                <div style="padding: 16px; background: var(--bg-tertiary); border-radius: var(--border-radius-sm);">
+                    <div style="font-size: 13px; color: var(--text-secondary); margin-bottom: 4px;">Current Plan</div>
+                    <div style="font-size: 20px; font-weight: 600;">Free</div>
+                </div>
+                <div style="padding: 16px; background: var(--bg-tertiary); border-radius: var(--border-radius-sm);">
+                    <div style="font-size: 13px; color: var(--text-secondary); margin-bottom: 4px;">Domains</div>
+                    <div style="font-size: 20px; font-weight: 600;">0 / 3</div>
+                </div>
+                <div style="padding: 16px; background: var(--bg-tertiary); border-radius: var(--border-radius-sm);">
+                    <div style="font-size: 13px; color: var(--text-secondary); margin-bottom: 4px;">Bandwidth</div>
+                    <div style="font-size: 20px; font-weight: 600;">0 GB / 10 GB</div>
+                </div>
+            </div>
+            <button class="btn btn-primary">
+                <i class="fas fa-arrow-up"></i> Upgrade Plan
+            </button>
+        </div>
+    </div>
+
+    <!-- API Keys Tab -->
+    <div id="tab-api" class="settings-tab-content" style="display: none;">
+        <div class="glass-card mb-3">
+            <div class="flex-between mb-3">
+                <div>
+                    <h2 style="font-size: 20px; font-weight: 600;">API Keys</h2>
+                    <p style="color: var(--text-secondary); font-size: 14px; margin-top: 4px;">
+                        Manage API keys for programmatic access to your CDN
+                    </p>
+                </div>
+                <button class="btn btn-primary btn-sm" onclick="showCreateAPIKeyModal()">
+                    <i class="fas fa-plus"></i> Create API Key
+                </button>
+            </div>
+            <div id="api-keys-list">
+                <p style="text-align: center; color: var(--text-muted); padding: 32px;">
+                    <i class="fas fa-spinner fa-spin"></i> Loading...
+                </p>
+            </div>
+        </div>
+
+        <div class="glass-card">
+            <h3 style="font-size: 18px; font-weight: 600; margin-bottom: 16px;">
+                <i class="fas fa-book"></i> API Documentation
+            </h3>
+            <p style="color: var(--text-secondary); margin-bottom: 16px;">
+                Learn how to use the CDN WAF API to automate your infrastructure.
+            </p>
+            <a href="/docs/api" class="btn btn-secondary">
+                <i class="fas fa-book-open"></i> View API Docs
+            </a>
+        </div>
+    </div>
+
+    <!-- Security Tab -->
+    <div id="tab-security" class="settings-tab-content" style="display: none;">
+        <div class="glass-card mb-3">
+            <h2 style="font-size: 20px; font-weight: 600; margin-bottom: 16px;">
+                Two-Factor Authentication
+            </h2>
+            <div class="flex-between">
+                <div>
+                    <p style="color: var(--text-secondary); margin-bottom: 8px;">
+                        Add an extra layer of security to your account
+                    </p>
+                    <div id="2fa-status">
+                        <span class="badge badge-secondary">Disabled</span>
+                    </div>
+                </div>
+                <button class="btn btn-primary" onclick="enable2FA()">
+                    <i class="fas fa-shield-alt"></i> Enable 2FA
+                </button>
+            </div>
+        </div>
+
+        <div class="glass-card mb-3">
+            <h2 style="font-size: 20px; font-weight: 600; margin-bottom: 16px;">
+                Active Sessions
+            </h2>
+            <div id="active-sessions">
+                <p style="text-align: center; color: var(--text-muted); padding: 32px;">
+                    <i class="fas fa-spinner fa-spin"></i> Loading...
+                </p>
+            </div>
+        </div>
+
+        <div class="glass-card">
+            <h2 style="font-size: 20px; font-weight: 600; margin-bottom: 16px;">
+                Security Log
+            </h2>
+            <div id="security-log">
+                <p style="text-align: center; color: var(--text-muted); padding: 32px;">
+                    <i class="fas fa-spinner fa-spin"></i> Loading...
+                </p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Notifications Tab -->
+    <div id="tab-notifications" class="settings-tab-content" style="display: none;">
+        <div class="glass-card mb-3">
+            <h2 style="font-size: 20px; font-weight: 600; margin-bottom: 16px;">
+                Email Notifications
+            </h2>
+            <div class="form-group">
+                <label style="display: flex; align-items: center; gap: 12px; cursor: pointer;">
+                    <input type="checkbox" id="notify-security" checked>
+                    <div>
+                        <div style="font-weight: 500;">Security Alerts</div>
+                        <div style="font-size: 13px; color: var(--text-secondary);">
+                            Get notified about suspicious activity and security events
+                        </div>
+                    </div>
+                </label>
+            </div>
+            <div class="form-group">
+                <label style="display: flex; align-items: center; gap: 12px; cursor: pointer;">
+                    <input type="checkbox" id="notify-downtime">
+                    <div>
+                        <div style="font-weight: 500;">Downtime Alerts</div>
+                        <div style="font-size: 13px; color: var(--text-secondary);">
+                            Receive alerts when your sites are down or experiencing issues
+                        </div>
+                    </div>
+                </label>
+            </div>
+            <div class="form-group">
+                <label style="display: flex; align-items: center; gap: 12px; cursor: pointer;">
+                    <input type="checkbox" id="notify-ssl">
+                    <div>
+                        <div style="font-weight: 500;">SSL Certificate Expiry</div>
+                        <div style="font-size: 13px; color: var(--text-secondary);">
+                            Get reminders before your SSL certificates expire
+                        </div>
+                    </div>
+                </label>
+            </div>
+            <div class="form-group">
+                <label style="display: flex; align-items: center; gap: 12px; cursor: pointer;">
+                    <input type="checkbox" id="notify-usage">
+                    <div>
+                        <div style="font-weight: 500;">Usage & Quota Warnings</div>
+                        <div style="font-size: 13px; color: var(--text-secondary);">
+                            Alerts when approaching bandwidth or request limits
+                        </div>
+                    </div>
+                </label>
+            </div>
+            <div class="form-group">
+                <label style="display: flex; align-items: center; gap: 12px; cursor: pointer;">
+                    <input type="checkbox" id="notify-weekly">
+                    <div>
+                        <div style="font-weight: 500;">Weekly Reports</div>
+                        <div style="font-size: 13px; color: var(--text-secondary);">
+                            Receive weekly summary of your traffic and performance
+                        </div>
+                    </div>
+                </label>
+            </div>
+            <button class="btn btn-primary" onclick="saveNotificationSettings()">
+                <i class="fas fa-save"></i> Save Preferences
+            </button>
+        </div>
+
+        <div class="glass-card">
+            <h2 style="font-size: 20px; font-weight: 600; margin-bottom: 16px;">
+                Webhook Notifications
+            </h2>
+            <p style="color: var(--text-secondary); margin-bottom: 16px;">
+                Send notifications to external services via webhooks (Slack, Discord, etc.)
+            </p>
+            <button class="btn btn-secondary">
+                <i class="fas fa-plus"></i> Add Webhook
+            </button>
+        </div>
+    </div>
+</div>
+
+<style>
+.tabs {
+    display: flex;
+    gap: 8px;
+    border-bottom: 2px solid var(--glass-border);
+    padding-bottom: 4px;
+    flex-wrap: wrap;
+}
+
+.tab-link {
+    padding: 12px 20px;
+    color: var(--text-secondary);
+    text-decoration: none;
+    border-radius: var(--border-radius-sm) var(--border-radius-sm) 0 0;
+    transition: all var(--transition-fast);
+    font-weight: 500;
+    background: none;
+    border: none;
+    cursor: pointer;
+}
+
+.tab-link:hover {
+    color: var(--text-primary);
+    background: var(--bg-tertiary);
+}
+
+.tab-link.active {
+    color: var(--accent-primary);
+    background: var(--accent-light);
+    border-bottom: 2px solid var(--accent-primary);
+}
+
+.settings-tab-content {
+    animation: fadeIn 0.3s ease;
+}
+
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+        transform: translateY(10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+</style>
+
+<script>
+function showSettingsTab(tabName) {
+    // Hide all tabs
+    document.querySelectorAll('.settings-tab-content').forEach(tab => {
+        tab.style.display = 'none';
+    });
+    
+    // Remove active class from all buttons
+    document.querySelectorAll('.tab-link').forEach(btn => {
+        btn.classList.remove('active');
+    });
+    
+    // Show selected tab
+    document.getElementById(`tab-${tabName}`).style.display = 'block';
+    
+    // Add active class to button
+    event.target.classList.add('active');
+    
+    // Load tab data
+    loadTabData(tabName);
+}
+
+function loadTabData(tabName) {
+    switch(tabName) {
+        case 'organization':
+            loadTeamMembers();
+            break;
+        case 'api':
+            loadAPIKeys();
+            break;
+        case 'security':
+            loadActiveSessions();
+            loadSecurityLog();
+            break;
+    }
+}
+
+async function loadTeamMembers() {
+    try {
+        const response = await fetch('/api/v1/organization/members');
+        const data = await response.json();
+        
+        const container = document.getElementById('team-members');
+        
+        if (data.length === 0) {
+            container.innerHTML = '<p style="text-align: center; color: var(--text-muted); padding: 24px;">No team members yet</p>';
+            return;
+        }
+        
+        container.innerHTML = data.map(member => `
+            <div class="glass-card-sm mb-2">
+                <div class="flex-between">
+                    <div>
+                        <div style="font-weight: 600; margin-bottom: 4px;">${member.email}</div>
+                        <span class="badge badge-primary">${member.role}</span>
+                    </div>
+                    ${member.role !== 'owner' ? `
+                        <button class="btn btn-error btn-sm" onclick="removeMember(${member.id})">
+                            <i class="fas fa-user-minus"></i> Remove
+                        </button>
+                    ` : ''}
+                </div>
+            </div>
+        `).join('');
+    } catch (error) {
+        console.error('Error loading team members:', error);
+    }
+}
+
+async function loadAPIKeys() {
+    try {
+        const response = await fetch('/api/v1/auth/api-keys');
+        const data = await response.json();
+        
+        const container = document.getElementById('api-keys-list');
+        
+        if (data.length === 0) {
+            container.innerHTML = `
+                <div style="text-align: center; padding: 40px; color: var(--text-muted);">
+                    <i class="fas fa-key" style="font-size: 48px; margin-bottom: 16px; opacity: 0.3;"></i>
+                    <p>No API keys created yet</p>
+                </div>
+            `;
+            return;
+        }
+        
+        container.innerHTML = data.map(key => `
+            <div class="glass-card-sm mb-2">
+                <div class="flex-between">
+                    <div style="flex: 1;">
+                        <div style="font-weight: 600; margin-bottom: 4px;">${key.name}</div>
+                        <div style="font-size: 13px; color: var(--text-secondary); font-family: monospace;">
+                            ${key.key_preview}...
+                        </div>
+                        <div style="font-size: 12px; color: var(--text-muted); margin-top: 8px;">
+                            Created: ${new Date(key.created_at).toLocaleDateString()}
+                        </div>
+                    </div>
+                    <button class="btn btn-error btn-sm" onclick="deleteAPIKey('${key.id}')">
+                        <i class="fas fa-trash"></i>
+                    </button>
+                </div>
+            </div>
+        `).join('');
+    } catch (error) {
+        console.error('Error loading API keys:', error);
+    }
+}
+
+async function loadActiveSessions() {
+    // TODO: Implement
+    document.getElementById('active-sessions').innerHTML = `
+        <div class="glass-card-sm">
+            <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 8px;">
+                <i class="fas fa-desktop" style="color: var(--info);"></i>
+                <div style="flex: 1;">
+                    <div style="font-weight: 600;">Current Session</div>
+                    <div style="font-size: 13px; color: var(--text-secondary);">Windows · Chrome · 192.168.1.1</div>
+                </div>
+                <span class="badge badge-success">Active</span>
+            </div>
+        </div>
+    `;
+}
+
+async function loadSecurityLog() {
+    // TODO: Implement
+    document.getElementById('security-log').innerHTML = `
+        <p style="text-align: center; color: var(--text-muted); padding: 24px;">No recent security events</p>
+    `;
+}
+
+function saveNotificationSettings() {
+    showNotification('Notification preferences saved', 'success');
+}
+
+function confirmDeleteAccount() {
+    if (confirm('Are you sure you want to delete your account? This action cannot be undone.')) {
+        showNotification('Account deletion initiated. You will receive a confirmation email.', 'warning');
+    }
+}
+
+function enable2FA() {
+    showNotification('2FA setup coming soon', 'info');
+}
+
+// Initialize
+document.addEventListener('DOMContentLoaded', () => {
+    // Load initial data
+    loadTabData('account');
+    
+    // Form handlers
+    document.getElementById('profile-form').addEventListener('submit', (e) => {
+        e.preventDefault();
+        showNotification('Profile updated successfully', 'success');
+    });
+    
+    document.getElementById('password-form').addEventListener('submit', (e) => {
+        e.preventDefault();
+        showNotification('Password updated successfully', 'success');
+    });
+    
+    document.getElementById('organization-form').addEventListener('submit', (e) => {
+        e.preventDefault();
+        showNotification('Organization updated successfully', 'success');
+    });
+});
+</script>
+{% endblock %}

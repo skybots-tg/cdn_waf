@@ -1,0 +1,374 @@
+{% extends "base.html" %}
+
+{% block title %}{{ domain.name }} - WAF - CDN WAF{% endblock %}
+
+{% block content %}
+<div class="container" style="padding: 32px 24px;">
+    <!-- Domain Header -->
+    <div class="flex-between mb-4">
+        <div>
+            <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 8px;">
+                <a href="/domains" style="color: var(--text-secondary); text-decoration: none;">
+                    <i class="fas fa-arrow-left"></i>
+                </a>
+                <h1 style="font-size: 32px; font-weight: 700;">{{ domain.name }}</h1>
+                <span class="badge badge-success">Active</span>
+            </div>
+            <p style="color: var(--text-secondary); font-size: 14px;">
+                Web Application Firewall and Security Settings
+            </p>
+        </div>
+    </div>
+
+    <!-- Tabs -->
+    <div class="tabs mb-4">
+        <a href="/domains/{{ domain.id }}/dns" class="tab-link">
+            <i class="fas fa-globe"></i> DNS
+        </a>
+        <a href="/domains/{{ domain.id }}/settings" class="tab-link">
+            <i class="fas fa-cog"></i> Settings
+        </a>
+        <a href="/domains/{{ domain.id }}/waf" class="tab-link active">
+            <i class="fas fa-shield-alt"></i> WAF
+        </a>
+        <a href="/domains/{{ domain.id }}/analytics" class="tab-link">
+            <i class="fas fa-chart-line"></i> Analytics
+        </a>
+    </div>
+
+    <!-- WAF Overview -->
+    <div class="grid grid-3 gap-3 mb-4">
+        <div class="glass-card">
+            <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
+                <span style="font-size: 14px; color: var(--text-secondary);">WAF Status</span>
+                <label class="toggle-switch">
+                    <input type="checkbox" id="waf-enabled" checked>
+                    <span class="toggle-slider"></span>
+                </label>
+            </div>
+            <div style="font-size: 24px; font-weight: 700; color: var(--success);">
+                <i class="fas fa-shield-alt"></i> Active
+            </div>
+        </div>
+
+        <div class="glass-card">
+            <div style="font-size: 14px; color: var(--text-secondary); margin-bottom: 8px;">Blocked Today</div>
+            <div style="font-size: 24px; font-weight: 700;">
+                <i class="fas fa-ban" style="color: var(--error);"></i> <span id="blocked-today">0</span>
+            </div>
+        </div>
+
+        <div class="glass-card">
+            <div style="font-size: 14px; color: var(--text-secondary); margin-bottom: 8px;">Active Rules</div>
+            <div style="font-size: 24px; font-weight: 700;">
+                <i class="fas fa-list" style="color: var(--info);"></i> <span id="active-rules">0</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Under Attack Mode -->
+    <div class="glass-card mb-4">
+        <div class="flex-between">
+            <div>
+                <h3 style="font-size: 18px; font-weight: 600; margin-bottom: 8px;">
+                    <i class="fas fa-exclamation-triangle" style="color: var(--warning);"></i>
+                    Under Attack Mode
+                </h3>
+                <p style="font-size: 14px; color: var(--text-secondary); margin-bottom: 0;">
+                    Enable enhanced protection when your site is under DDoS attack. Visitors will see a JS challenge before accessing your site.
+                </p>
+            </div>
+            <label class="toggle-switch">
+                <input type="checkbox" id="under-attack-mode">
+                <span class="toggle-slider"></span>
+            </label>
+        </div>
+    </div>
+
+    <!-- WAF Rules -->
+    <div class="glass-card mb-4">
+        <div class="flex-between mb-3">
+            <h2 style="font-size: 20px; font-weight: 600;">
+                <i class="fas fa-shield-alt"></i> WAF Rules
+            </h2>
+            <button class="btn btn-primary btn-sm" onclick="showAddWAFRuleModal()">
+                <i class="fas fa-plus"></i> Add Rule
+            </button>
+        </div>
+
+        <div class="mb-3">
+            <input type="text" class="form-input" placeholder="Search rules..." id="search-waf-rules">
+        </div>
+
+        <div id="waf-rules-list">
+            <p style="text-align: center; color: var(--text-muted); padding: 32px;">
+                <i class="fas fa-spinner fa-spin"></i> Loading...
+            </p>
+        </div>
+    </div>
+
+    <!-- Rate Limiting -->
+    <div class="glass-card mb-4">
+        <div class="flex-between mb-3">
+            <h2 style="font-size: 20px; font-weight: 600;">
+                <i class="fas fa-tachometer-alt"></i> Rate Limiting
+            </h2>
+            <button class="btn btn-primary btn-sm" onclick="showAddRateLimitModal()">
+                <i class="fas fa-plus"></i> Add Limit
+            </button>
+        </div>
+
+        <div class="mb-3">
+            <input type="text" class="form-input" placeholder="Search rate limits..." id="search-rate-limits">
+        </div>
+
+        <div id="rate-limits-list">
+            <p style="text-align: center; color: var(--text-muted); padding: 32px;">
+                <i class="fas fa-spinner fa-spin"></i> Loading...
+            </p>
+        </div>
+    </div>
+
+    <!-- IP Access Control -->
+    <div class="glass-card mb-4">
+        <div class="flex-between mb-3">
+            <h2 style="font-size: 20px; font-weight: 600;">
+                <i class="fas fa-ban"></i> IP Access Control
+            </h2>
+            <button class="btn btn-primary btn-sm" onclick="showAddIPRuleModal()">
+                <i class="fas fa-plus"></i> Add Rule
+            </button>
+        </div>
+
+        <div class="mb-3">
+            <div class="flex gap-2">
+                <input type="text" class="form-input" placeholder="Search IP rules..." id="search-ip-rules">
+                <select class="form-select" style="max-width: 200px;" id="filter-ip-type">
+                    <option value="">All Types</option>
+                    <option value="whitelist">Whitelist</option>
+                    <option value="blacklist">Blacklist</option>
+                </select>
+            </div>
+        </div>
+
+        <div id="ip-rules-list">
+            <p style="text-align: center; color: var(--text-muted); padding: 32px;">
+                <i class="fas fa-spinner fa-spin"></i> Loading...
+            </p>
+        </div>
+    </div>
+
+    <!-- GeoIP Blocking -->
+    <div class="glass-card">
+        <div class="flex-between mb-3">
+            <h2 style="font-size: 20px; font-weight: 600;">
+                <i class="fas fa-globe"></i> GeoIP Blocking
+            </h2>
+            <button class="btn btn-secondary btn-sm">
+                <i class="fas fa-info-circle"></i> Coming Soon
+            </button>
+        </div>
+        <p style="color: var(--text-secondary); font-size: 14px;">
+            Block or allow traffic from specific countries. This feature will be available in a future update.
+        </p>
+    </div>
+</div>
+
+<style>
+.tabs {
+    display: flex;
+    gap: 8px;
+    border-bottom: 2px solid var(--glass-border);
+    padding-bottom: 4px;
+}
+
+.tab-link {
+    padding: 12px 20px;
+    color: var(--text-secondary);
+    text-decoration: none;
+    border-radius: var(--border-radius-sm) var(--border-radius-sm) 0 0;
+    transition: all var(--transition-fast);
+    font-weight: 500;
+}
+
+.tab-link:hover {
+    color: var(--text-primary);
+    background: var(--bg-tertiary);
+}
+
+.tab-link.active {
+    color: var(--accent-primary);
+    background: var(--accent-light);
+    border-bottom: 2px solid var(--accent-primary);
+}
+</style>
+
+<script>
+const DOMAIN_ID = {{ domain.id }};
+
+async function loadWAFStats() {
+    // TODO: Load real stats from API
+    document.getElementById('blocked-today').textContent = '142';
+    document.getElementById('active-rules').textContent = '8';
+}
+
+async function loadWAFRules() {
+    try {
+        const response = await fetch(`/api/v1/domains/${DOMAIN_ID}/waf/rules`);
+        const data = await response.json();
+        
+        const list = document.getElementById('waf-rules-list');
+        
+        if (data.length === 0) {
+            list.innerHTML = `
+                <div style="text-align: center; padding: 40px; color: var(--text-muted);">
+                    <i class="fas fa-shield-alt" style="font-size: 48px; margin-bottom: 16px; opacity: 0.3;"></i>
+                    <p>No WAF rules configured yet</p>
+                    <button class="btn btn-primary mt-2" onclick="showAddWAFRuleModal()">
+                        <i class="fas fa-plus"></i> Add Your First Rule
+                    </button>
+                </div>
+            `;
+            return;
+        }
+        
+        list.innerHTML = data.map(rule => `
+            <div class="glass-card-sm mb-2">
+                <div class="flex-between">
+                    <div style="flex: 1;">
+                        <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 8px;">
+                            <span class="badge ${rule.enabled ? 'badge-success' : 'badge-secondary'}">
+                                ${rule.enabled ? 'Enabled' : 'Disabled'}
+                            </span>
+                            <span class="badge badge-primary">${rule.action}</span>
+                            <span style="font-weight: 600;">${rule.name}</span>
+                        </div>
+                        <p style="font-size: 13px; color: var(--text-secondary); margin: 0;">
+                            ${rule.description || 'No description'}
+                        </p>
+                        <div style="font-size: 12px; color: var(--text-muted); margin-top: 8px;">
+                            Priority: ${rule.priority}
+                        </div>
+                    </div>
+                    <div style="display: flex; gap: 8px;">
+                        <button class="btn btn-secondary btn-sm" onclick="editWAFRule(${rule.id})">
+                            <i class="fas fa-edit"></i>
+                        </button>
+                        <button class="btn btn-error btn-sm" onclick="deleteWAFRule(${rule.id})">
+                            <i class="fas fa-trash"></i>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        `).join('');
+    } catch (error) {
+        console.error('Error loading WAF rules:', error);
+        showNotification('Failed to load WAF rules', 'error');
+    }
+}
+
+async function loadRateLimits() {
+    try {
+        const response = await fetch(`/api/v1/domains/${DOMAIN_ID}/security/rate-limits`);
+        const data = await response.json();
+        
+        const list = document.getElementById('rate-limits-list');
+        
+        if (data.length === 0) {
+            list.innerHTML = `
+                <div style="text-align: center; padding: 40px; color: var(--text-muted);">
+                    <i class="fas fa-tachometer-alt" style="font-size: 48px; margin-bottom: 16px; opacity: 0.3;"></i>
+                    <p>No rate limits configured yet</p>
+                </div>
+            `;
+            return;
+        }
+        
+        list.innerHTML = data.map(limit => `
+            <div class="glass-card-sm mb-2">
+                <div class="flex-between">
+                    <div style="flex: 1;">
+                        <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 8px;">
+                            <span class="badge ${limit.enabled ? 'badge-success' : 'badge-secondary'}">
+                                ${limit.enabled ? 'Enabled' : 'Disabled'}
+                            </span>
+                            <span style="font-weight: 600;">${limit.name}</span>
+                        </div>
+                        <p style="font-size: 13px; color: var(--text-secondary); margin: 0;">
+                            ${limit.limit_value} requests per ${limit.interval_seconds}s
+                        </p>
+                    </div>
+                    <div style="display: flex; gap: 8px;">
+                        <button class="btn btn-secondary btn-sm" onclick="editRateLimit(${limit.id})">
+                            <i class="fas fa-edit"></i>
+                        </button>
+                        <button class="btn btn-error btn-sm" onclick="deleteRateLimit(${limit.id})">
+                            <i class="fas fa-trash"></i>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        `).join('');
+    } catch (error) {
+        console.error('Error loading rate limits:', error);
+        showNotification('Failed to load rate limits', 'error');
+    }
+}
+
+async function loadIPRules() {
+    try {
+        const response = await fetch(`/api/v1/domains/${DOMAIN_ID}/security/ip-rules`);
+        const data = await response.json();
+        
+        const list = document.getElementById('ip-rules-list');
+        
+        if (data.length === 0) {
+            list.innerHTML = `
+                <div style="text-align: center; padding: 40px; color: var(--text-muted);">
+                    <i class="fas fa-ban" style="font-size: 48px; margin-bottom: 16px; opacity: 0.3;"></i>
+                    <p>No IP rules configured yet</p>
+                </div>
+            `;
+            return;
+        }
+        
+        list.innerHTML = data.map(rule => `
+            <div class="glass-card-sm mb-2">
+                <div class="flex-between">
+                    <div style="flex: 1;">
+                        <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 8px;">
+                            <span class="badge ${rule.rule_type === 'whitelist' ? 'badge-success' : 'badge-error'}">
+                                ${rule.rule_type}
+                            </span>
+                            <span style="font-weight: 600; font-family: monospace;">${rule.ip_address}</span>
+                        </div>
+                        <p style="font-size: 13px; color: var(--text-secondary); margin: 0;">
+                            ${rule.description || 'No description'}
+                        </p>
+                    </div>
+                    <div style="display: flex; gap: 8px;">
+                        <button class="btn btn-secondary btn-sm" onclick="editIPRule(${rule.id})">
+                            <i class="fas fa-edit"></i>
+                        </button>
+                        <button class="btn btn-error btn-sm" onclick="deleteIPRule(${rule.id})">
+                            <i class="fas fa-trash"></i>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        `).join('');
+    } catch (error) {
+        console.error('Error loading IP rules:', error);
+        showNotification('Failed to load IP rules', 'error');
+    }
+}
+
+// Initialize
+document.addEventListener('DOMContentLoaded', () => {
+    loadWAFStats();
+    loadWAFRules();
+    loadRateLimits();
+    loadIPRules();
+});
+</script>
+{% endblock %}

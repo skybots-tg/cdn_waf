@@ -72,3 +72,41 @@ async def domain_settings_page(request: Request, domain_id: int):
     })
 
 
+@router.get("/domains/{domain_id}/waf", response_class=HTMLResponse)
+async def domain_waf_page(request: Request, domain_id: int):
+    """Domain WAF page"""
+    return templates.TemplateResponse("domain_waf.html", {
+        "request": request,
+        "user": {"email": "user@example.com"},
+        "domain": {"id": domain_id, "name": "example.com"}  # TODO: Get real domain
+    })
+
+
+@router.get("/domains/{domain_id}/analytics", response_class=HTMLResponse)
+async def domain_analytics_page(request: Request, domain_id: int):
+    """Domain analytics page"""
+    return templates.TemplateResponse("domain_analytics.html", {
+        "request": request,
+        "user": {"email": "user@example.com"},
+        "domain": {"id": domain_id, "name": "example.com"}  # TODO: Get real domain
+    })
+
+
+@router.get("/analytics", response_class=HTMLResponse)
+async def global_analytics_page(request: Request):
+    """Global analytics page"""
+    return templates.TemplateResponse("analytics.html", {
+        "request": request,
+        "user": {"email": "user@example.com"}  # TODO: Get real user
+    })
+
+
+@router.get("/settings", response_class=HTMLResponse)
+async def settings_page(request: Request):
+    """User settings page"""
+    return templates.TemplateResponse("settings.html", {
+        "request": request,
+        "user": {"email": "user@example.com"}  # TODO: Get real user
+    })
+
+

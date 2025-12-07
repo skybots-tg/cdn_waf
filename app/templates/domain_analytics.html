@@ -1,0 +1,431 @@
+{% extends "base.html" %}
+
+{% block title %}{{ domain.name }} - Analytics - CDN WAF{% endblock %}
+
+{% block content %}
+<div class="container" style="padding: 32px 24px;">
+    <!-- Domain Header -->
+    <div class="flex-between mb-4">
+        <div>
+            <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 8px;">
+                <a href="/domains" style="color: var(--text-secondary); text-decoration: none;">
+                    <i class="fas fa-arrow-left"></i>
+                </a>
+                <h1 style="font-size: 32px; font-weight: 700;">{{ domain.name }}</h1>
+                <span class="badge badge-success">Active</span>
+            </div>
+            <p style="color: var(--text-secondary); font-size: 14px;">
+                Traffic analytics and performance metrics
+            </p>
+        </div>
+        <div style="display: flex; gap: 12px;">
+            <select class="form-select" id="time-range" style="max-width: 200px;">
+                <option value="1h">Last Hour</option>
+                <option value="24h" selected>Last 24 Hours</option>
+                <option value="7d">Last 7 Days</option>
+                <option value="30d">Last 30 Days</option>
+            </select>
+            <button class="btn btn-secondary" onclick="exportData()">
+                <i class="fas fa-download"></i> Export
+            </button>
+        </div>
+    </div>
+
+    <!-- Tabs -->
+    <div class="tabs mb-4">
+        <a href="/domains/{{ domain.id }}/dns" class="tab-link">
+            <i class="fas fa-globe"></i> DNS
+        </a>
+        <a href="/domains/{{ domain.id }}/settings" class="tab-link">
+            <i class="fas fa-cog"></i> Settings
+        </a>
+        <a href="/domains/{{ domain.id }}/waf" class="tab-link">
+            <i class="fas fa-shield-alt"></i> WAF
+        </a>
+        <a href="/domains/{{ domain.id }}/analytics" class="tab-link active">
+            <i class="fas fa-chart-line"></i> Analytics
+        </a>
+    </div>
+
+    <!-- Key Metrics -->
+    <div class="grid grid-4 gap-3 mb-4">
+        <div class="glass-card">
+            <div style="font-size: 14px; color: var(--text-secondary); margin-bottom: 8px;">
+                <i class="fas fa-exchange-alt"></i> Total Requests
+            </div>
+            <div style="font-size: 28px; font-weight: 700;" id="total-requests">-</div>
+            <div style="font-size: 12px; color: var(--text-muted); margin-top: 4px;" id="requests-change">-</div>
+        </div>
+
+        <div class="glass-card">
+            <div style="font-size: 14px; color: var(--text-secondary); margin-bottom: 8px;">
+                <i class="fas fa-database"></i> Bandwidth
+            </div>
+            <div style="font-size: 28px; font-weight: 700;" id="total-bandwidth">-</div>
+            <div style="font-size: 12px; color: var(--text-muted); margin-top: 4px;" id="bandwidth-change">-</div>
+        </div>
+
+        <div class="glass-card">
+            <div style="font-size: 14px; color: var(--text-secondary); margin-bottom: 8px;">
+                <i class="fas fa-bolt"></i> Cache Hit Ratio
+            </div>
+            <div style="font-size: 28px; font-weight: 700; color: var(--success);" id="cache-ratio">-</div>
+            <div style="font-size: 12px; color: var(--text-muted); margin-top: 4px;" id="cache-change">-</div>
+        </div>
+
+        <div class="glass-card">
+            <div style="font-size: 14px; color: var(--text-secondary); margin-bottom: 8px;">
+                <i class="fas fa-shield-alt"></i> Threats Blocked
+            </div>
+            <div style="font-size: 28px; font-weight: 700; color: var(--error);" id="threats-blocked">-</div>
+            <div style="font-size: 12px; color: var(--text-muted); margin-top: 4px;" id="threats-change">-</div>
+        </div>
+    </div>
+
+    <!-- Main Chart -->
+    <div class="glass-card mb-4">
+        <div class="flex-between mb-3">
+            <h2 style="font-size: 20px; font-weight: 600;">Traffic Overview</h2>
+            <div class="flex gap-2">
+                <button class="btn btn-sm ${chartMetric === 'requests' ? 'btn-primary' : 'btn-secondary'}" onclick="changeChartMetric('requests')">
+                    Requests
+                </button>
+                <button class="btn btn-sm ${chartMetric === 'bandwidth' ? 'btn-primary' : 'btn-secondary'}" onclick="changeChartMetric('bandwidth')">
+                    Bandwidth
+                </button>
+            </div>
+        </div>
+        <div id="traffic-chart" style="height: 300px; display: flex; align-items: center; justify-content: center; color: var(--text-muted);">
+            <i class="fas fa-spinner fa-spin"></i> Loading chart...
+        </div>
+    </div>
+
+    <!-- Response Status Codes -->
+    <div class="grid grid-2 gap-3 mb-4">
+        <div class="glass-card">
+            <h3 style="font-size: 18px; font-weight: 600; margin-bottom: 16px;">
+                <i class="fas fa-check-circle"></i> Response Status
+            </h3>
+            <div id="status-codes">
+                <div class="flex-between mb-2">
+                    <span style="color: var(--text-secondary);">2xx Success</span>
+                    <span style="font-weight: 600; color: var(--success);" id="status-2xx">-</span>
+                </div>
+                <div class="flex-between mb-2">
+                    <span style="color: var(--text-secondary);">3xx Redirect</span>
+                    <span style="font-weight: 600; color: var(--info);" id="status-3xx">-</span>
+                </div>
+                <div class="flex-between mb-2">
+                    <span style="color: var(--text-secondary);">4xx Client Error</span>
+                    <span style="font-weight: 600; color: var(--warning);" id="status-4xx">-</span>
+                </div>
+                <div class="flex-between">
+                    <span style="color: var(--text-secondary);">5xx Server Error</span>
+                    <span style="font-weight: 600; color: var(--error);" id="status-5xx">-</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="glass-card">
+            <h3 style="font-size: 18px; font-weight: 600; margin-bottom: 16px;">
+                <i class="fas fa-server"></i> Cache Performance
+            </h3>
+            <div id="cache-stats">
+                <div class="flex-between mb-2">
+                    <span style="color: var(--text-secondary);">Cache Hits</span>
+                    <span style="font-weight: 600; color: var(--success);" id="cache-hits">-</span>
+                </div>
+                <div class="flex-between mb-2">
+                    <span style="color: var(--text-secondary);">Cache Misses</span>
+                    <span style="font-weight: 600; color: var(--warning);" id="cache-misses">-</span>
+                </div>
+                <div class="flex-between">
+                    <span style="color: var(--text-secondary);">Cache Bypass</span>
+                    <span style="font-weight: 600; color: var(--text-muted);" id="cache-bypass">-</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Top Content -->
+    <div class="grid grid-2 gap-3 mb-4">
+        <div class="glass-card">
+            <h3 style="font-size: 18px; font-weight: 600; margin-bottom: 16px;">
+                <i class="fas fa-fire"></i> Top Pages
+            </h3>
+            <div id="top-pages">
+                <p style="text-align: center; color: var(--text-muted); padding: 24px;">
+                    <i class="fas fa-spinner fa-spin"></i> Loading...
+                </p>
+            </div>
+        </div>
+
+        <div class="glass-card">
+            <h3 style="font-size: 18px; font-weight: 600; margin-bottom: 16px;">
+                <i class="fas fa-exclamation-triangle"></i> Top Errors
+            </h3>
+            <div id="top-errors">
+                <p style="text-align: center; color: var(--text-muted); padding: 24px;">
+                    <i class="fas fa-spinner fa-spin"></i> Loading...
+                </p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Geographic Distribution -->
+    <div class="glass-card mb-4">
+        <h3 style="font-size: 18px; font-weight: 600; margin-bottom: 16px;">
+            <i class="fas fa-globe"></i> Geographic Distribution
+        </h3>
+        <div id="geo-distribution">
+            <p style="text-align: center; color: var(--text-muted); padding: 32px;">
+                <i class="fas fa-spinner fa-spin"></i> Loading...
+            </p>
+        </div>
+    </div>
+
+    <!-- Recent Logs -->
+    <div class="glass-card">
+        <div class="flex-between mb-3">
+            <h3 style="font-size: 18px; font-weight: 600;">
+                <i class="fas fa-file-alt"></i> Recent Requests
+            </h3>
+            <button class="btn btn-secondary btn-sm" onclick="viewFullLogs()">
+                <i class="fas fa-eye"></i> View All Logs
+            </button>
+        </div>
+        <div id="recent-logs">
+            <p style="text-align: center; color: var(--text-muted); padding: 32px;">
+                <i class="fas fa-spinner fa-spin"></i> Loading...
+            </p>
+        </div>
+    </div>
+</div>
+
+<style>
+.tabs {
+    display: flex;
+    gap: 8px;
+    border-bottom: 2px solid var(--glass-border);
+    padding-bottom: 4px;
+}
+
+.tab-link {
+    padding: 12px 20px;
+    color: var(--text-secondary);
+    text-decoration: none;
+    border-radius: var(--border-radius-sm) var(--border-radius-sm) 0 0;
+    transition: all var(--transition-fast);
+    font-weight: 500;
+}
+
+.tab-link:hover {
+    color: var(--text-primary);
+    background: var(--bg-tertiary);
+}
+
+.tab-link.active {
+    color: var(--accent-primary);
+    background: var(--accent-light);
+    border-bottom: 2px solid var(--accent-primary);
+}
+</style>
+
+<script>
+const DOMAIN_ID = {{ domain.id }};
+let chartMetric = 'requests';
+
+async function loadAnalytics() {
+    const timeRange = document.getElementById('time-range').value;
+    
+    try {
+        // Load key metrics
+        const statsResponse = await fetch(`/api/v1/domains/${DOMAIN_ID}/stats/basic?range=${timeRange}`);
+        const stats = await statsResponse.json();
+        
+        document.getElementById('total-requests').textContent = formatNumber(stats.total_requests || 0);
+        document.getElementById('total-bandwidth').textContent = formatBytes(stats.total_bandwidth || 0);
+        document.getElementById('cache-ratio').textContent = `${stats.cache_hit_ratio || 0}%`;
+        document.getElementById('threats-blocked').textContent = formatNumber(stats.threats_blocked || 0);
+        
+        // Load status codes
+        document.getElementById('status-2xx').textContent = formatNumber(stats.status_2xx || 0);
+        document.getElementById('status-3xx').textContent = formatNumber(stats.status_3xx || 0);
+        document.getElementById('status-4xx').textContent = formatNumber(stats.status_4xx || 0);
+        document.getElementById('status-5xx').textContent = formatNumber(stats.status_5xx || 0);
+        
+        // Load cache stats
+        document.getElementById('cache-hits').textContent = formatNumber(stats.cache_hits || 0);
+        document.getElementById('cache-misses').textContent = formatNumber(stats.cache_misses || 0);
+        document.getElementById('cache-bypass').textContent = formatNumber(stats.cache_bypass || 0);
+        
+    } catch (error) {
+        console.error('Error loading analytics:', error);
+        showNotification('Failed to load analytics data', 'error');
+    }
+}
+
+async function loadTopPages() {
+    try {
+        const response = await fetch(`/api/v1/domains/${DOMAIN_ID}/stats/top_paths?limit=10`);
+        const data = await response.json();
+        
+        const container = document.getElementById('top-pages');
+        
+        if (data.length === 0) {
+            container.innerHTML = '<p style="text-align: center; color: var(--text-muted); padding: 24px;">No data available</p>';
+            return;
+        }
+        
+        container.innerHTML = data.map((item, index) => `
+            <div class="flex-between mb-2" style="padding: 8px 0; border-bottom: 1px solid var(--glass-border);">
+                <div style="flex: 1;">
+                    <span style="color: var(--text-muted); margin-right: 8px;">${index + 1}.</span>
+                    <span style="font-family: monospace; font-size: 13px;">${item.path}</span>
+                </div>
+                <span style="font-weight: 600;">${formatNumber(item.requests)}</span>
+            </div>
+        `).join('');
+    } catch (error) {
+        console.error('Error loading top pages:', error);
+    }
+}
+
+async function loadGeoDistribution() {
+    try {
+        const response = await fetch(`/api/v1/domains/${DOMAIN_ID}/stats/geo`);
+        const data = await response.json();
+        
+        const container = document.getElementById('geo-distribution');
+        
+        if (data.length === 0) {
+            container.innerHTML = '<p style="text-align: center; color: var(--text-muted); padding: 24px;">No data available</p>';
+            return;
+        }
+        
+        container.innerHTML = data.map((item, index) => `
+            <div class="flex-between mb-2" style="padding: 8px 0; border-bottom: 1px solid var(--glass-border);">
+                <div>
+                    <span style="color: var(--text-muted); margin-right: 8px;">${index + 1}.</span>
+                    <span style="font-weight: 500;">${item.country}</span>
+                </div>
+                <div style="display: flex; align-items: center; gap: 16px;">
+                    <span style="font-size: 13px; color: var(--text-secondary);">${item.percentage}%</span>
+                    <span style="font-weight: 600;">${formatNumber(item.requests)}</span>
+                </div>
+            </div>
+        `).join('');
+    } catch (error) {
+        console.error('Error loading geo distribution:', error);
+    }
+}
+
+async function loadRecentLogs() {
+    try {
+        const response = await fetch(`/api/v1/domains/${DOMAIN_ID}/logs?limit=10`);
+        const data = await response.json();
+        
+        const container = document.getElementById('recent-logs');
+        
+        if (data.length === 0) {
+            container.innerHTML = '<p style="text-align: center; color: var(--text-muted); padding: 24px;">No logs available</p>';
+            return;
+        }
+        
+        container.innerHTML = `
+            <div style="overflow-x: auto;">
+                <table style="width: 100%; font-size: 13px;">
+                    <thead>
+                        <tr style="border-bottom: 2px solid var(--glass-border);">
+                            <th style="text-align: left; padding: 8px; color: var(--text-secondary);">Time</th>
+                            <th style="text-align: left; padding: 8px; color: var(--text-secondary);">Method</th>
+                            <th style="text-align: left; padding: 8px; color: var(--text-secondary);">Path</th>
+                            <th style="text-align: center; padding: 8px; color: var(--text-secondary);">Status</th>
+                            <th style="text-align: left; padding: 8px; color: var(--text-secondary);">IP</th>
+                            <th style="text-align: right; padding: 8px; color: var(--text-secondary);">Size</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${data.map(log => `
+                            <tr style="border-bottom: 1px solid var(--glass-border);">
+                                <td style="padding: 8px; color: var(--text-muted); white-space: nowrap;">${formatTime(log.timestamp)}</td>
+                                <td style="padding: 8px;">
+                                    <span class="badge badge-secondary">${log.method}</span>
+                                </td>
+                                <td style="padding: 8px; font-family: monospace; max-width: 300px; overflow: hidden; text-overflow: ellipsis;">${log.path}</td>
+                                <td style="padding: 8px; text-align: center;">
+                                    <span class="badge ${getStatusBadgeClass(log.status)}">${log.status}</span>
+                                </td>
+                                <td style="padding: 8px; font-family: monospace; font-size: 12px;">${log.client_ip}</td>
+                                <td style="padding: 8px; text-align: right; color: var(--text-secondary);">${formatBytes(log.bytes_sent)}</td>
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                </table>
+            </div>
+        `;
+    } catch (error) {
+        console.error('Error loading recent logs:', error);
+    }
+}
+
+function formatNumber(num) {
+    if (num >= 1000000) return (num / 1000000).toFixed(1) + 'M';
+    if (num >= 1000) return (num / 1000).toFixed(1) + 'K';
+    return num.toString();
+}
+
+function formatBytes(bytes) {
+    if (bytes >= 1073741824) return (bytes / 1073741824).toFixed(2) + ' GB';
+    if (bytes >= 1048576) return (bytes / 1048576).toFixed(2) + ' MB';
+    if (bytes >= 1024) return (bytes / 1024).toFixed(2) + ' KB';
+    return bytes + ' B';
+}
+
+function formatTime(timestamp) {
+    const date = new Date(timestamp);
+    const now = new Date();
+    const diff = (now - date) / 1000; // seconds
+    
+    if (diff < 60) return 'Just now';
+    if (diff < 3600) return Math.floor(diff / 60) + 'm ago';
+    if (diff < 86400) return Math.floor(diff / 3600) + 'h ago';
+    
+    return date.toLocaleString();
+}
+
+function getStatusBadgeClass(status) {
+    if (status >= 200 && status < 300) return 'badge-success';
+    if (status >= 300 && status < 400) return 'badge-info';
+    if (status >= 400 && status < 500) return 'badge-warning';
+    if (status >= 500) return 'badge-error';
+    return 'badge-secondary';
+}
+
+function changeChartMetric(metric) {
+    chartMetric = metric;
+    // TODO: Update chart
+}
+
+function exportData() {
+    showNotification('Exporting data...', 'info');
+    // TODO: Implement export
+}
+
+function viewFullLogs() {
+    showNotification('Opening full logs view...', 'info');
+    // TODO: Implement full logs view
+}
+
+// Initialize
+document.addEventListener('DOMContentLoaded', () => {
+    loadAnalytics();
+    loadTopPages();
+    loadGeoDistribution();
+    loadRecentLogs();
+    
+    // Listen for time range changes
+    document.getElementById('time-range').addEventListener('change', loadAnalytics);
+});
+</script>
+{% endblock %}
