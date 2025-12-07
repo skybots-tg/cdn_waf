@@ -20,6 +20,29 @@ async def create_tables():
     logger.info("Database tables created successfully")
 
 
+async def migrate_schema():
+    """Run manual schema migrations"""
+    try:
+        async with AsyncSessionLocal() as session:
+            # Check if ssh_host column exists in edge_nodes
+            try:
+                # Try to select the column
+                await session.execute(text("SELECT ssh_host FROM edge_nodes LIMIT 1"))
+            except Exception:
+                # Column doesn't exist, add it and others
+                logger.info("Migrating edge_nodes table schema...")
+                await session.execute(text("ALTER TABLE edge_nodes ADD COLUMN ssh_host VARCHAR(255)"))
+                await session.execute(text("ALTER TABLE edge_nodes ADD COLUMN ssh_port INTEGER DEFAULT 22"))
+                await session.execute(text("ALTER TABLE edge_nodes ADD COLUMN ssh_user VARCHAR(255)"))
+                await session.execute(text("ALTER TABLE edge_nodes ADD COLUMN ssh_key TEXT"))
+                await session.commit()
+                logger.info("Schema migration completed")
+            else:
+                logger.info("Schema is up to date")
+    except Exception as e:
+        logger.error(f"Schema migration error: {e}")
+
+
 async def seed_data():
     """Seed initial data"""
     try:
@@ -97,6 +120,9 @@ async def init_system():
         await create_tables()
     except Exception as e:
         logger.warning(f"Table creation warning (may already exist): {e}")
+
+    # Run manual migrations
+    await migrate_schema()
 
     # Seed initial data
     await seed_data()

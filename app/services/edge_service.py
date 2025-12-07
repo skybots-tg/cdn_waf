@@ -1,6 +1,7 @@
 """Edge node management service"""
 import asyncio
 import logging
+import re
 from typing import List, Optional, Dict, Any
 from datetime import datetime, timedelta
 from sqlalchemy import select, func, or_
@@ -66,11 +67,12 @@ class EdgeNodeService:
             city=node_data.city,
             datacenter=node_data.datacenter,
             enabled=node_data.enabled,
-            status="unknown"
+            status="unknown",
+            ssh_host=node_data.ssh_host or node_data.ip_address,
+            ssh_port=node_data.ssh_port,
+            ssh_user=node_data.ssh_user,
+            ssh_key=node_data.ssh_key
         )
-        
-        # Сохранить SSH конфигурацию в отдельной таблице (TODO)
-        # Пока просто создаем ноду
         
         db.add(node)
         await db.commit()
@@ -143,14 +145,46 @@ class EdgeNodeService:
     @staticmethod
     async def check_node_health(node: EdgeNode) -> Dict[str, Any]:
         """Check edge node health via SSH"""
-        # TODO: Implement SSH connection and health check
-        # For now, return mock data
-        return {
-            "status": "online",
-            "cpu_usage": 25.5,
-            "memory_usage": 45.2,
-            "disk_usage": 30.1
-        }
+        # Define commands to run
+        commands = [
+            # Check CPU: grep 'cpu ' /proc/stat | awk '{usage=($2+$4)*100/($2+$4+$5)} END {print usage}'
+            "grep 'cpu ' /proc/stat | awk '{usage=($2+$4)*100/($2+$4+$5)} END {print usage}'",
+            # Check Memory: free | grep Mem | awk '{print $3/$2 * 100.0}'
+            "free | grep Mem | awk '{print $3/$2 * 100.0}'",
+            # Check Disk: df -h / | tail -1 | awk '{print $5}' | sed 's/%//'
+            "df -h / | tail -1 | awk '{print $5}' | sed 's/%//'"
+        ]
+        
+        try:
+            results = []
+            for cmd in commands:
+                result = await EdgeNodeService.execute_command(node, cmd)
+                if result.success:
+                    results.append(result.stdout.strip())
+                else:
+                    results.append(None)
+            
+            # Parse results
+            cpu_usage = float(results[0]) if results[0] else None
+            memory_usage = float(results[1]) if results[1] else None
+            disk_usage = float(results[2]) if results[2] else None
+            
+            # Update status based on success
+            status = "online" if all(x is not None for x in results) else "offline"
+            
+            return {
+                "status": status,
+                "cpu_usage": cpu_usage,
+                "memory_usage": memory_usage,
+                "disk_usage": disk_usage
+            }
+            
+        except Exception as e:
+            logger.error(f"Health check failed for {node.name}: {e}")
+            return {
+                "status": "offline",
+                "error": str(e)
+            }
     
     @staticmethod
     async def execute_command(
@@ -159,36 +193,47 @@ class EdgeNodeService:
         timeout: int = 30
     ) -> EdgeNodeCommandResult:
         """Execute command on edge node via SSH"""
-        # TODO: Get SSH credentials from secure storage
-        ssh_host = node.ip_address  # или из конфига
-        ssh_port = 22
-        ssh_user = "root"
+        ssh_host = node.ssh_host or node.ip_address
+        ssh_port = node.ssh_port or 22
+        ssh_user = node.ssh_user or "root"
+        ssh_key = node.ssh_key
         
+        if not ssh_key:
+             return EdgeNodeCommandResult(
+                success=False,
+                stdout="",
+                stderr="SSH key not configured for this node",
+                exit_code=1,
+                execution_time=0.0
+            )
+
         try:
             start_time = datetime.utcnow()
             
-            # В реальной реализации использовать asyncssh
-            # async with asyncssh.connect(
-            #     ssh_host,
-            #     port=ssh_port,
-            #     username=ssh_user,
-            #     client_keys=['path/to/key'],
-            #     known_hosts=None
-            # ) as conn:
-            #     result = await conn.run(command, timeout=timeout)
-            
-            # Mock implementation
-            await asyncio.sleep(0.5)
-            
-            execution_time = (datetime.utcnow() - start_time).total_seconds()
-            
-            return EdgeNodeCommandResult(
-                success=True,
-                stdout="Command executed successfully (mock)",
-                stderr="",
-                exit_code=0,
-                execution_time=execution_time
-            )
+            # Import asyncssh locally to ensure it is available
+            import asyncssh
+
+            # Create a temporary key object
+            client_keys = [asyncssh.import_private_key(ssh_key)]
+
+            async with asyncssh.connect(
+                ssh_host,
+                port=ssh_port,
+                username=ssh_user,
+                client_keys=client_keys,
+                known_hosts=None  # Security: In production, manage known_hosts!
+            ) as conn:
+                result = await conn.run(command, timeout=timeout)
+                
+                execution_time = (datetime.utcnow() - start_time).total_seconds()
+                
+                return EdgeNodeCommandResult(
+                    success=result.exit_status == 0,
+                    stdout=result.stdout,
+                    stderr=result.stderr,
+                    exit_code=result.exit_status,
+                    execution_time=execution_time
+                )
             
         except Exception as e:
             logger.error(f"Failed to execute command on node {node.name}: {e}")
@@ -206,13 +251,44 @@ class EdgeNodeService:
         component: str
     ) -> EdgeComponentStatus:
         """Get status of component on edge node"""
-        # TODO: Implement via SSH
+        # Command to check if service is running
+        cmd = f"systemctl is-active {component}"
+        result = await EdgeNodeService.execute_command(node, cmd)
+        
+        running = result.success and result.stdout.strip() == "active"
+        status_text = result.stdout.strip() if result.success else "unknown"
+        
+        # Check version if running
+        version = None
+        if running:
+            version_cmd = ""
+            if component == "nginx":
+                version_cmd = "nginx -v 2>&1 | cut -d '/' -f 2"
+            elif component == "redis":
+                version_cmd = "redis-server -v | awk '{print $3}' | cut -d= -f2"
+            
+            if version_cmd:
+                v_res = await EdgeNodeService.execute_command(node, version_cmd)
+                if v_res.success:
+                    version = v_res.stdout.strip()
+        
+        # Check if installed
+        installed = running
+        if not installed:
+            # Try to check via which/command -v
+            check_cmd = f"command -v {component}"
+            if component == "redis":
+                check_cmd = "command -v redis-server"
+                
+            c_res = await EdgeNodeService.execute_command(node, check_cmd)
+            installed = c_res.success
+        
         return EdgeComponentStatus(
             component=component,
-            installed=True,
-            running=True,
-            version="1.0.0",
-            status_text="running"
+            installed=installed,
+            running=running,
+            version=version,
+            status_text=status_text
         )
     
     @staticmethod
@@ -233,10 +309,10 @@ class EdgeNodeService:
                 "update": "apt-get update && apt-get upgrade -y nginx"
             },
             "redis": {
-                "start": "systemctl start redis",
-                "stop": "systemctl stop redis",
-                "restart": "systemctl restart redis",
-                "status": "systemctl status redis",
+                "start": "systemctl start redis-server",  # Usually redis-server
+                "stop": "systemctl stop redis-server",
+                "restart": "systemctl restart redis-server",
+                "status": "systemctl status redis-server",
                 "install": "apt-get update && apt-get install -y redis-server"
             },
             "certbot": {

@@ -1,6 +1,6 @@
 """Edge node models"""
 from datetime import datetime
-from sqlalchemy import Column, Integer, String, DateTime, Boolean, Float
+from sqlalchemy import Column, Integer, String, DateTime, Boolean, Float, Text
 from sqlalchemy.orm import relationship
 
 from app.core.database import Base
@@ -23,6 +23,12 @@ class EdgeNode(Base):
     city = Column(String(100), nullable=True)
     datacenter = Column(String(255), nullable=True)
     
+    # SSH Configuration
+    ssh_host = Column(String(255), nullable=True)
+    ssh_port = Column(Integer, default=22, nullable=True)
+    ssh_user = Column(String(255), nullable=True)
+    ssh_key = Column(Text, nullable=True)  # Private key
+    
     # Status
     enabled = Column(Boolean, default=True, nullable=False)
     status = Column(String(20), default="unknown", nullable=False)  # online, offline, maintenance
@@ -40,4 +46,6 @@ class EdgeNode(Base):
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
-
+    @property
+    def has_ssh_key(self) -> bool:
+        return bool(self.ssh_key)
