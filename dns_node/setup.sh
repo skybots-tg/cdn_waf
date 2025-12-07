@@ -197,6 +197,15 @@ EOF
             fi
         fi
     fi
+    
+    # Run migrations
+    if [[ -x "${APP_DIR}/venv/bin/alembic" ]]; then
+        log "Running database migrations..."
+        cd "${APP_DIR}"
+        "${APP_DIR}/venv/bin/alembic" upgrade head || warn "Migration failed, check logs."
+    else
+        warn "Alembic not found, skipping migrations."
+    fi
 }
 
 deploy_code() {
