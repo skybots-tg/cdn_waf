@@ -18,6 +18,7 @@ from app.core.config import settings
 from app.models.domain import Domain, DomainStatus
 from app.models.dns import DNSRecord as DNSModel
 from app.models.edge_node import EdgeNode
+from app.models.dns_node import DNSNode
 
 # Configure logging
 logging.basicConfig(
@@ -43,6 +44,13 @@ class DBResolver(BaseResolver):
         self.admin_email = "admin.yourcdn.ru"
         self.ttl = 300
         
+    def get_nameservers(self, db: Session) -> List[str]:
+        """Get hostnames of active DNS nodes"""
+        nodes = db.execute(
+            select(DNSNode).where(DNSNode.enabled == True)
+        ).scalars().all()
+        return [node.hostname for node in nodes]
+
     def get_edge_nodes_ips(self, db: Session) -> List[str]:
         """Get IPs of active edge nodes"""
         nodes = db.execute(
@@ -105,12 +113,15 @@ class DBResolver(BaseResolver):
             
             # Handle SOA
             if qtype_name == "SOA":
+                ns_list = self.get_nameservers(db)
+                primary_ns = ns_list[0] if ns_list else self.ns1
+                
                 reply.add_answer(RR(
                     qname,
                     QTYPE.SOA,
                     ttl=self.ttl,
                     rdata=SOA(
-                        mname=self.ns1,
+                        mname=primary_ns,
                         rname=self.admin_email,
                         serial=int(datetime.utcnow().strftime("%Y%m%d%H")),
                         refresh=3600,
@@ -123,8 +134,13 @@ class DBResolver(BaseResolver):
 
             # Handle NS for apex
             if qtype_name == "NS" and record_name == "@":
-                reply.add_answer(RR(qname, QTYPE.NS, ttl=self.ttl, rdata=NS(self.ns1)))
-                reply.add_answer(RR(qname, QTYPE.NS, ttl=self.ttl, rdata=NS(self.ns2)))
+                ns_list = self.get_nameservers(db)
+                if ns_list:
+                    for ns in ns_list:
+                         reply.add_answer(RR(qname, QTYPE.NS, ttl=self.ttl, rdata=NS(ns)))
+                else:
+                    reply.add_answer(RR(qname, QTYPE.NS, ttl=self.ttl, rdata=NS(self.ns1)))
+                    reply.add_answer(RR(qname, QTYPE.NS, ttl=self.ttl, rdata=NS(self.ns2)))
                 return reply
 
             # Look for records

@@ -58,11 +58,18 @@ async def domains_page(request: Request):
 
 
 @router.get("/domains/add", response_class=HTMLResponse)
-async def add_domain_page(request: Request):
+async def add_domain_page(request: Request, db: AsyncSession = Depends(get_db)):
     """Add domain page"""
+    from app.services.dns_node_service import DNSNodeService
+    
+    # Get enabled DNS nodes
+    nodes = await DNSNodeService.get_nodes(db, limit=100)
+    dns_nodes = [node.hostname for node in nodes if node.enabled]
+
     return templates.TemplateResponse("domain_add.html", {
         "request": request,
-        "user": get_mock_user(request)
+        "user": get_mock_user(request),
+        "dns_nodes": dns_nodes
     })
 
 

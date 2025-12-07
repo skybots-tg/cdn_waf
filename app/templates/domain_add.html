@@ -113,18 +113,20 @@
             </p>
             
             <div style="background: var(--bg-tertiary); padding: 16px; border-radius: var(--border-radius-sm); margin-bottom: 16px;">
-                <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 12px;">
-                    <code style="font-size: 16px; font-weight: 600; color: var(--accent-primary);">ns1.yourcdn.ru</code>
-                    <button class="btn btn-secondary btn-sm" onclick="copyToClipboard('ns1.yourcdn.ru')">
-                        <i class="fas fa-copy"></i>
-                    </button>
-                </div>
-                <div style="display: flex; align-items: center; gap: 12px;">
-                    <code style="font-size: 16px; font-weight: 600; color: var(--accent-primary);">ns2.yourcdn.ru</code>
-                    <button class="btn btn-secondary btn-sm" onclick="copyToClipboard('ns2.yourcdn.ru')">
-                        <i class="fas fa-copy"></i>
-                    </button>
-                </div>
+                {% if dns_nodes %}
+                    {% for node_hostname in dns_nodes %}
+                    <div style="display: flex; align-items: center; gap: 12px; {% if not loop.last %}margin-bottom: 12px;{% endif %}">
+                        <code style="font-size: 16px; font-weight: 600; color: var(--accent-primary);">{{ node_hostname }}</code>
+                        <button class="btn btn-secondary btn-sm" onclick="copyToClipboard('{{ node_hostname }}')">
+                            <i class="fas fa-copy"></i>
+                        </button>
+                    </div>
+                    {% endfor %}
+                {% else %}
+                    <div style="display: flex; align-items: center; gap: 12px;">
+                        <span style="color: var(--text-secondary);">No DNS nodes configured yet.</span>
+                    </div>
+                {% endif %}
             </div>
 
             <div style="padding: 12px; background: var(--bg-tertiary); border-radius: var(--border-radius-sm); margin-bottom: 16px;">
