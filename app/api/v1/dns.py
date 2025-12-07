@@ -6,7 +6,7 @@ from sqlalchemy import select
 
 from app.core.database import get_db
 from app.core.security import get_current_active_user
-from app.schemas.dns import DNSRecordCreate, DNSRecordUpdate, DNSRecordResponse
+from app.schemas.dns import DNSRecordCreate, DNSRecordUpdate, DNSRecordResponse, DNSRecordImport
 from app.models.user import User
 from app.models.dns import DNSRecord
 from app.models.domain import Domain
@@ -61,6 +61,36 @@ async def create_dns_record(
     await db.refresh(record)
     
     return record
+
+
+@router.post("/domains/{domain_id}/records/import", status_code=status.HTTP_201_CREATED)
+async def import_dns_records(
+    domain_id: int,
+    import_data: DNSRecordImport,
+    current_user: User = Depends(get_current_active_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """Import DNS records"""
+    # Verify domain exists
+    result = await db.execute(select(Domain).where(Domain.id == domain_id))
+    domain = result.scalar_one_or_none()
+    if not domain:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Domain not found"
+        )
+    
+    count = 0
+    for record_data in import_data.records:
+        record = DNSRecord(
+            domain_id=domain_id,
+            **record_data.model_dump()
+        )
+        db.add(record)
+        count += 1
+    
+    await db.commit()
+    return {"message": f"Imported {count} records", "count": count}
 
 
 @router.get("/records/{record_id}", response_model=DNSRecordResponse)
@@ -140,5 +170,3 @@ async def delete_dns_record(
     
     await db.delete(record)
     await db.commit()
-
-

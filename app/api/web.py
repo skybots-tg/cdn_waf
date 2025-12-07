@@ -1,6 +1,6 @@
 """Web routes for HTML pages"""
 from fastapi import APIRouter, Request, Depends, HTTPException
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -73,18 +73,31 @@ async def add_domain_page(request: Request, db: AsyncSession = Depends(get_db)):
     })
 
 
+@router.get("/domains/{domain_id}")
+async def domain_overview_redirect(domain_id: int):
+    """Redirect to domain settings"""
+    return RedirectResponse(url=f"/domains/{domain_id}/settings")
+
+
 @router.get("/domains/{domain_id}/dns", response_class=HTMLResponse)
 async def domain_dns_page(request: Request, domain_id: int, db: AsyncSession = Depends(get_db)):
     """Domain DNS page"""
+    from app.services.dns_node_service import DNSNodeService
+    
     domain_service = DomainService(db)
     domain = await domain_service.get_by_id(domain_id)
     if not domain:
         return templates.TemplateResponse("404.html", {"request": request}, status_code=404)
         
+    # Get enabled DNS nodes
+    nodes = await DNSNodeService.get_nodes(db, limit=100)
+    dns_nodes = [node.hostname for node in nodes if node.enabled]
+        
     return templates.TemplateResponse("domain_dns.html", {
         "request": request,
         "user": get_mock_user(request),
-        "domain": domain
+        "domain": domain,
+        "dns_nodes": dns_nodes
     })
 
 
@@ -138,15 +151,22 @@ async def dns_node_manage_page(request: Request, node_id: int, db: AsyncSession 
 @router.get("/domains/{domain_id}/settings", response_class=HTMLResponse)
 async def domain_settings_page(request: Request, domain_id: int, db: AsyncSession = Depends(get_db)):
     """Domain settings page"""
+    from app.services.dns_node_service import DNSNodeService
+    
     domain_service = DomainService(db)
     domain = await domain_service.get_by_id(domain_id)
     if not domain:
         return templates.TemplateResponse("404.html", {"request": request}, status_code=404)
+        
+    # Get enabled DNS nodes
+    nodes = await DNSNodeService.get_nodes(db, limit=100)
+    dns_nodes = [node.hostname for node in nodes if node.enabled]
 
     return templates.TemplateResponse("domain_settings.html", {
         "request": request,
         "user": get_mock_user(request),
-        "domain": domain
+        "domain": domain,
+        "dns_nodes": dns_nodes
     })
 
 
@@ -223,5 +243,3 @@ async def cdn_management_page(request: Request):
         "request": request,
         "user": get_mock_user(request)
     })
-
-

@@ -21,13 +21,40 @@
             <div class="flex gap-2">
                 <a href="/domains/{{ domain.id }}" class="btn btn-secondary">Overview</a>
                 <a href="/domains/{{ domain.id }}/dns" class="btn btn-primary">DNS</a>
-                <a href="/domains/{{ domain.id }}/cache" class="btn btn-secondary">Cache</a>
+                <a href="/domains/{{ domain.id }}/settings" class="btn btn-secondary">Cache</a>
                 <a href="/domains/{{ domain.id }}/waf" class="btn btn-secondary">WAF</a>
                 <a href="/domains/{{ domain.id }}/settings" class="btn btn-secondary">Settings</a>
             </div>
         </div>
     </div>
     
+    <!-- Nameservers Info -->
+    <div class="glass-card mb-4">
+        <h2 style="font-size: 20px; font-weight: 600; margin-bottom: 16px;">
+            <i class="fas fa-server"></i> Cloud Nameservers
+        </h2>
+        <p style="color: var(--text-secondary); font-size: 14px; margin-bottom: 16px;">
+            Ensure your domain at your registrar points to these nameservers:
+        </p>
+        
+        <div style="background: var(--bg-tertiary); padding: 16px; border-radius: var(--border-radius-sm);">
+            {% if dns_nodes %}
+                {% for node_hostname in dns_nodes %}
+                <div style="display: flex; align-items: center; gap: 12px; {% if not loop.last %}margin-bottom: 12px;{% endif %}">
+                    <code style="font-size: 16px; font-weight: 600; color: var(--accent-primary);">{{ node_hostname }}</code>
+                    <button class="btn btn-secondary btn-sm" onclick="copyToClipboard('{{ node_hostname }}')">
+                        <i class="fas fa-copy"></i>
+                    </button>
+                </div>
+                {% endfor %}
+            {% else %}
+                <div style="display: flex; align-items: center; gap: 12px;">
+                    <span style="color: var(--text-secondary);">No DNS nodes configured yet.</span>
+                </div>
+            {% endif %}
+        </div>
+    </div>
+
     <!-- DNS Records -->
     <div class="glass-card">
         <div class="flex-between mb-3">
@@ -88,7 +115,11 @@
             showNotification(error.message, 'error');
         }
     }
+
+    function copyToClipboard(text) {
+        navigator.clipboard.writeText(text).then(() => {
+            showNotification('Copied to clipboard!', 'success');
+        });
+    }
 </script>
 {% endblock %}
-
-

@@ -1,6 +1,6 @@
 """DNS schemas"""
 from datetime import datetime
-from typing import Optional
+from typing import Optional, List
 from pydantic import BaseModel, Field
 
 
@@ -14,6 +14,11 @@ class DNSRecordCreate(BaseModel):
     weight: Optional[int] = Field(None, ge=0, le=65535)
     proxied: bool = Field(default=False)
     comment: Optional[str] = Field(None, max_length=255)
+
+
+class DNSRecordImport(BaseModel):
+    """Schema for DNS record import"""
+    records: List[DNSRecordCreate]
 
 
 class DNSRecordUpdate(BaseModel):
@@ -45,5 +50,3 @@ class DNSRecordResponse(BaseModel):
     
     class Config:
         from_attributes = True
-
-
