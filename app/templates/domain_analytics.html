@@ -5,19 +5,31 @@
 {% block content %}
 <div class="container" style="padding: 32px 24px;">
     <!-- Domain Header -->
-    <div class="flex-between mb-4">
-        <div>
-            <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 8px;">
-                <a href="/domains" style="color: var(--text-secondary); text-decoration: none;">
-                    <i class="fas fa-arrow-left"></i>
-                </a>
-                <h1 style="font-size: 32px; font-weight: 700;">{{ domain.name }}</h1>
-                <span class="badge badge-success">Active</span>
+    <div class="glass-card mb-4">
+        <div class="flex-between">
+            <div>
+                <h1><i class="fas fa-globe"></i> {{ domain.name }}</h1>
+                <div class="flex gap-2 mt-2">
+                    <span class="badge badge-success">
+                        <i class="fas fa-check-circle"></i> Active
+                    </span>
+                    <span class="badge badge-orange">
+                        <i class="fas fa-cloud"></i> Proxied
+                    </span>
+                </div>
             </div>
-            <p style="color: var(--text-secondary); font-size: 14px;">
-                Traffic analytics and performance metrics
-            </p>
+            <div class="flex gap-2">
+                <a href="/domains/{{ domain.id }}/dns" class="btn btn-secondary">DNS</a>
+                <a href="/domains/{{ domain.id }}/waf" class="btn btn-secondary">WAF</a>
+                <a href="/domains/{{ domain.id }}/settings" class="btn btn-secondary">Settings</a>
+                <a href="/domains/{{ domain.id }}/analytics" class="btn btn-primary">Analytics</a>
+            </div>
         </div>
+    </div>
+
+    <!-- Analytics Controls -->
+    <div class="flex-between mb-4">
+        <h2 style="font-size: 20px; font-weight: 600;">Traffic Overview</h2>
         <div style="display: flex; gap: 12px;">
             <select class="form-select" id="time-range" style="max-width: 200px;">
                 <option value="1h">Last Hour</option>
@@ -29,22 +41,6 @@
                 <i class="fas fa-download"></i> Export
             </button>
         </div>
-    </div>
-
-    <!-- Tabs -->
-    <div class="tabs mb-4">
-        <a href="/domains/{{ domain.id }}/dns" class="tab-link">
-            <i class="fas fa-globe"></i> DNS
-        </a>
-        <a href="/domains/{{ domain.id }}/settings" class="tab-link">
-            <i class="fas fa-cog"></i> Settings
-        </a>
-        <a href="/domains/{{ domain.id }}/waf" class="tab-link">
-            <i class="fas fa-shield-alt"></i> WAF
-        </a>
-        <a href="/domains/{{ domain.id }}/analytics" class="tab-link active">
-            <i class="fas fa-chart-line"></i> Analytics
-        </a>
     </div>
 
     <!-- Key Metrics -->
@@ -85,7 +81,7 @@
     <!-- Main Chart -->
     <div class="glass-card mb-4">
         <div class="flex-between mb-3">
-            <h2 style="font-size: 20px; font-weight: 600;">Traffic Overview</h2>
+            <h2 style="font-size: 20px; font-weight: 600;">Traffic Chart</h2>
             <div class="flex gap-2">
                 <button id="btn-metric-requests" class="btn btn-sm btn-primary" onclick="changeChartMetric('requests')">
                     Requests
