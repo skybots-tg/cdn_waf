@@ -315,7 +315,23 @@ async def sync_data(payload: DNSSyncPayload):
             
             # 6. Insert Edge Nodes
             if payload.edge_nodes:
-                insert_rows("edge_nodes", [n.dict() for n in payload.edge_nodes])
+                insert_rows(
+                    "edge_nodes",
+                    [n.dict() for n in payload.edge_nodes],
+                    defaults={
+                        "config_version": 0,
+                        "last_heartbeat": None,
+                        "cpu_usage": None,
+                        "memory_usage": None,
+                        "disk_usage": None,
+                        "last_config_update": None,
+                        "ssh_host": None,
+                        "ssh_port": None,
+                        "ssh_user": None,
+                        "ssh_key": None,
+                        "ssh_password": None,
+                    },
+                )
 
             db.commit()
             logger.info("Sync completed successfully")

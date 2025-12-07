@@ -58,6 +58,12 @@ class EdgeNodeSync(BaseModel):
     datacenter: Optional[str] = None
     enabled: bool
     status: str
+    config_version: int = 0
+    last_heartbeat: Optional[datetime] = None
+    cpu_usage: Optional[float] = None
+    memory_usage: Optional[float] = None
+    disk_usage: Optional[float] = None
+    last_config_update: Optional[datetime] = None
     created_at: datetime
     updated_at: datetime
 
