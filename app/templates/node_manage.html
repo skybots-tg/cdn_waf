@@ -112,8 +112,15 @@
                         <input type="text" class="form-input" name="ssh_user" value="{{ node.ssh_user or 'root' }}">
                     </div>
                     <div class="form-group">
-                        <label class="form-label">SSH Private Key</label>
-                        <textarea class="form-textarea" name="ssh_key" style="font-family: monospace; font-size: 12px; height: 150px;" placeholder="-----BEGIN OPENSSH PRIVATE KEY-----...">{{ node.ssh_key or '' }}</textarea>
+                        <label class="form-label">SSH Private Key (оставьте пустым для входа по паролю)</label>
+                        <textarea class="form-textarea" name="ssh_key" style="font-family: monospace; font-size: 12px; height: 100px;" placeholder="-----BEGIN OPENSSH PRIVATE KEY-----...">{{ node.ssh_key or '' }}</textarea>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">SSH Пароль (если не используется ключ)</label>
+                        <input type="password" class="form-input" name="ssh_password" placeholder="••••••••" value="">
+                        <p style="font-size: 12px; color: var(--text-secondary); margin-top: 4px;">
+                            Оставьте пустым, чтобы не менять.
+                        </p>
                     </div>
                 </form>
             </div>
@@ -367,14 +374,33 @@ function log(message, type = 'normal') {
     line.className = 'terminal-line';
     
     let content = `<span class="terminal-prompt">></span> `;
-    if (type === 'error') content += `<span class="terminal-error">${message}</span>`;
-    else if (type === 'success') content += `<span class="terminal-success">${message}</span>`;
-    else if (type === 'info') content += `<span class="terminal-info">${message}</span>`;
-    else content += message;
+    
+    if (type === 'error') {
+        content += `<span class="terminal-error">${escapeHtml(message)}</span>`;
+    } else if (type === 'success') {
+        content += `<span class="terminal-success">${escapeHtml(message)}</span>`;
+    } else if (type === 'info') {
+        content += `<span class="terminal-info">${escapeHtml(message)}</span>`;
+    } else if (message && message.includes && message.includes('\n')) {
+        // Handle multiline output
+        content += `<pre style="margin: 0; white-space: pre-wrap; font-family: inherit;">${escapeHtml(message)}</pre>`;
+    } else {
+        content += escapeHtml(message);
+    }
     
     line.innerHTML = content;
     term.appendChild(line);
     term.scrollTop = term.scrollHeight;
+}
+
+function escapeHtml(text) {
+    if (!text) return '';
+    return text
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#039;");
 }
 
 function clearLogs() {
@@ -421,24 +447,11 @@ async function runAction(action) {
         
     } catch (error) {
         log(`Error: ${error.message}`, 'error');
-        // Fallback for demo purposes if API fails (e.g. no SSH connection)
-        log('Backend connection failed, showing demo output...', 'warning');
-        await mockRunAction(action);
+        showNotification('Ошибка выполнения команды', 'error');
     }
 }
 
-async function mockRunAction(action) {
-    await new Promise(r => setTimeout(r, 1000));
-    if (action === 'install_deps') {
-        log('apt-get update...');
-        log('apt-get install -y nginx python3-venv certbot...');
-    } else if (action === 'install_nginx') {
-        log('Configuring Nginx...');
-        log('Writing default config...');
-    }
-    await new Promise(r => setTimeout(r, 500));
-    log(`Action ${action} completed (Demo)`, 'success');
-}
+// async function mockRunAction(action) { ... } (removed)
 
 async function installAll() {
     if (!confirm('Это запустит полную переустановку всех компонентов на ноде. Продолжить?')) return;

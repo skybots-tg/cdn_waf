@@ -38,6 +38,7 @@ async def migrate_schema():
                 await session.execute(text("ALTER TABLE edge_nodes ADD COLUMN IF NOT EXISTS ssh_port INTEGER DEFAULT 22"))
                 await session.execute(text("ALTER TABLE edge_nodes ADD COLUMN IF NOT EXISTS ssh_user VARCHAR(255)"))
                 await session.execute(text("ALTER TABLE edge_nodes ADD COLUMN IF NOT EXISTS ssh_key TEXT"))
+                await session.execute(text("ALTER TABLE edge_nodes ADD COLUMN IF NOT EXISTS ssh_password VARCHAR(255)"))
                 await session.commit()
                 logger.info("Schema migration completed")
             else:

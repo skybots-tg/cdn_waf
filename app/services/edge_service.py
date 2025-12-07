@@ -71,7 +71,8 @@ class EdgeNodeService:
             ssh_host=node_data.ssh_host or node_data.ip_address,
             ssh_port=node_data.ssh_port,
             ssh_user=node_data.ssh_user,
-            ssh_key=node_data.ssh_key
+            ssh_key=node_data.ssh_key,
+            ssh_password=node_data.ssh_password
         )
         
         db.add(node)
@@ -197,12 +198,13 @@ class EdgeNodeService:
         ssh_port = node.ssh_port or 22
         ssh_user = node.ssh_user or "root"
         ssh_key = node.ssh_key
+        ssh_password = node.ssh_password
         
-        if not ssh_key:
+        if not ssh_key and not ssh_password:
              return EdgeNodeCommandResult(
                 success=False,
                 stdout="",
-                stderr="SSH key not configured for this node",
+                stderr="SSH credentials (key or password) not configured for this node",
                 exit_code=1,
                 execution_time=0.0
             )
@@ -213,16 +215,21 @@ class EdgeNodeService:
             # Import asyncssh locally to ensure it is available
             import asyncssh
 
-            # Create a temporary key object
-            client_keys = [asyncssh.import_private_key(ssh_key)]
+            # Create connection options
+            connect_kwargs = {
+                "host": ssh_host,
+                "port": ssh_port,
+                "username": ssh_user,
+                "known_hosts": None  # Security: In production, manage known_hosts!
+            }
 
-            async with asyncssh.connect(
-                ssh_host,
-                port=ssh_port,
-                username=ssh_user,
-                client_keys=client_keys,
-                known_hosts=None  # Security: In production, manage known_hosts!
-            ) as conn:
+            if ssh_key:
+                client_keys = [asyncssh.import_private_key(ssh_key)]
+                connect_kwargs["client_keys"] = client_keys
+            elif ssh_password:
+                connect_kwargs["password"] = ssh_password
+
+            async with asyncssh.connect(**connect_kwargs) as conn:
                 result = await conn.run(command, timeout=timeout)
                 
                 execution_time = (datetime.utcnow() - start_time).total_seconds()

@@ -28,6 +28,7 @@ class EdgeNode(Base):
     ssh_port = Column(Integer, default=22, nullable=True)
     ssh_user = Column(String(255), nullable=True)
     ssh_key = Column(Text, nullable=True)  # Private key
+    ssh_password = Column(String(255), nullable=True)  # Password (encrypted in production!)
     
     # Status
     enabled = Column(Boolean, default=True, nullable=False)
@@ -49,3 +50,7 @@ class EdgeNode(Base):
     @property
     def has_ssh_key(self) -> bool:
         return bool(self.ssh_key)
+
+    @property
+    def has_ssh_password(self) -> bool:
+        return bool(self.ssh_password)
