@@ -69,7 +69,11 @@ async def get_current_user(
     if payload.get("type") != "access":
         raise HTTPException(status_code=401, detail="Invalid token type")
     
-    user_id: int = payload.get("sub")
+    try:
+        user_id = int(payload.get("sub"))
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=401, detail="Could not validate credentials")
+        
     if user_id is None:
         raise HTTPException(status_code=401, detail="Could not validate credentials")
     
