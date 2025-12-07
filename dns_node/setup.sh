@@ -122,10 +122,20 @@ install_deps() {
     apt_install_safe \
         curl git build-essential \
         python3 python3-venv python3-dev python3-pip \
-        libpq-dev \
+        libpq-dev postgresql postgresql-contrib \
         psmisc lsof net-tools rsync
 
     log "Системные зависимости установлены."
+    
+    # Настройка PostgreSQL (разрешаем локальные подключения без пароля для удобства в Docker/local, 
+    # но в продакшене лучше настроить pg_hba.conf аккуратнее)
+    # Для простоты считаем, что приложение коннектится через Unix socket или 127.0.0.1 c md5/trust
+    
+    # Убедимся, что сервис запущен
+    if command -v systemctl >/dev/null 2>&1; then
+        systemctl enable postgresql
+        systemctl start postgresql
+    fi
 }
 
 deploy_code() {
