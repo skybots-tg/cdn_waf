@@ -113,6 +113,21 @@ async def edge_node_manage_page(request: Request, node_id: int, db: AsyncSession
     })
 
 
+@router.get("/dns-nodes/{node_id}", response_class=HTMLResponse)
+async def dns_node_manage_page(request: Request, node_id: int, db: AsyncSession = Depends(get_db)):
+    """DNS node management page"""
+    from app.services.dns_node_service import DNSNodeService
+    node = await DNSNodeService.get_node(db, node_id)
+    if not node:
+        return templates.TemplateResponse("404.html", {"request": request}, status_code=404)
+
+    return templates.TemplateResponse("dns_node_manage.html", {
+        "request": request,
+        "user": get_mock_user(request),
+        "node": node
+    })
+
+
 @router.get("/domains/{domain_id}/settings", response_class=HTMLResponse)
 async def domain_settings_page(request: Request, domain_id: int, db: AsyncSession = Depends(get_db)):
     """Domain settings page"""

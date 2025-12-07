@@ -199,62 +199,6 @@
     </div>
 </div>
 
-<!-- Log Modal -->
-<div id="log-modal" class="modal" style="display: none;">
-    <div class="modal-backdrop" onclick="closeLogModal()"></div>
-    <div class="modal-content" style="max-width: 800px; height: 80vh; display: flex; flex-direction: column;">
-        <div class="flex-between mb-3">
-            <h2 style="font-size: 24px; font-weight: 700;">Node Logs</h2>
-            <div class="flex gap-2">
-                <button class="btn btn-sm btn-secondary" onclick="refreshLogs()">
-                    <i class="fas fa-sync"></i> Refresh
-                </button>
-                <button class="btn btn-icon btn-secondary" onclick="closeLogModal()">
-                    <i class="fas fa-times"></i>
-                </button>
-            </div>
-        </div>
-        
-        <div class="form-group mb-3">
-            <label class="form-label">Lines</label>
-            <select class="form-select" id="log-lines" onchange="refreshLogs()" style="width: 100px;">
-                <option value="50">50</option>
-                <option value="100" selected>100</option>
-                <option value="500">500</option>
-                <option value="1000">1000</option>
-            </select>
-        </div>
-        
-        <div id="log-content" style="
-            background: #1e1e1e; 
-            color: #d4d4d4; 
-            font-family: monospace; 
-            padding: 16px; 
-            border-radius: var(--border-radius-sm); 
-            overflow: auto; 
-            flex: 1; 
-            white-space: pre-wrap;
-            font-size: 13px;
-        ">Loading logs...</div>
-    </div>
-</div>
-
-<!-- Component Management Modal -->
-<div id="component-modal" class="modal" style="display: none;">
-    <div class="modal-backdrop" onclick="closeComponentModal()"></div>
-    <div class="modal-content" style="max-width: 500px;">
-        <div class="flex-between mb-3">
-            <h2 style="font-size: 24px; font-weight: 700;">Manage Components</h2>
-            <button class="btn btn-icon btn-secondary" onclick="closeComponentModal()">
-                <i class="fas fa-times"></i>
-            </button>
-        </div>
-        
-        <input type="hidden" id="component-node-id">
-        <div id="components-list"></div>
-    </div>
-</div>
-
 <style>
 .modal {
     position: fixed;
@@ -289,20 +233,6 @@
     box-shadow: var(--shadow-lg);
     width: 90%;
     max-width: 800px;
-}
-
-.component-item {
-    padding: 16px;
-    background: var(--bg-tertiary);
-    border-radius: var(--border-radius-sm);
-    margin-bottom: 12px;
-}
-
-.component-actions {
-    display: flex;
-    gap: 8px;
-    flex-wrap: wrap;
-    margin-top: 12px;
 }
 </style>
 

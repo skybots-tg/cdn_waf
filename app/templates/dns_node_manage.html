@@ -1,0 +1,587 @@
+{% extends "base.html" %}
+
+{% block title %}Manage DNS Node {{ node.name }} - CDN WAF{% endblock %}
+
+{% block content %}
+<div class="container" style="padding: 32px 24px;">
+    <!-- Header -->
+    <div class="flex-between mb-4">
+        <div>
+            <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 8px;">
+                <a href="/dns-nodes" style="color: var(--text-secondary); text-decoration: none;">
+                    <i class="fas fa-arrow-left"></i>
+                </a>
+                <h1 style="font-size: 32px; font-weight: 700;">{{ node.name }}</h1>
+                <span class="badge badge-{{ 'success' if node.status == 'online' else 'error' }}">
+                    {{ node.status }}
+                </span>
+            </div>
+            <p style="color: var(--text-secondary); font-size: 14px;">
+                ID: {{ node.id }} &bull; IP: {{ node.ip_address }} &bull; Hostname: {{ node.hostname }} &bull; {{ node.location_code }}
+            </p>
+        </div>
+        <div style="display: flex; gap: 12px;">
+            <button class="btn btn-secondary" onclick="checkConnection()">
+                <i class="fas fa-plug"></i> Check Connection
+            </button>
+            <button class="btn btn-primary" onclick="saveSettings()">
+                <i class="fas fa-save"></i> Save Settings
+            </button>
+        </div>
+    </div>
+
+    <!-- Tabs -->
+    <div class="tabs mb-4">
+        <button class="tab-link active" onclick="switchTab('settings')">
+            <i class="fas fa-cog"></i> Settings
+        </button>
+        <button class="tab-link" onclick="switchTab('components')">
+            <i class="fas fa-boxes"></i> Components & Installation
+        </button>
+        <button class="tab-link" onclick="switchTab('logs')">
+            <i class="fas fa-terminal"></i> Installation Logs
+        </button>
+        <button class="tab-link" onclick="switchTab('service-logs')">
+            <i class="fas fa-file-alt"></i> Service Logs
+        </button>
+    </div>
+
+    <!-- Tab Content: Settings -->
+    <div id="tab-settings" class="tab-content">
+        <div class="grid grid-2 gap-3">
+            <!-- Basic Info -->
+            <div class="glass-card">
+                <h3 style="font-size: 18px; font-weight: 600; margin-bottom: 20px;">
+                    <i class="fas fa-info-circle"></i> Basic Info
+                </h3>
+                <form id="node-settings-form">
+                    <div class="grid grid-2 gap-2">
+                        <div class="form-group">
+                            <label class="form-label">Name</label>
+                            <input type="text" class="form-input" name="name" value="{{ node.name }}">
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">Hostname</label>
+                            <input type="text" class="form-input" name="hostname" value="{{ node.hostname }}">
+                        </div>
+                    </div>
+                    <div class="grid grid-2 gap-2">
+                        <div class="form-group">
+                            <label class="form-label">IPv4 Address</label>
+                            <input type="text" class="form-input" name="ip_address" value="{{ node.ip_address }}">
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">IPv6 Address</label>
+                            <input type="text" class="form-input" name="ipv6_address" value="{{ node.ipv6_address or '' }}">
+                        </div>
+                    </div>
+                    <div class="grid grid-2 gap-2">
+                        <div class="form-group">
+                            <label class="form-label">Location Code</label>
+                            <input type="text" class="form-input" name="location_code" value="{{ node.location_code }}">
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">Datacenter</label>
+                            <input type="text" class="form-input" name="datacenter" value="{{ node.datacenter or '' }}">
+                        </div>
+                    </div>
+                    <div class="form-group" style="margin-bottom: 0;">
+                        <label class="flex-between" style="cursor: pointer;">
+                            <span>Enabled</span>
+                            <div class="toggle-switch">
+                                <input type="checkbox" name="enabled" {% if node.enabled %}checked{% endif %}>
+                                <span class="toggle-slider"></span>
+                            </div>
+                        </label>
+                    </div>
+                </form>
+            </div>
+
+            <!-- SSH Configuration -->
+            <div class="glass-card">
+                <h3 style="font-size: 18px; font-weight: 600; margin-bottom: 20px;">
+                    <i class="fas fa-key"></i> SSH Access
+                </h3>
+                <p style="color: var(--text-secondary); font-size: 13px; margin-bottom: 16px;">
+                    Required for automated component installation.
+                </p>
+                <form id="ssh-settings-form">
+                    <div class="grid grid-2 gap-2">
+                        <div class="form-group">
+                            <label class="form-label">SSH Host (if different from IP)</label>
+                            <input type="text" class="form-input" name="ssh_host" value="{{ node.ssh_host or node.ip_address }}">
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">SSH Port</label>
+                            <input type="number" class="form-input" name="ssh_port" value="{{ node.ssh_port or 22 }}">
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">User (root)</label>
+                        <input type="text" class="form-input" name="ssh_user" value="{{ node.ssh_user or 'root' }}">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">SSH Private Key</label>
+                        <textarea class="form-textarea" name="ssh_key" style="font-family: monospace; font-size: 12px; height: 100px;" placeholder="-----BEGIN OPENSSH PRIVATE KEY-----...">{{ node.ssh_key or '' }}</textarea>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">SSH Password</label>
+                        <input type="password" class="form-input" name="ssh_password" placeholder="••••••••" value="">
+                        <p style="font-size: 12px; color: var(--text-secondary); margin-top: 4px;">
+                            Leave empty to keep unchanged.
+                        </p>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Tab Content: Components -->
+    <div id="tab-components" class="tab-content" style="display: none;">
+        <div class="glass-card mb-4">
+            <div class="flex-between">
+                <div>
+                    <h3 style="font-size: 18px; font-weight: 600;">Components Status</h3>
+                    <p style="color: var(--text-secondary); font-size: 14px;">Manage software on the node</p>
+                </div>
+                <button class="btn btn-primary" onclick="installAll()">
+                    <i class="fas fa-sync-alt"></i> Full Installation (All)
+                </button>
+            </div>
+        </div>
+
+        <div class="grid grid-2 gap-3">
+            <!-- Dependencies -->
+            <div class="glass-card" id="card-dependencies">
+                <div class="flex-between mb-3">
+                    <div style="display: flex; gap: 12px; align-items: center;">
+                        <div class="component-icon"><i class="fas fa-box-open"></i></div>
+                        <div>
+                            <h4 style="font-weight: 600;">System Dependencies</h4>
+                            <span class="status-dot status-warning"></span> <span class="status-text" style="font-size: 12px; color: var(--text-muted);">Checking...</span>
+                        </div>
+                    </div>
+                    <button class="btn btn-sm btn-secondary" onclick="runAction('install_deps')">Install</button>
+                </div>
+                <p style="font-size: 13px; color: var(--text-secondary);">
+                    Basic packages: python3, venv, build-essential
+                </p>
+            </div>
+
+            <!-- Python Env -->
+            <div class="glass-card" id="card-python_env">
+                <div class="flex-between mb-3">
+                    <div style="display: flex; gap: 12px; align-items: center;">
+                        <div class="component-icon"><i class="fab fa-python"></i></div>
+                        <div>
+                            <h4 style="font-weight: 600;">Python Environment</h4>
+                            <span class="status-dot status-warning"></span> <span class="status-text" style="font-size: 12px; color: var(--text-muted);">Checking...</span>
+                        </div>
+                    </div>
+                    <button class="btn btn-sm btn-secondary" onclick="runAction('install_python')">Install/Update</button>
+                </div>
+                <p style="font-size: 13px; color: var(--text-secondary);">
+                    Virtual environment and dependencies
+                </p>
+            </div>
+
+            <!-- App Code -->
+            <div class="glass-card" id="card-app_code">
+                <div class="flex-between mb-3">
+                    <div style="display: flex; gap: 12px; align-items: center;">
+                        <div class="component-icon"><i class="fas fa-code"></i></div>
+                        <div>
+                            <h4 style="font-weight: 600;">Application Code</h4>
+                            <span class="status-dot status-warning"></span> <span class="status-text" style="font-size: 12px; color: var(--text-muted);">Checking...</span>
+                        </div>
+                    </div>
+                    <button class="btn btn-sm btn-secondary" onclick="runAction('update_app')">Update</button>
+                </div>
+                <p style="font-size: 13px; color: var(--text-secondary);">
+                    DNS server source code
+                </p>
+            </div>
+
+            <!-- Configuration -->
+            <div class="glass-card" id="card-config">
+                <div class="flex-between mb-3">
+                    <div style="display: flex; gap: 12px; align-items: center;">
+                        <div class="component-icon"><i class="fas fa-cog"></i></div>
+                        <div>
+                            <h4 style="font-weight: 600;">Configuration</h4>
+                            <span class="status-dot status-warning"></span> <span class="status-text" style="font-size: 12px; color: var(--text-muted);">Checking...</span>
+                        </div>
+                    </div>
+                    <button class="btn btn-sm btn-secondary" onclick="runAction('update_config')">Update</button>
+                </div>
+                <p style="font-size: 13px; color: var(--text-secondary);">
+                    Environment variables and settings
+                </p>
+            </div>
+
+            <!-- DNS Service -->
+            <div class="glass-card" id="card-dns_service">
+                <div class="flex-between mb-3">
+                    <div style="display: flex; gap: 12px; align-items: center;">
+                        <div class="component-icon"><i class="fas fa-server"></i></div>
+                        <div>
+                            <h4 style="font-weight: 600;">DNS Service</h4>
+                            <span class="status-dot status-warning"></span> <span class="status-text" style="font-size: 12px; color: var(--text-muted);">Checking...</span>
+                        </div>
+                    </div>
+                    <div class="flex gap-1">
+                        <button class="btn btn-sm btn-secondary" onclick="runAction('restart_service')">Restart</button>
+                        <button class="btn btn-sm btn-secondary" onclick="runAction('install_service')">Install</button>
+                    </div>
+                </div>
+                <p style="font-size: 13px; color: var(--text-secondary);">
+                    Systemd service (cdn-waf-dns)
+                </p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Tab Content: Installation Logs -->
+    <div id="tab-logs" class="tab-content" style="display: none;">
+        <div class="glass-card">
+            <div class="flex-between mb-3">
+                <h3 style="font-size: 18px; font-weight: 600;">Installation Terminal</h3>
+                <button class="btn btn-sm btn-secondary" onclick="clearLogs()">
+                    <i class="fas fa-trash"></i> Clear
+                </button>
+            </div>
+            <div class="terminal-window" id="install-logs">
+                <div class="terminal-line"><span class="terminal-prompt">$</span> ready...</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Tab Content: Service Logs -->
+    <div id="tab-service-logs" class="tab-content" style="display: none;">
+        <div class="glass-card">
+             <div class="flex-between mb-3">
+                <h3 style="font-size: 18px; font-weight: 600;">Service Logs (journalctl)</h3>
+                <div class="flex gap-2">
+                    <select class="form-select" id="log-lines" onchange="refreshServiceLogs()" style="width: 100px;">
+                        <option value="50">50 lines</option>
+                        <option value="100" selected>100 lines</option>
+                        <option value="500">500 lines</option>
+                    </select>
+                    <button class="btn btn-sm btn-secondary" onclick="refreshServiceLogs()">
+                        <i class="fas fa-sync"></i> Refresh
+                    </button>
+                </div>
+            </div>
+            <div class="terminal-window" id="service-logs" style="height: 600px;">
+                <div class="terminal-line">Loading logs...</div>
+            </div>
+        </div>
+    </div>
+
+</div>
+
+<style>
+.tabs {
+    display: flex;
+    gap: 12px;
+    border-bottom: 1px solid var(--glass-border);
+    padding-bottom: 12px;
+}
+
+.tab-link {
+    background: transparent;
+    border: none;
+    color: var(--text-secondary);
+    font-size: 14px;
+    font-weight: 500;
+    padding: 8px 16px;
+    cursor: pointer;
+    border-radius: var(--border-radius-sm);
+    transition: all var(--transition-fast);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.tab-link:hover {
+    color: var(--text-primary);
+    background: var(--bg-tertiary);
+}
+
+.tab-link.active {
+    color: var(--accent-primary);
+    background: var(--accent-light);
+}
+
+.component-icon {
+    width: 40px;
+    height: 40px;
+    background: var(--bg-tertiary);
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--text-primary);
+    font-size: 20px;
+}
+
+.status-dot {
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    margin-right: 4px;
+}
+
+.status-success { background: var(--success); box-shadow: 0 0 8px rgba(81, 207, 102, 0.4); }
+.status-warning { background: var(--warning); box-shadow: 0 0 8px rgba(255, 212, 59, 0.4); }
+.status-error { background: var(--error); box-shadow: 0 0 8px rgba(255, 107, 107, 0.4); }
+
+.terminal-window {
+    background: #1e1e1e;
+    color: #f0f0f0;
+    font-family: 'Consolas', 'Monaco', monospace;
+    padding: 16px;
+    border-radius: 8px;
+    height: 400px;
+    overflow-y: auto;
+    font-size: 13px;
+    line-height: 1.5;
+    white-space: pre-wrap;
+}
+
+.terminal-line { margin-bottom: 4px; }
+.terminal-prompt { color: var(--success); margin-right: 8px; }
+.terminal-info { color: var(--info); }
+.terminal-error { color: var(--error); }
+.terminal-success { color: var(--success); }
+</style>
+
+<script>
+const NODE_ID = {{ node.id }};
+
+function switchTab(tabName) {
+    document.querySelectorAll('.tab-content').forEach(el => el.style.display = 'none');
+    document.querySelectorAll('.tab-link').forEach(el => el.classList.remove('active'));
+    
+    document.getElementById(`tab-${tabName}`).style.display = 'block';
+    const btn = Array.from(document.querySelectorAll('.tab-link')).find(b => b.onclick.toString().includes(tabName));
+    if (btn) btn.classList.add('active');
+    
+    if (tabName === 'components') {
+        checkAllComponents();
+    }
+    if (tabName === 'service-logs') {
+        refreshServiceLogs();
+    }
+}
+
+async function saveSettings() {
+    const form = document.getElementById('node-settings-form');
+    const sshForm = document.getElementById('ssh-settings-form');
+    
+    const data = {
+        ...Object.fromEntries(new FormData(form)),
+        ...Object.fromEntries(new FormData(sshForm))
+    };
+    
+    data.enabled = form.querySelector('[name="enabled"]').checked;
+    if (data.ssh_port) data.ssh_port = parseInt(data.ssh_port);
+    
+    showNotification('Saving settings...', 'info');
+    
+    try {
+        const response = await fetch(`/api/v1/dns-nodes/${NODE_ID}`, {
+            method: 'PATCH',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${localStorage.getItem('access_token')}`
+            },
+            body: JSON.stringify(data)
+        });
+        
+        if (!response.ok) {
+             const error = await response.json();
+             throw new Error(error.detail || 'Failed to save');
+        }
+
+        showNotification('Settings saved', 'success');
+    } catch (error) {
+        showNotification(error.message, 'error');
+    }
+}
+
+function log(message, type = 'normal') {
+    const term = document.getElementById('install-logs');
+    const line = document.createElement('div');
+    line.className = 'terminal-line';
+    
+    let content = `<span class="terminal-prompt">></span> `;
+    
+    if (type === 'error') content += `<span class="terminal-error">${escapeHtml(message)}</span>`;
+    else if (type === 'success') content += `<span class="terminal-success">${escapeHtml(message)}</span>`;
+    else if (type === 'info') content += `<span class="terminal-info">${escapeHtml(message)}</span>`;
+    else content += escapeHtml(message);
+    
+    line.innerHTML = content;
+    term.appendChild(line);
+    term.scrollTop = term.scrollHeight;
+}
+
+function escapeHtml(text) {
+    if (!text) return '';
+    return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+function clearLogs() {
+    document.getElementById('install-logs').innerHTML = '<div class="terminal-line"><span class="terminal-prompt">$</span> cleared</div>';
+}
+
+async function runAction(action) {
+    switchTab('logs');
+    log(`Starting action: ${action}...`, 'info');
+    
+    let component = '';
+    let cmd = '';
+    
+    if (action === 'install_deps') { component = 'dependencies'; cmd = 'install'; }
+    else if (action === 'install_python') { component = 'python_env'; cmd = 'install'; }
+    else if (action === 'update_app') { component = 'app_code'; cmd = 'install'; }
+    else if (action === 'update_config') { component = 'config'; cmd = 'install'; }
+    else if (action === 'install_service') { component = 'dns_service'; cmd = 'install'; }
+    else if (action === 'restart_service') { component = 'dns_service'; cmd = 'restart'; }
+    
+    try {
+        log(`Sending command: ${component} ${cmd}...`);
+        
+        const response = await fetch(`/api/v1/dns-nodes/${NODE_ID}/component`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${localStorage.getItem('access_token')}`
+            },
+            body: JSON.stringify({ component, action: cmd })
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            log(`Success!`, 'success');
+            if (result.stdout) log(result.stdout);
+        } else {
+            log(`Failed: ${result.stderr}`, 'error');
+        }
+        
+    } catch (error) {
+        log(`Error: ${error.message}`, 'error');
+    }
+}
+
+async function installAll() {
+    if (!confirm('This will reinstall all components. Continue?')) return;
+    
+    switchTab('logs');
+    log('Starting full installation...', 'info');
+    
+    const steps = ['install_deps', 'install_python', 'update_app', 'update_config', 'install_service'];
+    
+    for (const step of steps) {
+        await runAction(step);
+    }
+    
+    log('Full installation completed!', 'success');
+}
+
+async function checkConnection() {
+    showNotification('Checking connection...', 'info');
+    try {
+        const response = await fetch(`/api/v1/dns-nodes/${NODE_ID}`, {
+             headers: { 'Authorization': `Bearer ${localStorage.getItem('access_token')}` }
+        });
+        const node = await response.json();
+        
+        // Also check SSH
+        const sshRes = await fetch(`/api/v1/dns-nodes/${NODE_ID}/command`, {
+             method: 'POST',
+             headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${localStorage.getItem('access_token')}`
+             },
+             body: JSON.stringify({ command: 'echo "pong"' })
+        });
+        const sshData = await sshRes.json();
+        
+        if (sshData.success) {
+             showNotification('Connection OK', 'success');
+        } else {
+             showNotification('Connection Failed: ' + sshData.stderr, 'error');
+        }
+    } catch (error) {
+        showNotification(error.message, 'error');
+    }
+}
+
+async function updateComponentStatus(component, cardId) {
+    const card = document.getElementById(cardId);
+    if (!card) return;
+    
+    const dot = card.querySelector('.status-dot');
+    const text = card.querySelector('.status-text');
+    
+    try {
+        const response = await fetch(`/api/v1/dns-nodes/${NODE_ID}/components/${component}`, {
+             headers: { 'Authorization': `Bearer ${localStorage.getItem('access_token')}` }
+        });
+        const data = await response.json();
+        
+        dot.className = 'status-dot';
+        if (data.running) {
+            dot.classList.add('status-success');
+        } else if (data.installed) {
+             dot.classList.add('status-warning');
+        } else {
+             dot.classList.add('status-error');
+        }
+        
+        text.innerText = data.status_text || (data.running ? 'Active' : 'Inactive');
+        
+    } catch (error) {
+        dot.className = 'status-dot status-error';
+        text.innerText = 'Error';
+    }
+}
+
+async function checkAllComponents() {
+    const components = [
+        { id: 'dependencies', card: 'card-dependencies' },
+        { id: 'python_env', card: 'card-python_env' },
+        { id: 'app_code', card: 'card-app_code' },
+        { id: 'config', card: 'card-config' },
+        { id: 'dns_service', card: 'card-dns_service' }
+    ];
+    
+    for (const comp of components) {
+        updateComponentStatus(comp.id, comp.card);
+    }
+}
+
+async function refreshServiceLogs() {
+    const lines = document.getElementById('log-lines').value;
+    const term = document.getElementById('service-logs');
+    
+    try {
+        const response = await fetch(`/api/v1/dns-nodes/${NODE_ID}/logs?lines=${lines}`, {
+             headers: { 'Authorization': `Bearer ${localStorage.getItem('access_token')}` }
+        });
+        const data = await response.json();
+        term.innerText = data.logs || 'No logs.';
+        term.scrollTop = term.scrollHeight;
+    } catch (error) {
+        term.innerText = 'Error loading logs: ' + error.message;
+    }
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+});
+</script>
+{% endblock %}
