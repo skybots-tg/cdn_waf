@@ -198,27 +198,32 @@ async function loadDomainRecords(domainId) {
     }
 }
 
-async function loadDomains() {
-    try {
-        const response = await fetch('/api/v1/domains');
-        const domains = await response.json();
-    
-    // Search functionality
-    document.getElementById('search-domains').addEventListener('input', (e) => {
-        // TODO: Implement search
-    });
-    
-    document.getElementById('filter-status').addEventListener('change', (e) => {
-        // TODO: Implement filter
-    });
-    
-    document.getElementById('filter-proxied').addEventListener('change', (e) => {
-        // TODO: Implement filter
-    });
-});
 
 // Initialize
 document.addEventListener('DOMContentLoaded', () => {
     loadDomains();
+    
+    // Search functionality
+    const searchInput = document.getElementById('search-domains');
+    if (searchInput) {
+        searchInput.addEventListener('input', (e) => {
+            // TODO: Implement search
+        });
+    }
+    
+    const filterStatus = document.getElementById('filter-status');
+    if (filterStatus) {
+        filterStatus.addEventListener('change', (e) => {
+            // TODO: Implement filter
+        });
+    }
+    
+    const filterProxied = document.getElementById('filter-proxied');
+    if (filterProxied) {
+        filterProxied.addEventListener('change', (e) => {
+            // TODO: Implement filter
+        });
+    }
+});
 </script>
 {% endblock %}

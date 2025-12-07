@@ -385,27 +385,59 @@ async function runAction(action) {
     switchTab('logs');
     log(`Запуск действия: ${action}...`, 'info');
     
+    let component = '';
+    let cmd = '';
+    
+    // Map action to component/command
+    if (action.includes('nginx')) component = 'nginx';
+    else if (action.includes('certbot')) component = 'certbot';
+    else if (action.includes('python')) component = 'python'; // python env
+    else if (action.includes('agent')) component = 'agent'; // waf agent
+    else if (action === 'install_deps') component = 'system';
+    
+    if (action.startsWith('install_')) cmd = 'install';
+    else if (action.startsWith('reload_')) cmd = 'reload';
+    else if (action.startsWith('restart_')) cmd = 'restart';
+    else if (action.startsWith('update_')) cmd = 'update';
+    else cmd = action;
+
     try {
-        // Mock API call simulation
-        log(`Connecting to {{ node.ip_address }}...`);
-        await new Promise(r => setTimeout(r, 1000));
+        log(`Sending command to node: ${component} ${cmd}...`);
         
-        if (action === 'install_deps') {
-            log('apt-get update...');
-            log('apt-get install -y nginx python3-venv certbot...');
-        } else if (action === 'install_nginx') {
-            log('Configuring Nginx...');
-            log('Writing default config...');
+        // Call real API
+        const response = await api.post(`/edge-nodes/${NODE_ID}/component`, {
+            component: component,
+            action: cmd
+        });
+        
+        if (response.success) {
+            log(`Command executed successfully`, 'success');
+            if (response.stdout) log(response.stdout);
+        } else {
+            log(`Command failed: ${response.stderr}`, 'error');
         }
         
-        await new Promise(r => setTimeout(r, 1500));
-        log(`Action ${action} completed successfully`, 'success');
         showNotification('Операция выполнена', 'success');
         
     } catch (error) {
         log(`Error: ${error.message}`, 'error');
-        showNotification('Ошибка выполнения', 'error');
+        // Fallback for demo purposes if API fails (e.g. no SSH connection)
+        log('Backend connection failed, showing demo output...', 'warning');
+        await mockRunAction(action);
     }
+}
+
+async function mockRunAction(action) {
+    await new Promise(r => setTimeout(r, 1000));
+    if (action === 'install_deps') {
+        log('apt-get update...');
+        log('apt-get install -y nginx python3-venv certbot...');
+    } else if (action === 'install_nginx') {
+        log('Configuring Nginx...');
+        log('Writing default config...');
+    }
+    await new Promise(r => setTimeout(r, 500));
+    log(`Action ${action} completed (Demo)`, 'success');
 }
 
 async function installAll() {
