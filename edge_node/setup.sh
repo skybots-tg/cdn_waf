@@ -1,12 +1,9 @@
 #!/usr/bin/env bash
-# Edge Node Setup Script (improved)
-# Supports Debian/Ubuntu и RHEL-like
+# Edge Node Setup Script (improved v2)
 
 set -euo pipefail
 
-# ============ Глобальные настройки ============
-
-# Глушим любые попытки спросить что-то у пользователя
+# Глушим любые попытки интерактива
 export DEBIAN_FRONTEND="${DEBIAN_FRONTEND:-noninteractive}"
 
 APP_DIR="${APP_DIR:-/opt/cdn_waf}"
@@ -28,12 +25,12 @@ err() {
 
 require_root() {
     if [[ "${EUID}" -ne 0 ]]; then
-        err "Этот скрипт нужно запускать от root (или через sudo)."
+        err "Скрипт нужно запускать от root (sudo)."
         exit 1
     fi
 }
 
-# ============ Детект ОС ============
+# Определяем семейство ОС
 
 detect_os() {
     if [[ -f /etc/os-release ]]; then
@@ -57,23 +54,34 @@ detect_os() {
     fi
 }
 
-# ============ Вспомогательные функции для APT/YUM ============
+# Попытка починить сломанный dpkg/apt, в т.ч. убить проблемный openresty
 
 fix_dpkg_if_broken() {
-    if command -v dpkg >/dev/null 2>&1; then
-        log "Пробую починить сломанное состояние dpkg/apt (если оно есть)..."
-        dpkg --configure -a || true
-        if command -v apt-get >/dev/null 2>&1; then
-            apt-get -f install -y || true
+    if ! command -v dpkg >/dev/null 2>&1; then
+        return
+    fi
+
+    log "Пробую починить dpkg/apt (если что-то сломано)..."
+
+    if ! dpkg --configure -a; then
+        log "dpkg --configure -a завершился с ошибкой, ищу проблемный openresty..."
+
+        if dpkg -l 2>/dev/null | grep -E '^(i.|rc)\s+openresty(\s|$)' >/dev/null 2>&1; then
+            log "Обнаружен openresty в проблемном состоянии, форсирую удаление..."
+            dpkg -P --force-remove-reinstreq openresty openresty-opm openresty-resty || true
         fi
+
+        dpkg --configure -a || true
+    fi
+
+    if command -v apt-get >/dev/null 2>&1; then
+        apt-get -f install -y || true
     fi
 }
 
 run_apt() {
-    # Обёртка для apt-get <subcommand> ...
-    # Пример: run_apt update
     if ! apt-get "$@"; then
-        err "apt-get $* завершился с ошибкой, пробую починить dpkg и повторить..."
+        err "apt-get $* завершился с ошибкой, пытаюсь восстановить..."
         fix_dpkg_if_broken
         apt-get "$@"
     fi
@@ -86,7 +94,29 @@ run_yum() {
     fi
 }
 
-# ============ Установка зависимостей ============
+# Включение/запуск nginx, если есть systemd
+
+enable_http_service() {
+    local svc=""
+
+    if command -v systemctl >/dev/null 2>&1 && pidof systemd >/dev/null 2>&1; then
+        if systemctl list-unit-files | grep -q '^nginx\.service'; then
+            svc="nginx"
+        fi
+
+        if [[ -n "${svc}" ]]; then
+            log "Enabling & starting ${svc}..."
+            systemctl enable "${svc}"
+            systemctl restart "${svc}"
+        else
+            err "nginx.service не найден. Возможно, установка прошла некорректно."
+        fi
+    else
+        log "systemctl недоступен (контейнер без systemd?), пропускаю enable/start."
+    fi
+}
+
+# ---------- install_deps ----------
 
 install_deps() {
     detect_os
@@ -107,94 +137,46 @@ install_deps() {
     fi
 }
 
-# ============ Установка Nginx / OpenResty ============
-
-install_openresty_repo_debian() {
-    # Современный способ: отдельный keyring + sources.list.d
-    local codename
-    codename="$(lsb_release -sc 2>/dev/null || true)"
-    if [[ -z "${codename}" && -n "${VERSION_CODENAME:-}" ]]; then
-        codename="${VERSION_CODENAME}"
-    fi
-
-    if [[ -z "${codename}" ]]; then
-        err "Не удалось определить codename для дистрибутива, пропускаю OpenResty, будет обычный nginx."
-        return 1
-    fi
-
-    log "Настраиваю репозиторий OpenResty для ${codename}..."
-    mkdir -p /usr/share/keyrings
-
-    curl -fsSL https://openresty.org/package/pubkey.gpg \
-        | gpg --dearmor -o /usr/share/keyrings/openresty-archive-keyring.gpg
-
-    cat >/etc/apt/sources.list.d/openresty.list <<EOF
-deb [signed-by=/usr/share/keyrings/openresty-archive-keyring.gpg] http://openresty.org/package/ubuntu ${codename} main
-EOF
-
-    run_apt update -y
-    return 0
-}
-
-enable_http_service() {
-    # Пробуем включить и запустить openresty или nginx
-    local svc=""
-
-    if command -v systemctl >/dev/null 2>&1 && pidof systemd >/dev/null 2>&1; then
-        if systemctl list-unit-files | grep -q '^openresty\.service'; then
-            svc="openresty"
-        elif systemctl list-unit-files | grep -q '^nginx\.service'; then
-            svc="nginx"
-        fi
-
-        if [[ -n "${svc}" ]]; then
-            log "Enabling & starting ${svc}..."
-            systemctl enable "${svc}"
-            systemctl restart "${svc}"
-        else
-            err "Не найден ни openresty.service, ни nginx.service. Возможно, установка прошла криво."
-        fi
-    else
-        log "systemctl недоступен (контейнер без systemd?), пропускаю enable/start."
-    fi
-}
+# ---------- install_nginx (только nginx, без OpenResty) ----------
 
 install_nginx() {
     detect_os
     require_root
-    log "Installing Nginx/OpenResty for ${OS_NAME} (${DIST_ID})..."
+    log "Installing nginx for ${OS_NAME} (${DIST_ID})..."
 
     if [[ "${DIST_FAMILY}" == "debian" ]]; then
-        run_apt update -y
-        run_apt install -y ca-certificates lsb-release gnupg
-
-        # Если openresty ещё не установлен — пробуем
-        if ! command -v openresty >/dev/null 2>&1; then
-            if install_openresty_repo_debian; then
-                if ! run_apt install -y openresty; then
-                    err "Установка OpenResty не удалась, ставлю обычный nginx."
-                    run_apt install -y nginx
+        # Чистим старые openresty-репы, если они вдруг остались
+        if [[ -d /etc/apt/sources.list.d ]]; then
+            for f in /etc/apt/sources.list.d/*openresty*.list; do
+                if [[ -e "$f" ]]; then
+                    log "Удаляю старый репозиторий OpenResty: $f"
+                    rm -f "$f"
                 fi
-            else
-                log "Ставлю обычный nginx из репозитория дистрибутива."
-                run_apt install -y nginx
-            fi
-        else
-            log "OpenResty уже установлен, пропускаю установку."
+            done
         fi
 
+        # На всякий случай прибиваем пакеты OpenResty, если они остались
+        if dpkg -l 2>/dev/null | grep -E '^(i.|rc)\s+openresty(\s|$)' >/dev/null 2>&1; then
+            log "Удаляю пакеты OpenResty, чтобы не ломали dpkg..."
+            dpkg -P --force-remove-reinstreq openresty openresty-opm openresty-resty || true
+            dpkg --configure -a || true
+        fi
+
+        run_apt update -y
+        run_apt install -y nginx
+
     elif [[ "${DIST_FAMILY}" == "rhel" ]]; then
-        run_yum install -y epel-release
+        run_yum install -y epel-release || true
         run_yum install -y nginx
     else
-        err "Unsupported distribution for nginx/openresty: ${DIST_ID}"
+        err "Unsupported distribution for nginx: ${DIST_ID}"
         exit 1
     fi
 
     enable_http_service
 }
 
-# ============ Установка Certbot ============
+# ---------- install_certbot ----------
 
 install_certbot() {
     detect_os
@@ -203,7 +185,6 @@ install_certbot() {
 
     if [[ "${DIST_FAMILY}" == "debian" ]]; then
         run_apt update -y
-        # Классическая связка apt-пакетов (без snap)
         run_apt install -y certbot python3-certbot-nginx
     elif [[ "${DIST_FAMILY}" == "rhel" ]]; then
         run_yum install -y certbot python3-certbot-nginx || run_yum install -y certbot
@@ -215,7 +196,7 @@ install_certbot() {
     log "Certbot установлен."
 }
 
-# ============ Python окружение ============
+# ---------- install_python_env ----------
 
 install_python_env() {
     require_root
@@ -240,7 +221,7 @@ install_python_env() {
     fi
 }
 
-# ============ systemd-сервис агента ============
+# ---------- install_agent_service ----------
 
 install_agent_service() {
     require_root
@@ -256,7 +237,7 @@ install_agent_service() {
         exit 1
     fi
 
-    cat >/etc/systemd/system/${SERVICE_NAME}.service <<EOF
+    cat >/etc/systemd/system/${SERVICE_NAME}.service <<SERVICE_EOF
 [Unit]
 Description=CDN WAF Edge Agent
 After=network.target
@@ -272,7 +253,7 @@ Environment=PYTHONUNBUFFERED=1
 
 [Install]
 WantedBy=multi-user.target
-EOF
+SERVICE_EOF
 
     if command -v systemctl >/dev/null 2>&1 && pidof systemd >/dev/null 2>&1; then
         systemctl daemon-reload
@@ -280,20 +261,17 @@ EOF
         systemctl restart "${SERVICE_NAME}"
         log "Сервис ${SERVICE_NAME} установлен и запущен."
     else
-        err "systemd недоступен, сервис создан, но включить/запустить его я не могу. Сделай это сам в подходящей среде."
+        err "systemd недоступен, сервис создан, но включить/запустить его я не могу."
     fi
 }
 
-# ============ Диспетчер команд ============
-
 usage() {
-    cat <<EOF
+    cat <<USAGE_EOF
 Usage: $0 {install_deps|install_nginx|install_certbot|install_python|install_agent_service}
 
 ENV:
   APP_DIR   Папка приложения (по умолчанию: /opt/cdn_waf)
-
-EOF
+USAGE_EOF
 }
 
 case "${1:-}" in
