@@ -1,9 +1,9 @@
-# Makefile for CDN WAF
+# Makefile for FlareCloud
 
 .PHONY: help install dev test clean docker-up docker-down migrate format lint
 
 help:
-	@echo "CDN WAF - Makefile Commands"
+	@echo "FlareCloud - Makefile Commands"
 	@echo ""
 	@echo "Setup:"
 	@echo "  make install       - Install dependencies"

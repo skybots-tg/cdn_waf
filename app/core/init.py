@@ -48,6 +48,17 @@ async def migrate_schema():
                 logger.info("Adding ssh_password column to edge_nodes...")
                 await session.execute(text("ALTER TABLE edge_nodes ADD COLUMN IF NOT EXISTS ssh_password VARCHAR(255)"))
                 await session.commit()
+
+            # 3. Check/Add protocol to origins
+            result_proto = await session.execute(text(
+                "SELECT column_name FROM information_schema.columns "
+                "WHERE table_name='origins' AND column_name='protocol'"
+            ))
+            
+            if not result_proto.scalar():
+                logger.info("Adding protocol column to origins...")
+                await session.execute(text("ALTER TABLE origins ADD COLUMN IF NOT EXISTS protocol VARCHAR(10) DEFAULT 'https' NOT NULL"))
+                await session.commit()
                 
     except Exception as e:
         logger.error(f"Schema migration error: {e}")
@@ -117,7 +128,7 @@ async def check_database_connection():
 
 async def init_system():
     """Initialize system on startup"""
-    logger.info("Initializing CDN WAF system...")
+    logger.info("Initializing FlareCloud system...")
     
     # Check database
     db_ok = await check_database_connection()

@@ -1,8 +1,8 @@
 @echo off
-REM CDN WAF Quick Start Script for Windows
+REM FlareCloud Quick Start Script for Windows
 
 echo ========================================
-echo    CDN WAF - Quick Start Setup
+echo    FlareCloud - Quick Start Setup
 echo ========================================
 echo.
 

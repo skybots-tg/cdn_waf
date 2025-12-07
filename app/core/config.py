@@ -8,7 +8,7 @@ class Settings(BaseSettings):
     """Application settings"""
     
     # Application
-    APP_NAME: str = "CDN WAF"
+    APP_NAME: str = "FlareCloud"
     APP_ENV: str = "development"
     DEBUG: bool = True
     SECRET_KEY: str

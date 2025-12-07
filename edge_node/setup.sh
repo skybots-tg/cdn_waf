@@ -239,7 +239,7 @@ install_agent_service() {
 
     cat >/etc/systemd/system/${SERVICE_NAME}.service <<SERVICE_EOF
 [Unit]
-Description=CDN WAF Edge Agent
+Description=FlareCloud Edge Agent
 After=network.target
 
 [Service]

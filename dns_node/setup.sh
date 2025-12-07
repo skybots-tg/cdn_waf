@@ -286,7 +286,7 @@ install_dns_service() {
 
     cat >"/etc/systemd/system/${SERVICE_NAME}.service" <<EOF
 [Unit]
-Description=CDN WAF DNS Server
+Description=FlareCloud DNS Server
 After=network-online.target
 Wants=network-online.target
 

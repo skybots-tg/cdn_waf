@@ -65,7 +65,7 @@ app.include_router(web.router)
 async def root():
     """Root endpoint"""
     return {
-        "message": "CDN WAF Control Panel API",
+        "message": "FlareCloud Control Panel API",
         "version": "0.1.0",
         "docs": "/docs",
     }

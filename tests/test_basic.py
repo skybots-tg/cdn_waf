@@ -46,7 +46,7 @@ async def test_redis():
 async def main():
     """Run all tests"""
     print("=" * 50)
-    print("CDN WAF - Basic Functionality Test")
+    print("FlareCloud - Basic Functionality Test")
     print("=" * 50)
     
     await test_config()

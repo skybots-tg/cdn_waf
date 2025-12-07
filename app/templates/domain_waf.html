@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 
-{% block title %}{{ domain.name }} - WAF - CDN WAF{% endblock %}
+{% block title %}{{ domain.name }} - WAF - FlareCloud{% endblock %}
 
 {% block content %}
 <div class="container" style="padding: 32px 24px;">
@@ -207,6 +207,13 @@ async function loadWAFRules() {
     try {
         const response = await fetch(`/api/v1/domains/${DOMAIN_ID}/waf/rules`);
         const data = await response.json();
+        
+        // Update active rules count
+        const activeCount = data.filter(r => r.enabled).length;
+        const activeRulesEl = document.getElementById('active-rules');
+        if (activeRulesEl) {
+            activeRulesEl.textContent = activeCount;
+        }
         
         const list = document.getElementById('waf-rules-list');
         

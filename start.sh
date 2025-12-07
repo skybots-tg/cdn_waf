@@ -1,12 +1,12 @@
 #!/bin/bash
 
-# CDN WAF Quick Start Script
-# This script helps you get started with CDN WAF quickly
+# FlareCloud Quick Start Script
+# This script helps you get started with FlareCloud quickly
 
 set -e
 
 echo "========================================"
-echo "   CDN WAF - Quick Start Setup"
+echo "   FlareCloud - Quick Start Setup"
 echo "========================================"
 echo ""
 
