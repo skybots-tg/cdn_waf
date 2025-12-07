@@ -315,26 +315,10 @@ function changeGlobalChartMetric(metric) {
 
 async function loadGlobalChartData(timeRange) {
     try {
-        // Mock chart data for now since we don't have real time-series endpoint yet
-        const labels = [];
-        const data = [];
+        const response = await fetch(`/api/v1/stats/global/timeseries?range=${timeRange}&metric=${globalChartMetric}`);
+        const result = await response.json();
         
-        const now = new Date();
-        const points = 24; 
-        
-        for (let i = points; i >= 0; i--) {
-            const d = new Date(now.getTime() - i * 3600 * 1000);
-            labels.push(d.getHours() + ':00');
-            
-            // Random data for demo
-            if (globalChartMetric === 'requests') {
-                data.push(Math.floor(Math.random() * 5000) + 500);
-            } else {
-                data.push(Math.floor(Math.random() * 2000) * 1024 * 1024); // Random MB
-            }
-        }
-        
-        renderGlobalChart(labels, data);
+        renderGlobalChart(result.labels, result.data);
         
     } catch (error) {
         console.error('Error loading global chart data:', error);

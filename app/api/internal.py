@@ -12,6 +12,7 @@ from app.models.origin import Origin
 from app.models.cache import CacheRule
 from app.models.waf import WAFRule, RateLimit
 from app.models.certificate import Certificate
+from app.models.log import RequestLog
 from app.services.edge_service import EdgeNodeService
 
 router = APIRouter()
@@ -271,8 +272,56 @@ async def receive_logs(
         }
     ]
     """
-    # TODO: Store logs in database or forward to log aggregator
-    # For now, just acknowledge receipt
+    if not logs:
+        return {"status": "ok", "received": 0}
+
+    # Pre-fetch domains to minimize queries
+    domain_names = list(set(log.get("domain") for log in logs if log.get("domain")))
+    domains_map = {}
+    
+    if domain_names:
+        domains_result = await db.execute(
+            select(Domain).where(Domain.name.in_(domain_names))
+        )
+        domains_map = {d.name: d.id for d in domains_result.scalars().all()}
+    
+    log_entries = []
+    for log_data in logs:
+        domain_name = log_data.get("domain")
+        domain_id = domains_map.get(domain_name)
+        
+        # Parse timestamp
+        timestamp_str = log_data.get("timestamp")
+        if timestamp_str:
+            try:
+                timestamp = datetime.fromisoformat(timestamp_str.replace("Z", "+00:00"))
+            except ValueError:
+                timestamp = datetime.utcnow()
+        else:
+            timestamp = datetime.utcnow()
+        
+        entry = RequestLog(
+            timestamp=timestamp,
+            domain_id=domain_id,
+            edge_node_id=node.id,
+            method=log_data.get("method"),
+            path=log_data.get("path"),
+            status_code=log_data.get("status"),
+            bytes_sent=log_data.get("bytes_sent", 0),
+            client_ip=log_data.get("client_ip"),
+            cache_status=log_data.get("cache_status"),
+            user_agent=log_data.get("user_agent"),
+            referer=log_data.get("referer"),
+            request_time=log_data.get("request_time"),
+            country_code=log_data.get("country_code"),
+            waf_status=log_data.get("waf_status"),
+            waf_rule_id=log_data.get("waf_rule_id")
+        )
+        log_entries.append(entry)
+    
+    if log_entries:
+        db.add_all(log_entries)
+        await db.commit()
     
     return {
         "status": "ok",
