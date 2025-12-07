@@ -216,13 +216,13 @@ async def check_node_health(
     health = await EdgeNodeService.check_node_health(node)
     
     # Update metrics in database
-    if "cpu_usage" in health:
-        await EdgeNodeService.update_metrics(
-            db,
-            node_id,
-            cpu_usage=health.get("cpu_usage"),
-            memory_usage=health.get("memory_usage"),
-            disk_usage=health.get("disk_usage")
-        )
+    await EdgeNodeService.update_metrics(
+        db,
+        node_id,
+        cpu_usage=health.get("cpu_usage"),
+        memory_usage=health.get("memory_usage"),
+        disk_usage=health.get("disk_usage"),
+        status=health.get("status", "unknown")
+    )
     
     return health

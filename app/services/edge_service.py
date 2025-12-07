@@ -312,7 +312,15 @@ class EdgeNodeService:
         status_output = result.stdout.strip()
         running = status_output == "active"
         
-        if status_output:
+        if not result.success:
+             # Command failed or service inactive
+             if "SSH" in result.stderr:
+                 status_text = "Connection Error"
+             elif status_output:
+                 status_text = status_output # e.g. inactive, failed
+             else:
+                 status_text = "Stopped" # Default for exit code non-zero without output
+        elif status_output:
             status_text = status_output
         else:
             status_text = "unknown"
@@ -539,7 +547,8 @@ class EdgeNodeService:
         node_id: int,
         cpu_usage: Optional[float] = None,
         memory_usage: Optional[float] = None,
-        disk_usage: Optional[float] = None
+        disk_usage: Optional[float] = None,
+        status: str = "online"
     ) -> bool:
         """Update node metrics"""
         node = await EdgeNodeService.get_node(db, node_id)
@@ -554,5 +563,6 @@ class EdgeNodeService:
             node.disk_usage = disk_usage
         
         node.last_heartbeat = datetime.utcnow()
+        node.status = status
         await db.commit()
         return True
