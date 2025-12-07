@@ -334,7 +334,7 @@
                 data.priority = parseInt(priority);
             }
 
-            await api.post(`/domains/${domainId}/records`, data);
+            await api.post(`/dns/domains/${domainId}/records`, data);
             
             showNotification('DNS record created successfully', 'success');
             closeAddRecordModal();
