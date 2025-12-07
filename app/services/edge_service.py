@@ -458,8 +458,8 @@ class EdgeNodeService:
     ) -> EdgeNodeCommandResult:
         """Manage component on edge node (start, stop, restart, etc.)"""
         
-        # Handle installations via setup script
-        if action == "install":
+        # Handle installations and updates
+        if action == "install" or (component == "agent" and action == "update"):
             if component == "system":
                 return await EdgeNodeService.run_setup_script(node, "install_deps")
             elif component == "nginx":
@@ -469,7 +469,7 @@ class EdgeNodeService:
             elif component == "python":
                 return await EdgeNodeService.run_setup_script(node, "install_python")
             elif component == "agent":
-                # Special handling for agent: upload code first
+                # Logic for agent install/update (upload files)
                 
                 # Prepare config
                 config_content = ""
@@ -538,7 +538,7 @@ class EdgeNodeService:
                 "stop": "systemctl stop cdn-waf-agent",
                 "restart": "systemctl restart cdn-waf-agent",
                 "status": "systemctl status cdn-waf-agent",
-                "update": "cd /opt/cdn_waf && git pull && systemctl restart cdn-waf-agent"
+                # update is now handled above manually via file upload
             }
         }
         
