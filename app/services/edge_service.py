@@ -428,8 +428,31 @@ class EdgeNodeService:
             elif ssh_password:
                 connect_kwargs["password"] = ssh_password
 
+            # Check if remote file exists and is writable
+            # For simplicity, we just try to upload. But if permission denied, we might need sudo.
+            # AsyncSSH scp doesn't support sudo directly easily.
+            # We will upload to /tmp first then move with sudo if needed.
+            
+            tmp_remote_path = f"/tmp/{os.path.basename(local_path)}_{secrets.token_hex(4)}"
+
             async with asyncssh.connect(**connect_kwargs) as conn:
-                await asyncssh.scp(local_path, (conn, remote_path))
+                await asyncssh.scp(local_path, (conn, tmp_remote_path))
+                
+                # Move to final destination (using sudo if user is not root)
+                cmd = f"mv {tmp_remote_path} {remote_path}"
+                if ssh_user != "root":
+                    cmd = f"sudo mv {tmp_remote_path} {remote_path}"
+                
+                # Also ensure ownership/permissions if needed? 
+                # For now let's just move.
+                
+                result = await conn.run(cmd)
+                if result.exit_status != 0:
+                     logger.error(f"Failed to move file to destination: {result.stderr}")
+                     # Clean up tmp file
+                     await conn.run(f"rm {tmp_remote_path}")
+                     return False
+                     
                 return True
                 
         except Exception as e:
@@ -525,8 +548,9 @@ class EdgeNodeService:
                         (tmp_config_path, "/opt/cdn_waf/config.yaml") 
                     ]
                     
-                    # Ensure directory exists
-                    await EdgeNodeService.execute_command(node, "mkdir -p /opt/cdn_waf")
+            # Ensure directory exists
+            await EdgeNodeService.execute_command(node, "mkdir -p /opt/cdn_waf || sudo mkdir -p /opt/cdn_waf")
+            await EdgeNodeService.execute_command(node, "chown -R $USER:$USER /opt/cdn_waf || sudo chown -R $USER:$USER /opt/cdn_waf")
                     
                     for local, remote in files_to_upload:
                         if not await EdgeNodeService.upload_file(node, local, remote):
