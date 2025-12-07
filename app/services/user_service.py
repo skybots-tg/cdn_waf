@@ -58,3 +58,4 @@ class UserService:
         user.last_login = datetime.utcnow()
         await self.db.flush()
 
+

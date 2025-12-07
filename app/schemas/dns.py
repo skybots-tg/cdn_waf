@@ -46,3 +46,4 @@ class DNSRecordResponse(BaseModel):
     class Config:
         from_attributes = True
 
+

@@ -59,3 +59,4 @@ class Certificate(Base):
     # Relationships
     domain = relationship("Domain", back_populates="certificates")
 
+

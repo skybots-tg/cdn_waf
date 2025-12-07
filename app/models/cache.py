@@ -47,3 +47,4 @@ class CacheRule(Base):
     # Relationships
     domain = relationship("Domain", back_populates="cache_rules")
 
+

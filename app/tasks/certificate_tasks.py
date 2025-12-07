@@ -26,3 +26,4 @@ def check_expiring_certificates():
     print("Checking expiring certificates")
     return {"status": "success", "checked": 0}
 
+

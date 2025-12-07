@@ -37,3 +37,4 @@ class DNSRecord(Base):
     # Relationships
     domain = relationship("Domain", back_populates="dns_records")
 
+

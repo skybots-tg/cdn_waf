@@ -78,3 +78,4 @@ class RateLimit(Base):
     # Relationships
     domain = relationship("Domain", back_populates="rate_limits")
 
+

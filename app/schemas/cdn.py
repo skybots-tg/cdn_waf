@@ -112,3 +112,4 @@ class CachePurgeRequest(BaseModel):
     urls: Optional[list[str]] = None
     patterns: Optional[list[str]] = None
 
+

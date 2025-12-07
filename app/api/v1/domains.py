@@ -130,3 +130,4 @@ async def verify_ns(
     
     return {"verified": verified, "domain_id": domain_id}
 
+

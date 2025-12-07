@@ -48,3 +48,4 @@ class OrganizationMember(Base):
     organization = relationship("Organization", back_populates="members")
     user = relationship("User", back_populates="organization_memberships")
 
+

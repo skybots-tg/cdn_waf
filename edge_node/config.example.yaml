@@ -17,3 +17,4 @@ monitoring:
   enabled: true
   endpoint: "https://control.yourcdn.ru/api/v1/edge/metrics"
 
+

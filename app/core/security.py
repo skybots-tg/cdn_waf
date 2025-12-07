@@ -92,3 +92,4 @@ async def get_current_active_user(current_user = Depends(get_current_user)):
     """Get current active user"""
     return current_user
 
+

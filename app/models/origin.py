@@ -42,3 +42,4 @@ class Origin(Base):
     # Relationships
     domain = relationship("Domain", back_populates="origins")
 
+

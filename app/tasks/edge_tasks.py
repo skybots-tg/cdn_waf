@@ -26,3 +26,4 @@ def health_check_origins():
     print("Checking origin health")
     return {"status": "success", "checked": 0}
 
+

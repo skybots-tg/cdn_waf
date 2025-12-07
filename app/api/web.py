@@ -52,3 +52,4 @@ async def domain_dns_page(request: Request, domain_id: int):
         "domain": {"id": domain_id, "name": "example.com"}  # TODO: Get real domain
     })
 
+
