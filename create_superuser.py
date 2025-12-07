@@ -5,7 +5,8 @@ from getpass import getpass
 from sqlalchemy import select
 
 from app.core.database import AsyncSessionLocal
-from app.models.user import User
+# Import all models to ensure relationships are resolved
+from app.models import User, Organization
 from app.core.security import get_password_hash
 
 
