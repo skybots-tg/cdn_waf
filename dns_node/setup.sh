@@ -185,6 +185,28 @@ install_dns_service() {
         warn "Каталог ${APP_DIR}/app не найден. Убедись, что код приложения уже скопирован в ${APP_DIR}."
     fi
 
+    # === Fix Port 53 Conflict ===
+    log "Checking for port 53 conflicts..."
+    if ss -tuln | grep ':53 ' >/dev/null 2>&1 || lsof -i :53 >/dev/null 2>&1; then
+        warn "Port 53 is in use. Attempting to free it by disabling systemd-resolved..."
+        
+        # Stop and disable systemd-resolved if active
+        if systemctl is-active --quiet systemd-resolved; then
+            systemctl stop systemd-resolved
+            systemctl disable systemd-resolved
+            log "systemd-resolved stopped and disabled."
+            
+            # Fix resolv.conf so the server still has DNS
+            rm -f /etc/resolv.conf
+            echo "nameserver 8.8.8.8" > /etc/resolv.conf
+            echo "nameserver 1.1.1.1" >> /etc/resolv.conf
+            log "/etc/resolv.conf updated to use public DNS."
+        else
+            warn "Port 53 is used by something else (not systemd-resolved). Please check manually: lsof -i :53"
+        fi
+    fi
+    # ============================
+
     cat >/etc/systemd/system/${SERVICE_NAME}.service <<EOF
 [Unit]
 Description=CDN WAF DNS Server
