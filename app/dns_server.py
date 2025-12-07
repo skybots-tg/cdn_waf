@@ -253,6 +253,36 @@ async def sync_data(payload: DNSSyncPayload):
     logger.info("Received sync request")
     try:
         with SessionLocal() as db:
+            def insert_rows(table_name: str, rows: list[dict]):
+                """Insert rows only into existing columns to avoid schema drift issues."""
+                if not rows:
+                    return
+                cols_res = db.execute(
+                    text(
+                        "SELECT column_name FROM information_schema.columns "
+                        "WHERE table_name = :table_name"
+                    ),
+                    {"table_name": table_name},
+                )
+                table_columns = [r[0] for r in cols_res]
+                if not table_columns:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"Table {table_name} has no columns (not found?)",
+                    )
+                # Use only columns that exist both in DB and in incoming rows
+                used_columns = [
+                    c for c in table_columns if any(c in row for row in rows)
+                ]
+                if not used_columns:
+                    return
+                stmt = text(
+                    f"INSERT INTO {table_name} ({', '.join(used_columns)}) "
+                    f"VALUES ({', '.join(':'+c for c in used_columns)})"
+                )
+                filtered_rows = [{c: row.get(c) for c in used_columns} for row in rows]
+                db.execute(stmt, filtered_rows)
+
             # 1. Truncate tables
             # We use TRUNCATE CASCADE to clear everything
             # Note: We include edge_nodes and dns_nodes if we sync them
@@ -260,38 +290,23 @@ async def sync_data(payload: DNSSyncPayload):
             
             # 2. Insert Users
             if payload.users:
-                db.execute(
-                    User.__table__.insert(),
-                    [u.dict() for u in payload.users]
-                )
+                insert_rows("users", [u.dict() for u in payload.users])
             
             # 3. Insert Organizations
             if payload.organizations:
-                db.execute(
-                    Organization.__table__.insert(),
-                    [o.dict() for o in payload.organizations]
-                )
+                insert_rows("organizations", [o.dict() for o in payload.organizations])
             
             # 4. Insert Domains
             if payload.domains:
-                db.execute(
-                    Domain.__table__.insert(),
-                    [d.dict() for d in payload.domains]
-                )
+                insert_rows("domains", [d.dict() for d in payload.domains])
             
             # 5. Insert DNS Records
             if payload.records:
-                db.execute(
-                    DNSModel.__table__.insert(),
-                    [r.dict() for r in payload.records]
-                )
+                insert_rows("dns_records", [r.dict() for r in payload.records])
             
             # 6. Insert Edge Nodes
             if payload.edge_nodes:
-                db.execute(
-                    EdgeNode.__table__.insert(),
-                    [n.dict() for n in payload.edge_nodes]
-                )
+                insert_rows("edge_nodes", [n.dict() for n in payload.edge_nodes])
 
             db.commit()
             logger.info("Sync completed successfully")
