@@ -8,6 +8,11 @@ export DEBIAN_FRONTEND="${DEBIAN_FRONTEND:-noninteractive}"
 APP_DIR="${APP_DIR:-/opt/cdn_waf}"
 SERVICE_NAME="${SERVICE_NAME:-cdn-waf-dns}"
 PYTHON_BIN="${PYTHON_BIN:-python3}"
+SERVICE_USER="${SERVICE_USER:-root}"
+
+# Определяем расположение скрипта и корня репозитория
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
+REPO_ROOT="$(dirname "$SCRIPT_DIR")"
 
 # ===== Logging / error handling =====
 
@@ -118,9 +123,53 @@ install_deps() {
         curl git build-essential \
         python3 python3-venv python3-dev python3-pip \
         libpq-dev \
-        psmisc lsof net-tools
-        
+        psmisc lsof net-tools rsync
+
     log "Системные зависимости установлены."
+}
+
+deploy_code() {
+    require_root
+    log "Копирование кода приложения в ${APP_DIR}..."
+
+    mkdir -p "${APP_DIR}"
+
+    if [[ -f "${REPO_ROOT}/requirements.txt" ]]; then
+        log "Копирую файлы из ${REPO_ROOT}..."
+        
+        # Используем rsync для удобства, исключая venv и .git
+        # Если rsync нет, можно cp, но rsync лучше
+        if command -v rsync >/dev/null 2>&1; then
+            rsync -av --exclude 'venv' --exclude '.git' --exclude '__pycache__' \
+                "${REPO_ROOT}/" "${APP_DIR}/"
+        else
+            # Fallback to cp
+            cp -R "${REPO_ROOT}/app" "${APP_DIR}/"
+            cp "${REPO_ROOT}/requirements.txt" "${APP_DIR}/"
+            [[ -d "${REPO_ROOT}/alembic" ]] && cp -R "${REPO_ROOT}/alembic" "${APP_DIR}/"
+            [[ -f "${REPO_ROOT}/alembic.ini" ]] && cp "${REPO_ROOT}/alembic.ini" "${APP_DIR}/"
+            # .env копируем только если его нет
+            if [[ -f "${REPO_ROOT}/.env" && ! -f "${APP_DIR}/.env" ]]; then
+                cp "${REPO_ROOT}/.env" "${APP_DIR}/"
+            fi
+        fi
+        
+        # Создаем .env если нет
+        if [[ ! -f "${APP_DIR}/.env" && -f "${APP_DIR}/.env.example" ]]; then
+             log "Создаю .env из .env.example..."
+             cp "${APP_DIR}/.env.example" "${APP_DIR}/.env"
+        fi
+        
+        log "Файлы скопированы."
+    else
+        warn "Не найден исходный код в ${REPO_ROOT}. Пропускаю копирование. Надеюсь, файлы уже на месте."
+    fi
+    
+    # Выставляем права, если запускаем не от того юзера (хотя скрипт от root)
+    # Если будем запускать сервис от SERVICE_USER, надо дать права
+    if id "$SERVICE_USER" >/dev/null 2>&1; then
+        chown -R "$SERVICE_USER:$SERVICE_USER" "$APP_DIR"
+    fi
 }
 
 install_python() {
@@ -148,7 +197,7 @@ install_python() {
         "${APP_DIR}/venv/bin/pip" install --upgrade pip
         "${APP_DIR}/venv/bin/pip" install -r requirements.txt
     else
-        warn "requirements.txt не найден в ${APP_DIR}. Пропускаю установку Python-зависимостей."
+        fatal "requirements.txt не найден в ${APP_DIR}. Не могу установить зависимости."
     fi
 
     log "Python окружение готово."
@@ -158,6 +207,7 @@ install_python() {
 
 install_certbot() {
     require_root
+    ensure_apt_based
     log "Установка Certbot..."
     apt_install_safe certbot
     log "Certbot установлен."
@@ -174,8 +224,13 @@ check_systemd() {
 install_dns_service() {
     require_root
     check_systemd
+    ensure_apt_based
 
-    log "Устанавливаю systemd-сервис ${SERVICE_NAME}..."
+    if ! id -u "${SERVICE_USER}" >/dev/null 2>&1; then
+        fatal "Пользователь ${SERVICE_USER} не существует. Создай его заранее или не задавай SERVICE_USER."
+    fi
+
+    log "Устанавливаю systemd-сервис ${SERVICE_NAME} от пользователя ${SERVICE_USER}..."
 
     if [[ ! -x "${APP_DIR}/venv/bin/python" ]]; then
         warn "Похоже, venv ещё не создан или битый. Запускаю install_python..."
@@ -188,37 +243,48 @@ install_dns_service() {
 
     # === Fix Port 53 Conflict ===
     log "Checking for port 53 conflicts..."
-    
+
     # Ensure tools are present (just in case deps wasn't run recently)
     if ! command -v fuser >/dev/null 2>&1; then
         apt_install_safe psmisc
     fi
 
-    # Stop systemd-resolved specifically
-    if systemctl is-active --quiet systemd-resolved; then
-        log "Stopping systemd-resolved..."
-        systemctl stop systemd-resolved || true
-        systemctl disable systemd-resolved || true
-    fi
-
-    # Force kill anything on port 53
+    # Force kill anything on port 53 only если реально что-то слушает
     if fuser 53/tcp >/dev/null 2>&1 || fuser 53/udp >/dev/null 2>&1; then
-        warn "Port 53 still in use. Force killing..."
+        # Stop systemd-resolved, если он живой
+        if systemctl is-active --quiet systemd-resolved; then
+            log "Stopping systemd-resolved..."
+            systemctl stop systemd-resolved || true
+            systemctl disable systemd-resolved || true
+        fi
+
+        warn "Port 53 всё ещё занят. Убиваю процессы..."
         fuser -k -9 53/tcp || true
         fuser -k -9 53/udp || true
         sleep 2
-    fi
 
-    # Fix resolv.conf if we killed the local resolver
-    if [[ -L /etc/resolv.conf ]] || grep -q "127.0.0.53" /etc/resolv.conf; then
-        log "Updating /etc/resolv.conf to use public DNS..."
-        rm -f /etc/resolv.conf
-        echo "nameserver 8.8.8.8" > /etc/resolv.conf
-        echo "nameserver 1.1.1.1" >> /etc/resolv.conf
+        # Чиним resolv.conf, если выключили локальный резолвер
+        if [[ -e /etc/resolv.conf ]]; then
+            if [[ -L /etc/resolv.conf ]] || grep -q "127.0.0.53" /etc/resolv.conf 2>/dev/null; then
+                log "Updating /etc/resolv.conf to use public DNS..."
+                rm -f /etc/resolv.conf
+                {
+                    echo "nameserver 8.8.8.8"
+                    echo "nameserver 1.1.1.1"
+                } > /etc/resolv.conf
+            fi
+        else
+            # На всякий случай создаём нормальный resolv.conf
+            log "Создаю /etc/resolv.conf с публичными DNS..."
+            {
+                echo "nameserver 8.8.8.8"
+                echo "nameserver 1.1.1.1"
+            } > /etc/resolv.conf
+        fi
     fi
     # ============================
 
-    cat >/etc/systemd/system/${SERVICE_NAME}.service <<EOF
+    cat >"/etc/systemd/system/${SERVICE_NAME}.service" <<EOF
 [Unit]
 Description=CDN WAF DNS Server
 After=network-online.target
@@ -226,14 +292,13 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-User=root
+User=${SERVICE_USER}
 WorkingDirectory=${APP_DIR}
 ExecStart=${APP_DIR}/venv/bin/python -m app.dns_server
 Restart=always
 RestartSec=10
 Environment=PYTHONUNBUFFERED=1
 EnvironmentFile=-${APP_DIR}/.env
-# Если нужен другой пользователь (не root) — переопредели через env SERVICE_USER и поправь права на APP_DIR.
 
 [Install]
 WantedBy=multi-user.target
@@ -260,6 +325,7 @@ EOF
 
 install_all() {
     install_deps
+    deploy_code
     install_python
     install_dns_service
 }
@@ -281,6 +347,7 @@ Usage: $0 <command>
   APP_DIR       - путь к приложению (default: /opt/cdn_waf)
   SERVICE_NAME  - имя systemd сервиса (default: cdn-waf-dns)
   PYTHON_BIN    - бинарник python (default: python3)
+  SERVICE_USER  - пользователь, от которого будет работать сервис (default: root)
 EOF
 }
 
