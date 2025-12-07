@@ -22,6 +22,7 @@ class EdgeNodeCreate(EdgeNodeBase):
     ssh_port: int = Field(default=22, ge=1, le=65535)
     ssh_user: Optional[str] = None
     ssh_key: Optional[str] = None  # SSH private key content
+    ssh_password: Optional[str] = None # SSH password
 
 
 class EdgeNodeUpdate(BaseModel):
@@ -38,6 +39,7 @@ class EdgeNodeUpdate(BaseModel):
     ssh_port: Optional[int] = Field(None, ge=1, le=65535)
     ssh_user: Optional[str] = None
     ssh_key: Optional[str] = None
+    ssh_password: Optional[str] = None
 
 
 class EdgeNodeResponse(EdgeNodeBase):
@@ -53,11 +55,12 @@ class EdgeNodeResponse(EdgeNodeBase):
     created_at: datetime
     updated_at: Optional[datetime] = None
     
-    # SSH info (без приватного ключа)
+    # SSH info (без приватного ключа и пароля)
     ssh_host: Optional[str] = None
     ssh_port: Optional[int] = None
     ssh_user: Optional[str] = None
     has_ssh_key: bool = False
+    has_ssh_password: bool = False
 
     class Config:
         from_attributes = True

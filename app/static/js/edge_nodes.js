@@ -153,6 +153,15 @@ async function editNode(nodeId) {
         document.getElementById('node-ssh-user').value = node.ssh_user || '';
         document.getElementById('node-enabled').checked = node.enabled;
         
+        // Handle auth method
+        if (node.has_ssh_key) {
+            document.querySelector('input[name="auth_method"][value="key"]').checked = true;
+            toggleAuthMethod();
+        } else {
+            document.querySelector('input[name="auth_method"][value="password"]').checked = true;
+            toggleAuthMethod();
+        }
+        
         document.getElementById('node-modal').style.display = 'flex';
     } catch (error) {
         console.error('Error loading node:', error);
@@ -180,7 +189,12 @@ async function saveNode(event) {
         ssh_host: document.getElementById('node-ssh-host').value || null,
         ssh_port: parseInt(document.getElementById('node-ssh-port').value) || 22,
         ssh_user: document.getElementById('node-ssh-user').value || null,
-        ssh_key: document.getElementById('node-ssh-key').value || null,
+        ssh_key: document.querySelector('input[name="auth_method"]:checked').value === 'key' 
+            ? document.getElementById('node-ssh-key').value 
+            : null,
+        ssh_password: document.querySelector('input[name="auth_method"]:checked').value === 'password'
+            ? document.getElementById('node-ssh-password').value
+            : null,
         enabled: document.getElementById('node-enabled').checked
     };
     
@@ -414,6 +428,17 @@ function formatDateTime(dateStr) {
         hour: '2-digit',
         minute: '2-digit'
     });
+}
+
+function toggleAuthMethod() {
+    const method = document.querySelector('input[name="auth_method"]:checked').value;
+    if (method === 'password') {
+        document.getElementById('auth-password').style.display = 'block';
+        document.getElementById('auth-key').style.display = 'none';
+    } else {
+        document.getElementById('auth-password').style.display = 'none';
+        document.getElementById('auth-key').style.display = 'block';
+    }
 }
 
 // Initialize
