@@ -1,0 +1,437 @@
+{% extends "base.html" %}
+
+{% block title %}Управление нодой {{ node.name }} - CDN WAF{% endblock %}
+
+{% block content %}
+<div class="container" style="padding: 32px 24px;">
+    <!-- Header -->
+    <div class="flex-between mb-4">
+        <div>
+            <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 8px;">
+                <a href="/edge-nodes" style="color: var(--text-secondary); text-decoration: none;">
+                    <i class="fas fa-arrow-left"></i>
+                </a>
+                <h1 style="font-size: 32px; font-weight: 700;">{{ node.name }}</h1>
+                <span class="badge badge-{{ 'success' if node.status == 'active' else 'warning' }}">
+                    {{ node.status }}
+                </span>
+            </div>
+            <p style="color: var(--text-secondary); font-size: 14px;">
+                ID: {{ node.id }} &bull; IP: {{ node.ip_address }} &bull; {{ node.location }}
+            </p>
+        </div>
+        <div style="display: flex; gap: 12px;">
+            <button class="btn btn-secondary" onclick="checkConnection()">
+                <i class="fas fa-plug"></i> Проверить связь
+            </button>
+            <button class="btn btn-primary" onclick="saveSettings()">
+                <i class="fas fa-save"></i> Сохранить
+            </button>
+        </div>
+    </div>
+
+    <!-- Tabs -->
+    <div class="tabs mb-4">
+        <button class="tab-link active" onclick="switchTab('settings')">
+            <i class="fas fa-cog"></i> Настройки
+        </button>
+        <button class="tab-link" onclick="switchTab('components')">
+            <i class="fas fa-boxes"></i> Компоненты и Установка
+        </button>
+        <button class="tab-link" onclick="switchTab('logs')">
+            <i class="fas fa-terminal"></i> Логи операций
+        </button>
+    </div>
+
+    <!-- Tab Content: Settings -->
+    <div id="tab-settings" class="tab-content">
+        <div class="grid grid-2 gap-3">
+            <!-- Basic Info -->
+            <div class="glass-card">
+                <h3 style="font-size: 18px; font-weight: 600; margin-bottom: 20px;">
+                    <i class="fas fa-info-circle"></i> Основная информация
+                </h3>
+                <form id="node-settings-form">
+                    <div class="form-group">
+                        <label class="form-label">Название ноды</label>
+                        <input type="text" class="form-input" name="name" value="{{ node.name }}">
+                    </div>
+                    <div class="grid grid-2 gap-2">
+                        <div class="form-group">
+                            <label class="form-label">IPv4 Адрес</label>
+                            <input type="text" class="form-input" name="ip_address" value="{{ node.ip_address }}">
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">IPv6 Адрес (опционально)</label>
+                            <input type="text" class="form-input" name="ipv6_address" value="{{ node.ipv6_address or '' }}">
+                        </div>
+                    </div>
+                    <div class="grid grid-2 gap-2">
+                        <div class="form-group">
+                            <label class="form-label">Код локации</label>
+                            <input type="text" class="form-input" name="location_code" value="{{ node.location_code or 'RU-MSK' }}">
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">Датацентр</label>
+                            <input type="text" class="form-input" name="datacenter" value="{{ node.datacenter or '' }}">
+                        </div>
+                    </div>
+                    <div class="form-group" style="margin-bottom: 0;">
+                        <label class="flex-between" style="cursor: pointer;">
+                            <span>Активна</span>
+                            <div class="toggle-switch">
+                                <input type="checkbox" name="enabled" {% if node.enabled %}checked{% endif %}>
+                                <span class="toggle-slider"></span>
+                            </div>
+                        </label>
+                    </div>
+                </form>
+            </div>
+
+            <!-- SSH Configuration -->
+            <div class="glass-card">
+                <h3 style="font-size: 18px; font-weight: 600; margin-bottom: 20px;">
+                    <i class="fas fa-key"></i> SSH Доступ
+                </h3>
+                <p style="color: var(--text-secondary); font-size: 13px; margin-bottom: 16px;">
+                    Необходимо для автоматической установки компонентов.
+                </p>
+                <form id="ssh-settings-form">
+                    <div class="grid grid-2 gap-2">
+                        <div class="form-group">
+                            <label class="form-label">SSH Хост (если отличается от IP)</label>
+                            <input type="text" class="form-input" name="ssh_host" value="{{ node.ssh_host or node.ip_address }}">
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">SSH Порт</label>
+                            <input type="number" class="form-input" name="ssh_port" value="{{ node.ssh_port or 22 }}">
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Пользователь (root)</label>
+                        <input type="text" class="form-input" name="ssh_user" value="{{ node.ssh_user or 'root' }}">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">SSH Private Key</label>
+                        <textarea class="form-textarea" name="ssh_key" style="font-family: monospace; font-size: 12px; height: 150px;" placeholder="-----BEGIN OPENSSH PRIVATE KEY-----...">{{ node.ssh_key or '' }}</textarea>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Tab Content: Components -->
+    <div id="tab-components" class="tab-content" style="display: none;">
+        <div class="glass-card mb-4">
+            <div class="flex-between">
+                <div>
+                    <h3 style="font-size: 18px; font-weight: 600;">Состояние компонентов</h3>
+                    <p style="color: var(--text-secondary); font-size: 14px;">Управление программным обеспечением на ноде</p>
+                </div>
+                <button class="btn btn-primary" onclick="installAll()">
+                    <i class="fas fa-sync-alt"></i> Полная установка (Все)
+                </button>
+            </div>
+        </div>
+
+        <div class="grid grid-2 gap-3">
+            <!-- System -->
+            <div class="glass-card">
+                <div class="flex-between mb-3">
+                    <div style="display: flex; gap: 12px; align-items: center;">
+                        <div class="component-icon"><i class="fab fa-linux"></i></div>
+                        <div>
+                            <h4 style="font-weight: 600;">System Dependencies</h4>
+                            <span class="status-dot status-success"></span> <span style="font-size: 12px; color: var(--text-muted);">Installed</span>
+                        </div>
+                    </div>
+                    <div class="dropdown">
+                        <button class="btn btn-sm btn-secondary" onclick="runAction('install_deps')">Переустановить</button>
+                    </div>
+                </div>
+                <p style="font-size: 13px; color: var(--text-secondary);">
+                    Базовые пакеты: curl, git, build-essential, python3-dev
+                </p>
+            </div>
+
+            <!-- Nginx -->
+            <div class="glass-card">
+                <div class="flex-between mb-3">
+                    <div style="display: flex; gap: 12px; align-items: center;">
+                        <div class="component-icon"><i class="fas fa-server"></i></div>
+                        <div>
+                            <h4 style="font-weight: 600;">Nginx & Modules</h4>
+                            <span class="status-dot status-warning"></span> <span style="font-size: 12px; color: var(--text-muted);">Outdated config</span>
+                        </div>
+                    </div>
+                    <div class="flex gap-1">
+                        <button class="btn btn-sm btn-secondary" onclick="runAction('reload_nginx')">Reload</button>
+                        <button class="btn btn-sm btn-secondary" onclick="runAction('install_nginx')">Install</button>
+                    </div>
+                </div>
+                <p style="font-size: 13px; color: var(--text-secondary);">
+                    Веб-сервер и WAF модули. Версия 1.24.0
+                </p>
+            </div>
+
+            <!-- Python Env -->
+            <div class="glass-card">
+                <div class="flex-between mb-3">
+                    <div style="display: flex; gap: 12px; align-items: center;">
+                        <div class="component-icon"><i class="fab fa-python"></i></div>
+                        <div>
+                            <h4 style="font-weight: 600;">Python Environment</h4>
+                            <span class="status-dot status-success"></span> <span style="font-size: 12px; color: var(--text-muted);">Active</span>
+                        </div>
+                    </div>
+                    <button class="btn btn-sm btn-secondary" onclick="runAction('update_python')">Обновить venv</button>
+                </div>
+                <p style="font-size: 13px; color: var(--text-secondary);">
+                    Виртуальное окружение и зависимости приложения
+                </p>
+            </div>
+
+            <!-- Agent -->
+            <div class="glass-card">
+                <div class="flex-between mb-3">
+                    <div style="display: flex; gap: 12px; align-items: center;">
+                        <div class="component-icon"><i class="fas fa-robot"></i></div>
+                        <div>
+                            <h4 style="font-weight: 600;">WAF Agent</h4>
+                            <span class="status-dot status-error"></span> <span style="font-size: 12px; color: var(--text-muted);">Stopped</span>
+                        </div>
+                    </div>
+                    <div class="flex gap-1">
+                        <button class="btn btn-sm btn-secondary" onclick="runAction('restart_agent')">Restart</button>
+                        <button class="btn btn-sm btn-secondary" onclick="runAction('update_agent')">Update Code</button>
+                    </div>
+                </div>
+                <p style="font-size: 13px; color: var(--text-secondary);">
+                    Служба синхронизации конфигураций и отправки логов
+                </p>
+            </div>
+            
+            <!-- SSL -->
+            <div class="glass-card">
+                <div class="flex-between mb-3">
+                    <div style="display: flex; gap: 12px; align-items: center;">
+                        <div class="component-icon"><i class="fas fa-lock"></i></div>
+                        <div>
+                            <h4 style="font-weight: 600;">Certbot & SSL</h4>
+                            <span class="status-dot status-success"></span> <span style="font-size: 12px; color: var(--text-muted);">Ready</span>
+                        </div>
+                    </div>
+                    <button class="btn btn-sm btn-secondary" onclick="runAction('install_certbot')">Install</button>
+                </div>
+                <p style="font-size: 13px; color: var(--text-secondary);">
+                    Инструменты для выпуска Let's Encrypt сертификатов
+                </p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Tab Content: Logs -->
+    <div id="tab-logs" class="tab-content" style="display: none;">
+        <div class="glass-card">
+            <div class="flex-between mb-3">
+                <h3 style="font-size: 18px; font-weight: 600;">Терминал установки</h3>
+                <button class="btn btn-sm btn-secondary" onclick="clearLogs()">
+                    <i class="fas fa-trash"></i> Очистить
+                </button>
+            </div>
+            <div class="terminal-window" id="install-logs">
+                <div class="terminal-line"><span class="terminal-prompt">$</span> ready to connect...</div>
+            </div>
+        </div>
+    </div>
+
+</div>
+
+<style>
+.tabs {
+    display: flex;
+    gap: 12px;
+    border-bottom: 1px solid var(--glass-border);
+    padding-bottom: 12px;
+}
+
+.tab-link {
+    background: transparent;
+    border: none;
+    color: var(--text-secondary);
+    font-size: 14px;
+    font-weight: 500;
+    padding: 8px 16px;
+    cursor: pointer;
+    border-radius: var(--border-radius-sm);
+    transition: all var(--transition-fast);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.tab-link:hover {
+    color: var(--text-primary);
+    background: var(--bg-tertiary);
+}
+
+.tab-link.active {
+    color: var(--accent-primary);
+    background: var(--accent-light);
+}
+
+.component-icon {
+    width: 40px;
+    height: 40px;
+    background: var(--bg-tertiary);
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--text-primary);
+    font-size: 20px;
+}
+
+.status-dot {
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    margin-right: 4px;
+}
+
+.status-success { background: var(--success); box-shadow: 0 0 8px rgba(81, 207, 102, 0.4); }
+.status-warning { background: var(--warning); box-shadow: 0 0 8px rgba(255, 212, 59, 0.4); }
+.status-error { background: var(--error); box-shadow: 0 0 8px rgba(255, 107, 107, 0.4); }
+
+.terminal-window {
+    background: #1e1e1e;
+    color: #f0f0f0;
+    font-family: 'Consolas', 'Monaco', monospace;
+    padding: 16px;
+    border-radius: 8px;
+    height: 400px;
+    overflow-y: auto;
+    font-size: 13px;
+    line-height: 1.5;
+}
+
+.terminal-line { margin-bottom: 4px; }
+.terminal-prompt { color: var(--success); margin-right: 8px; }
+.terminal-info { color: var(--info); }
+.terminal-error { color: var(--error); }
+.terminal-success { color: var(--success); }
+</style>
+
+<script>
+const NODE_ID = {{ node.id }};
+
+function switchTab(tabName) {
+    // Hide all contents
+    document.querySelectorAll('.tab-content').forEach(el => el.style.display = 'none');
+    // Deactivate all buttons
+    document.querySelectorAll('.tab-link').forEach(el => el.classList.remove('active'));
+    
+    // Show selected
+    document.getElementById(`tab-${tabName}`).style.display = 'block';
+    // Activate button (simple matching by index or text, but here manual is fine)
+    const btn = Array.from(document.querySelectorAll('.tab-link')).find(b => b.onclick.toString().includes(tabName));
+    if (btn) btn.classList.add('active');
+}
+
+async function saveSettings() {
+    const form = document.getElementById('node-settings-form');
+    const sshForm = document.getElementById('ssh-settings-form');
+    
+    const data = {
+        ...Object.fromEntries(new FormData(form)),
+        ...Object.fromEntries(new FormData(sshForm))
+    };
+    
+    // Convert checkbox
+    data.enabled = form.querySelector('[name="enabled"]').checked;
+    
+    showNotification('Сохранение настроек...', 'info');
+    
+    try {
+        await api.patch(`/edge-nodes/${NODE_ID}`, data);
+        showNotification('Настройки сохранены', 'success');
+    } catch (error) {
+        showNotification(error.message, 'error');
+    }
+}
+
+function log(message, type = 'normal') {
+    const term = document.getElementById('install-logs');
+    const line = document.createElement('div');
+    line.className = 'terminal-line';
+    
+    let content = `<span class="terminal-prompt">></span> `;
+    if (type === 'error') content += `<span class="terminal-error">${message}</span>`;
+    else if (type === 'success') content += `<span class="terminal-success">${message}</span>`;
+    else if (type === 'info') content += `<span class="terminal-info">${message}</span>`;
+    else content += message;
+    
+    line.innerHTML = content;
+    term.appendChild(line);
+    term.scrollTop = term.scrollHeight;
+}
+
+function clearLogs() {
+    document.getElementById('install-logs').innerHTML = '<div class="terminal-line"><span class="terminal-prompt">$</span> cleared</div>';
+}
+
+async function runAction(action) {
+    switchTab('logs');
+    log(`Запуск действия: ${action}...`, 'info');
+    
+    try {
+        // Mock API call simulation
+        log(`Connecting to {{ node.ip_address }}...`);
+        await new Promise(r => setTimeout(r, 1000));
+        
+        if (action === 'install_deps') {
+            log('apt-get update...');
+            log('apt-get install -y nginx python3-venv certbot...');
+        } else if (action === 'install_nginx') {
+            log('Configuring Nginx...');
+            log('Writing default config...');
+        }
+        
+        await new Promise(r => setTimeout(r, 1500));
+        log(`Action ${action} completed successfully`, 'success');
+        showNotification('Операция выполнена', 'success');
+        
+    } catch (error) {
+        log(`Error: ${error.message}`, 'error');
+        showNotification('Ошибка выполнения', 'error');
+    }
+}
+
+async function installAll() {
+    if (!confirm('Это запустит полную переустановку всех компонентов на ноде. Продолжить?')) return;
+    
+    switchTab('logs');
+    log('Начало полной установки...', 'info');
+    
+    const steps = ['install_deps', 'install_python', 'install_nginx', 'install_certbot', 'install_agent'];
+    
+    for (const step of steps) {
+        await runAction(step);
+    }
+    
+    log('Все компоненты установлены!', 'success');
+}
+
+async function checkConnection() {
+    showNotification('Проверка соединения...', 'info');
+    try {
+        // Mock connection check
+        await new Promise(r => setTimeout(r, 1000));
+        showNotification('Связь с нодой установлена (23ms)', 'success');
+    } catch (error) {
+        showNotification('Нет связи с нодой', 'error');
+    }
+}
+</script>
+{% endblock %}

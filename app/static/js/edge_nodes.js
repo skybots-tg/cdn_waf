@@ -88,12 +88,9 @@ function renderNodes(nodes) {
             </td>
             <td>
                 <div class="flex gap-1">
-                    <button class="btn btn-icon btn-sm btn-secondary" onclick="editNode(${node.id})" title="Edit">
+                    <a href="/edge-nodes/${node.id}" class="btn btn-icon btn-sm btn-secondary" title="Manage">
                         <i class="fas fa-edit"></i>
-                    </button>
-                    <button class="btn btn-icon btn-sm btn-secondary" onclick="showComponentModal(${node.id})" title="Manage Components">
-                        <i class="fas fa-cog"></i>
-                    </button>
+                    </a>
                     <button class="btn btn-icon btn-sm btn-secondary" onclick="checkNodeHealth(${node.id})" title="Health Check">
                         <i class="fas fa-heartbeat"></i>
                     </button>

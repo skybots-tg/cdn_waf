@@ -80,6 +80,28 @@ async def edge_nodes_page(request: Request):
     })
 
 
+@router.get("/edge-nodes/{node_id}", response_class=HTMLResponse)
+async def edge_node_manage_page(request: Request, node_id: int):
+    """Edge node management page"""
+    # Mock node data for now
+    node = {
+        "id": node_id,
+        "name": f"Node-{node_id}",
+        "ip_address": "192.168.1.100",
+        "location": "Moscow, RU",
+        "location_code": "RU-MSK",
+        "status": "active",
+        "enabled": True,
+        "ssh_user": "root",
+        "ssh_port": 22
+    }
+    return templates.TemplateResponse("node_manage.html", {
+        "request": request,
+        "user": get_mock_user(request),
+        "node": node
+    })
+
+
 @router.get("/domains/{domain_id}/settings", response_class=HTMLResponse)
 async def domain_settings_page(request: Request, domain_id: int):
     """Domain settings page"""
