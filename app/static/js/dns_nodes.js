@@ -141,7 +141,7 @@ async function saveNode(event) {
             ? document.getElementById('node-ssh-key').value 
             : null,
         ssh_password: document.querySelector('input[name="auth_method"]:checked').value === 'password'
-            ? document.getElementById('node-ssh-password').value
+            ? (document.getElementById('node-ssh-password').value || null)
             : null,
         enabled: document.getElementById('node-enabled').checked
     };

@@ -388,6 +388,8 @@ async function saveSettings() {
     data.enabled = form.querySelector('[name="enabled"]').checked;
     if (data.ssh_port) data.ssh_port = parseInt(data.ssh_port);
     
+    if (!data.ssh_password) delete data.ssh_password;
+    
     showNotification('Saving settings...', 'info');
     
     try {
