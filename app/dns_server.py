@@ -253,10 +253,11 @@ async def sync_data(payload: DNSSyncPayload):
     logger.info("Received sync request")
     try:
         with SessionLocal() as db:
-            def insert_rows(table_name: str, rows: list[dict]):
+            def insert_rows(table_name: str, rows: list[dict], defaults: dict | None = None):
                 """Insert rows only into existing columns to avoid schema drift issues."""
                 if not rows:
                     return
+                defaults = defaults or {}
                 cols_res = db.execute(
                     text(
                         "SELECT column_name FROM information_schema.columns "
@@ -271,16 +272,17 @@ async def sync_data(payload: DNSSyncPayload):
                         detail=f"Table {table_name} has no columns (not found?)",
                     )
                 # Use only columns that exist both in DB and in incoming rows
-                used_columns = [
-                    c for c in table_columns if any(c in row for row in rows)
-                ]
+                used_columns = [c for c in table_columns if any(c in row for row in rows) or c in defaults]
                 if not used_columns:
                     return
                 stmt = text(
                     f"INSERT INTO {table_name} ({', '.join(used_columns)}) "
                     f"VALUES ({', '.join(':'+c for c in used_columns)})"
                 )
-                filtered_rows = [{c: row.get(c) for c in used_columns} for row in rows]
+                filtered_rows = [
+                    {c: row.get(c, defaults.get(c)) for c in used_columns}
+                    for row in rows
+                ]
                 db.execute(stmt, filtered_rows)
 
             # 1. Truncate tables
@@ -290,7 +292,14 @@ async def sync_data(payload: DNSSyncPayload):
             
             # 2. Insert Users
             if payload.users:
-                insert_rows("users", [u.dict() for u in payload.users])
+                insert_rows(
+                    "users",
+                    [u.dict() for u in payload.users],
+                    defaults={
+                        "totp_enabled": False,
+                        "totp_secret": None,
+                    },
+                )
             
             # 3. Insert Organizations
             if payload.organizations:

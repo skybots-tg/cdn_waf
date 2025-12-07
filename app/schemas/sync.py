@@ -9,6 +9,8 @@ class UserSync(BaseModel):
     full_name: Optional[str] = None
     is_active: bool
     is_superuser: bool
+    totp_secret: Optional[str] = None
+    totp_enabled: bool = False
     last_login: Optional[datetime] = None
     created_at: datetime
     updated_at: datetime
