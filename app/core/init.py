@@ -24,17 +24,20 @@ async def migrate_schema():
     """Run manual schema migrations"""
     try:
         async with AsyncSessionLocal() as session:
-            # Check if ssh_host column exists in edge_nodes
-            try:
-                # Try to select the column
-                await session.execute(text("SELECT ssh_host FROM edge_nodes LIMIT 1"))
-            except Exception:
-                # Column doesn't exist, add it and others
+            # Check if ssh_host column exists in edge_nodes using information_schema
+            # This avoids transaction abortion if the column is missing
+            result = await session.execute(text(
+                "SELECT column_name FROM information_schema.columns "
+                "WHERE table_name='edge_nodes' AND column_name='ssh_host'"
+            ))
+            
+            if not result.scalar():
                 logger.info("Migrating edge_nodes table schema...")
-                await session.execute(text("ALTER TABLE edge_nodes ADD COLUMN ssh_host VARCHAR(255)"))
-                await session.execute(text("ALTER TABLE edge_nodes ADD COLUMN ssh_port INTEGER DEFAULT 22"))
-                await session.execute(text("ALTER TABLE edge_nodes ADD COLUMN ssh_user VARCHAR(255)"))
-                await session.execute(text("ALTER TABLE edge_nodes ADD COLUMN ssh_key TEXT"))
+                # Add columns safely
+                await session.execute(text("ALTER TABLE edge_nodes ADD COLUMN IF NOT EXISTS ssh_host VARCHAR(255)"))
+                await session.execute(text("ALTER TABLE edge_nodes ADD COLUMN IF NOT EXISTS ssh_port INTEGER DEFAULT 22"))
+                await session.execute(text("ALTER TABLE edge_nodes ADD COLUMN IF NOT EXISTS ssh_user VARCHAR(255)"))
+                await session.execute(text("ALTER TABLE edge_nodes ADD COLUMN IF NOT EXISTS ssh_key TEXT"))
                 await session.commit()
                 logger.info("Schema migration completed")
             else:
