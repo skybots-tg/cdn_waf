@@ -29,6 +29,7 @@ email-validator==2.1.0
 # Security
 cryptography==42.0.0
 pyotp==2.9.0
+asyncssh==2.14.2
 
 # ACME/Let's Encrypt
 acme==2.9.0

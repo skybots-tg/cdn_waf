@@ -302,11 +302,25 @@ class DNSNodeService:
         return await DNSNodeService.execute_command(node, "/tmp/setup_dns.sh install_dns_service")
 
     @staticmethod
+    async def install_certbot(node: DNSNode) -> DNSNodeCommandResult:
+        res = await DNSNodeService._ensure_setup_script(node)
+        if not res.success: return res
+        return await DNSNodeService.execute_command(node, "/tmp/setup_dns.sh install_certbot")
+
+    @staticmethod
+    async def issue_certificate(node: DNSNode) -> DNSNodeCommandResult:
+        """Issue SSL certificate for the node hostname"""
+        cmd = f"certbot certonly --standalone -d {node.hostname} --non-interactive --agree-tos --email admin@yourcdn.ru" # TODO: use config email
+        # Check if port 80 is free first?
+        return await DNSNodeService.execute_command(node, cmd)
+
+    @staticmethod
     async def install_node(node: DNSNode) -> DNSNodeCommandResult:
         """Full installation flow"""
         steps = [
             ("Dependencies", DNSNodeService.install_dependencies),
             ("Python Env", DNSNodeService.install_python_env),
+            ("Certbot", DNSNodeService.install_certbot),
             ("App Code", DNSNodeService.update_app_code),
             ("Config", DNSNodeService.update_config),
             ("Service", DNSNodeService.install_service)
@@ -340,10 +354,15 @@ class DNSNodeService:
                 return await DNSNodeService.update_config(node)
             elif component == "dns_service":
                 return await DNSNodeService.install_service(node)
+            elif component == "certbot":
+                return await DNSNodeService.install_certbot(node)
             elif component == "dns_server": # Alias for full install? Or just service?
                  # If user clicks "Install" on "DNS Server" component in old UI
                  return await DNSNodeService.install_node(node)
         
+        if component == "certbot" and action == "issue":
+             return await DNSNodeService.issue_certificate(node)
+
         # Service management
         if component in ["dns_service", "dns_server"]:
              cmd_map = {
@@ -367,16 +386,34 @@ class DNSNodeService:
     async def get_component_status(node: DNSNode, component: str) -> DNSComponentStatus:
         """Get component status"""
         if component in ["dns_server", "dns_service"]:
+             # Check if service file exists to determine "installed"
+             check_installed = "systemctl list-unit-files cdn-waf-dns.service"
+             res_installed = await DNSNodeService.execute_command(node, check_installed)
+             is_installed = res_installed.success and "cdn-waf-dns.service" in res_installed.stdout
+             
              cmd = "systemctl is-active cdn-waf-dns"
              res = await DNSNodeService.execute_command(node, cmd)
              running = res.stdout.strip() == "active"
+             
              return DNSComponentStatus(
                  component=component,
-                 installed=res.success or running,
+                 installed=is_installed,
                  running=running,
-                 status_text="Active" if running else "Inactive"
+                 status_text="Active" if running else ("Inactive" if is_installed else "Not Installed")
              )
         
+        if component == "certbot":
+             res = await DNSNodeService.execute_command(node, "certbot --version")
+             installed = res.success
+             version = res.stdout.strip().split()[-1] if installed and res.stdout else None
+             return DNSComponentStatus(
+                 component=component, 
+                 installed=installed, 
+                 running=True, # Always "running" as CLI tool
+                 version=version,
+                 status_text="Installed" if installed else "Missing"
+             )
+
         # For other components, we can check existence of files
         if component == "dependencies":
              # Check for python3

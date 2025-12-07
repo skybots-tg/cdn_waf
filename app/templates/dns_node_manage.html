@@ -185,6 +185,26 @@
                 </p>
             </div>
 
+            <!-- Certbot -->
+            <div class="glass-card" id="card-certbot">
+                <div class="flex-between mb-3">
+                    <div style="display: flex; gap: 12px; align-items: center;">
+                        <div class="component-icon"><i class="fas fa-lock"></i></div>
+                        <div>
+                            <h4 style="font-weight: 600;">Certbot & SSL</h4>
+                            <span class="status-dot status-warning"></span> <span class="status-text" style="font-size: 12px; color: var(--text-muted);">Checking...</span>
+                        </div>
+                    </div>
+                    <div class="flex gap-1">
+                        <button class="btn btn-sm btn-secondary" onclick="runAction('issue_cert')">Issue Cert</button>
+                        <button class="btn btn-sm btn-secondary" onclick="runAction('install_certbot')">Install</button>
+                    </div>
+                </div>
+                <p style="font-size: 13px; color: var(--text-secondary);">
+                    Let's Encrypt client for SSL certificates
+                </p>
+            </div>
+
             <!-- App Code -->
             <div class="glass-card" id="card-app_code">
                 <div class="flex-between mb-3">
@@ -448,6 +468,8 @@ async function runAction(action) {
     
     if (action === 'install_deps') { component = 'dependencies'; cmd = 'install'; }
     else if (action === 'install_python') { component = 'python_env'; cmd = 'install'; }
+    else if (action === 'install_certbot') { component = 'certbot'; cmd = 'install'; }
+    else if (action === 'issue_cert') { component = 'certbot'; cmd = 'issue'; }
     else if (action === 'update_app') { component = 'app_code'; cmd = 'install'; }
     else if (action === 'update_config') { component = 'config'; cmd = 'install'; }
     else if (action === 'install_service') { component = 'dns_service'; cmd = 'install'; }
@@ -485,7 +507,7 @@ async function installAll() {
     switchTab('logs');
     log('Starting full installation...', 'info');
     
-    const steps = ['install_deps', 'install_python', 'update_app', 'update_config', 'install_service'];
+    const steps = ['install_deps', 'install_python', 'install_certbot', 'update_app', 'update_config', 'install_service'];
     
     for (const step of steps) {
         await runAction(step);
@@ -557,6 +579,7 @@ async function checkAllComponents() {
     const components = [
         { id: 'dependencies', card: 'card-dependencies' },
         { id: 'python_env', card: 'card-python_env' },
+        { id: 'certbot', card: 'card-certbot' },
         { id: 'app_code', card: 'card-app_code' },
         { id: 'config', card: 'card-config' },
         { id: 'dns_service', card: 'card-dns_service' }
