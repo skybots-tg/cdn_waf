@@ -212,12 +212,12 @@ install_python_env() {
         log "venv уже существует, пропускаю создание."
     fi
 
-    if [[ -f "requirements.txt" ]]; then
+    if [[ -f "${APP_DIR}/requirements.txt" ]]; then
         log "Устанавливаю зависимости из requirements.txt..."
         "${APP_DIR}/venv/bin/pip" install --upgrade pip
-        "${APP_DIR}/venv/bin/pip" install -r requirements.txt
+        "${APP_DIR}/venv/bin/pip" install -r "${APP_DIR}/requirements.txt"
     else
-        log "requirements.txt не найден, пропускаю pip install."
+        log "requirements.txt не найден (${APP_DIR}/requirements.txt), пропускаю pip install."
     fi
 }
 
@@ -235,6 +235,9 @@ install_agent_service() {
     if [[ -f "${APP_DIR}/requirements.txt" ]]; then
         log "Installing dependencies..."
         "${APP_DIR}/venv/bin/pip" install -r "${APP_DIR}/requirements.txt"
+    else
+        err "Файл requirements.txt не найден в ${APP_DIR}. Зависимости не будут установлены, сервис может не запуститься."
+        exit 1
     fi
 
     if [[ ! -f "${APP_DIR}/edge_config_updater.py" ]]; then

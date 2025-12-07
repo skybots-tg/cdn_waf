@@ -3,7 +3,7 @@ import asyncio
 from sqlalchemy import select
 from celery import shared_task
 from app.tasks import celery_app
-from app.core.database import async_session_maker
+from app.core.database import AsyncSessionLocal as async_session_maker
 from app.services.dns_node_service import DNSNodeService
 from app.models.dns_node import DNSNode
 

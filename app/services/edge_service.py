@@ -468,6 +468,13 @@ class EdgeNodeService:
             elif component == "certbot":
                 return await EdgeNodeService.run_setup_script(node, "install_certbot")
             elif component == "python":
+                # Upload requirements.txt before installing python env
+                await EdgeNodeService.execute_command(node, "mkdir -p /opt/cdn_waf")
+                if not await EdgeNodeService.upload_file(node, "edge_node/requirements.txt", "/opt/cdn_waf/requirements.txt"):
+                     return EdgeNodeCommandResult(
+                        success=False, stdout="", stderr="Failed to upload requirements.txt", 
+                        exit_code=1, execution_time=0
+                    )
                 return await EdgeNodeService.run_setup_script(node, "install_python")
             elif component == "agent":
                 # Logic for agent install/update (upload files)
