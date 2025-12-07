@@ -102,6 +102,7 @@ class DBResolver(BaseResolver):
                 reply.header.rcode = RCODE.REFUSED # We are not authoritative
                 return reply
                 
+            # Allow ACTIVE and PENDING states
             if zone.status not in [DomainStatus.ACTIVE, DomainStatus.PENDING]:
                 logger.debug(f"Domain inactive: {zone.name} ({zone.status})")
                 reply.header.rcode = RCODE.REFUSED
@@ -234,7 +235,7 @@ def main():
     # Create TCP Server
     tcp_server = DNSServer(resolver, port=53, address="0.0.0.0", tcp=True)
 
-    logger.info("Starting DNS Server on port 53...")
+    logger.info("Starting DNS Server on port 53 (v1.1 - PENDING fix)...")
     
     udp_server.start_thread()
     tcp_server.start_thread()
