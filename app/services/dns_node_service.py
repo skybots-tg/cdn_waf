@@ -387,7 +387,14 @@ ACME_EMAIL={settings.ACME_EMAIL}
         
         sql_lines = [
             "BEGIN;",
-            "TRUNCATE TABLE dns_records, domains, organizations, users CASCADE;",
+            # Truncate in correct order (dependent tables first if we didn't use CASCADE, but CASCADE handles it)
+            # However, to be safe and clear:
+            # dns_records -> domains
+            # domains -> organizations
+            # organizations -> users
+            # So truncating users CASCADE should clear everything if everything is linked.
+            # But explicit list is better.
+            "TRUNCATE TABLE dns_records, domains, organizations, users, domain_tls_settings, origins, cache_rules, waf_rules, rate_limits, ip_access_rules, certificates CASCADE;",
         ]
         
         # Users
