@@ -2,6 +2,8 @@
 import asyncio
 import logging
 import re
+import os
+import tempfile
 from typing import List, Optional, Dict, Any
 from datetime import datetime, timedelta
 from sqlalchemy import select, func, or_
@@ -307,8 +309,13 @@ class EdgeNodeService:
         cmd = f"systemctl is-active {service_name}"
         result = await EdgeNodeService.execute_command(node, cmd)
         
-        running = result.success and result.stdout.strip() == "active"
-        status_text = result.stdout.strip() if result.success else "unknown"
+        status_output = result.stdout.strip()
+        running = status_output == "active"
+        
+        if status_output:
+            status_text = status_output
+        else:
+            status_text = "unknown"
         
         # Check version if running
         version = None
@@ -346,21 +353,135 @@ class EdgeNodeService:
         )
     
     @staticmethod
+    async def upload_file(
+        node: EdgeNode,
+        local_path: str,
+        remote_path: str
+    ) -> bool:
+        """Upload file to edge node via SCP"""
+        ssh_host = node.ssh_host or node.ip_address
+        ssh_port = node.ssh_port or 22
+        ssh_user = node.ssh_user or "root"
+        ssh_key = node.ssh_key
+        ssh_password = node.ssh_password
+        
+        try:
+            import asyncssh
+            
+            connect_kwargs = {
+                "host": ssh_host,
+                "port": ssh_port,
+                "username": ssh_user,
+                "known_hosts": None
+            }
+            if ssh_key:
+                client_keys = [asyncssh.import_private_key(ssh_key)]
+                connect_kwargs["client_keys"] = client_keys
+            elif ssh_password:
+                connect_kwargs["password"] = ssh_password
+
+            async with asyncssh.connect(**connect_kwargs) as conn:
+                await asyncssh.scp(local_path, (conn, remote_path))
+                return True
+                
+        except Exception as e:
+            logger.error(f"Failed to upload file to {node.name}: {e}")
+            return False
+
+    @staticmethod
+    async def run_setup_script(
+        node: EdgeNode,
+        action_name: str
+    ) -> EdgeNodeCommandResult:
+        """Run setup script action on node"""
+        
+        # Local paths
+        setup_script = "edge_node/setup.sh"
+        if not os.path.exists(setup_script):
+            return EdgeNodeCommandResult(
+                success=False, stdout="", stderr=f"Setup script not found: {setup_script}", 
+                exit_code=1, execution_time=0
+            )
+
+        # Upload setup script
+        if not await EdgeNodeService.upload_file(node, setup_script, "/tmp/setup.sh"):
+             return EdgeNodeCommandResult(
+                success=False, stdout="", stderr="Failed to upload setup script", 
+                exit_code=1, execution_time=0
+            )
+            
+        # Make executable
+        await EdgeNodeService.execute_command(node, "chmod +x /tmp/setup.sh")
+        
+        # Run action
+        cmd = f"/tmp/setup.sh {action_name}"
+        return await EdgeNodeService.execute_command(node, cmd, timeout=300) # Increased timeout for install
+
+    @staticmethod
     async def manage_component(
         node: EdgeNode,
         component: str,
         action: str
     ) -> EdgeNodeCommandResult:
         """Manage component on edge node (start, stop, restart, etc.)"""
+        
+        # Handle installations via setup script
+        if action == "install":
+            if component == "system":
+                return await EdgeNodeService.run_setup_script(node, "install_deps")
+            elif component == "nginx":
+                return await EdgeNodeService.run_setup_script(node, "install_nginx")
+            elif component == "certbot":
+                return await EdgeNodeService.run_setup_script(node, "install_certbot")
+            elif component == "python":
+                return await EdgeNodeService.run_setup_script(node, "install_python")
+            elif component == "agent":
+                # Special handling for agent: upload code first
+                
+                # Prepare config
+                config_content = ""
+                with open("edge_node/config.example.yaml", "r") as f:
+                    config_content = f.read()
+                
+                # Replace values
+                config_content = config_content.replace("id: 1", f"id: {node.id}")
+                config_content = config_content.replace('name: "ru-msk-01"', f'name: "{node.name}"')
+                config_content = config_content.replace('location: "RU-MSK"', f'location: "{node.location_code}"')
+                
+                # Write to temp file
+                with tempfile.NamedTemporaryFile(mode='w', delete=False) as tmp:
+                    tmp.write(config_content)
+                    tmp_config_path = tmp.name
+
+                try:
+                    files_to_upload = [
+                        ("edge_node/edge_config_updater.py", "/opt/cdn_waf/edge_config_updater.py"),
+                        ("edge_node/requirements.txt", "/opt/cdn_waf/requirements.txt"),
+                        (tmp_config_path, "/opt/cdn_waf/config.yaml") 
+                    ]
+                    
+                    # Ensure directory exists
+                    await EdgeNodeService.execute_command(node, "mkdir -p /opt/cdn_waf")
+                    
+                    for local, remote in files_to_upload:
+                        if not await EdgeNodeService.upload_file(node, local, remote):
+                             return EdgeNodeCommandResult(
+                                success=False, stdout="", stderr=f"Failed to upload {local}", 
+                                exit_code=1, execution_time=0
+                            )
+                finally:
+                    os.unlink(tmp_config_path)
+                
+                return await EdgeNodeService.run_setup_script(node, "install_agent_service")
+
         command_map = {
             "nginx": {
-                "start": "systemctl start nginx",
-                "stop": "systemctl stop nginx",
-                "restart": "systemctl restart nginx",
-                "reload": "nginx -s reload",
-                "status": "systemctl status nginx",
-                "install": "apt-get update && apt-get install -y nginx",
-                "update": "apt-get update && apt-get upgrade -y nginx"
+                "start": "systemctl start nginx || systemctl start openresty",
+                "stop": "systemctl stop nginx || systemctl stop openresty",
+                "restart": "systemctl restart nginx || systemctl restart openresty",
+                "reload": "nginx -s reload || openresty -s reload",
+                "status": "systemctl status nginx || systemctl status openresty",
+                "update": "apt-get update && apt-get upgrade -y nginx openresty"
             },
             "redis": {
                 "start": "systemctl start redis-server",  # Usually redis-server
