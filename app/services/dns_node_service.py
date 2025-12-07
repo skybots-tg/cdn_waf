@@ -386,6 +386,7 @@ ACME_EMAIL={settings.ACME_EMAIL}
         # But for sync, TRUNCATE + INSERT is easiest way to ensure consistency
         
         sql_lines = [
+            "\\set ON_ERROR_STOP on",
             "BEGIN;",
             # Truncate in correct order (dependent tables first if we didn't use CASCADE, but CASCADE handles it)
             # However, to be safe and clear:
