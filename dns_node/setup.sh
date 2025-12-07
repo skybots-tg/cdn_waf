@@ -200,9 +200,13 @@ EOF
     
     # Run migrations
     if [[ -x "${APP_DIR}/venv/bin/alembic" ]]; then
-        log "Running database migrations..."
-        cd "${APP_DIR}"
-        "${APP_DIR}/venv/bin/alembic" upgrade head || warn "Migration failed, check logs."
+        if [[ -f "${APP_DIR}/alembic.ini" ]]; then
+            log "Running database migrations..."
+            cd "${APP_DIR}"
+            "${APP_DIR}/venv/bin/alembic" upgrade head || warn "Migration failed, check logs."
+        else
+            warn "alembic.ini not found in ${APP_DIR}, skipping migrations."
+        fi
     else
         warn "Alembic not found, skipping migrations."
     fi
@@ -231,6 +235,11 @@ deploy_code() {
             # .env копируем только если его нет
             if [[ -f "${REPO_ROOT}/.env" && ! -f "${APP_DIR}/.env" ]]; then
                 cp "${REPO_ROOT}/.env" "${APP_DIR}/"
+            fi
+            
+            # Copy alembic.ini
+            if [[ -f "${REPO_ROOT}/alembic.ini" ]]; then
+                cp "${REPO_ROOT}/alembic.ini" "${APP_DIR}/"
             fi
         fi
         
