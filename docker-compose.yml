@@ -54,6 +54,23 @@ services:
       - CELERY_BROKER_URL=redis://redis:6379/2
       - CELERY_RESULT_BACKEND=redis://redis:6379/3
 
+  # DNS Server
+  dns_server:
+    build: .
+    container_name: cdn_waf_dns
+    command: python -m app.dns_server
+    volumes:
+      - .:/app
+    ports:
+      - "53:53/udp"
+      - "53:53/tcp"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      # Use psycopg2 (sync) driver implicitly via code replacement, but provide standard URL
+      - DATABASE_URL=postgresql+asyncpg://cdn_user:cdn_password@postgres:5432/cdn_waf
+
   # Celery Worker
   celery_worker:
     build: .
@@ -103,5 +120,3 @@ services:
 volumes:
   postgres_data:
   redis_data:
-
-

@@ -1,0 +1,270 @@
+{% extends "base.html" %}
+
+{% block title %}DNS Nodes - CDN WAF{% endblock %}
+
+{% block content %}
+<div class="container" style="padding: 32px 24px;">
+    <div class="flex-between mb-4">
+        <div>
+            <h1 style="font-size: 32px; font-weight: 700; margin-bottom: 8px;">DNS Nodes</h1>
+            <p style="color: var(--text-secondary); font-size: 14px;">
+                Manage Authoritative DNS servers
+            </p>
+        </div>
+        <button class="btn btn-primary" onclick="showAddNodeModal()">
+            <i class="fas fa-plus"></i> Add DNS Node
+        </button>
+    </div>
+
+    <!-- Stats Cards -->
+    <div class="grid grid-3 mb-4">
+        <div class="glass-card glass-card-sm">
+            <div class="flex-between mb-2">
+                <span style="color: var(--text-secondary); font-size: 13px; text-transform: uppercase; letter-spacing: 0.5px;">
+                    Total Nodes
+                </span>
+                <i class="fas fa-server" style="color: var(--text-muted);"></i>
+            </div>
+            <div style="font-size: 28px; font-weight: 700;" id="stat-total">0</div>
+        </div>
+        
+        <div class="glass-card glass-card-sm">
+            <div class="flex-between mb-2">
+                <span style="color: var(--text-secondary); font-size: 13px; text-transform: uppercase; letter-spacing: 0.5px;">
+                    Online
+                </span>
+                <i class="fas fa-check-circle" style="color: var(--success);"></i>
+            </div>
+            <div style="font-size: 28px; font-weight: 700; color: var(--success);" id="stat-online">0</div>
+        </div>
+        
+        <div class="glass-card glass-card-sm">
+            <div class="flex-between mb-2">
+                <span style="color: var(--text-secondary); font-size: 13px; text-transform: uppercase; letter-spacing: 0.5px;">
+                    Offline
+                </span>
+                <i class="fas fa-times-circle" style="color: var(--error);"></i>
+            </div>
+            <div style="font-size: 28px; font-weight: 700; color: var(--error);" id="stat-offline">0</div>
+        </div>
+    </div>
+
+    <!-- DNS Nodes Table -->
+    <div class="glass-card">
+        <div class="table-container">
+            <table class="table">
+                <thead>
+                    <tr>
+                        <th>Name</th>
+                        <th>Hostname</th>
+                        <th>Location</th>
+                        <th>IP Address</th>
+                        <th>Status</th>
+                        <th>Last Heartbeat</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody id="nodes-table-body">
+                    <tr>
+                        <td colspan="7" style="text-align: center; padding: 32px; color: var(--text-muted);">
+                            <i class="fas fa-spinner fa-spin"></i> Loading...
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<!-- Add/Edit Node Modal -->
+<div id="node-modal" class="modal" style="display: none;">
+    <div class="modal-backdrop" onclick="closeNodeModal()"></div>
+    <div class="modal-content" style="max-width: 600px;">
+        <div class="flex-between mb-3">
+            <h2 id="modal-title" style="font-size: 24px; font-weight: 700;">Add DNS Node</h2>
+            <button class="btn btn-icon btn-secondary" onclick="closeNodeModal()">
+                <i class="fas fa-times"></i>
+            </button>
+        </div>
+        
+        <form id="node-form" onsubmit="saveNode(event)">
+            <input type="hidden" id="node-id">
+            
+            <div class="grid grid-2 gap-2">
+                <div class="form-group">
+                    <label class="form-label">Name *</label>
+                    <input type="text" class="form-input" id="node-name" required placeholder="ns1-msk">
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Hostname *</label>
+                    <input type="text" class="form-input" id="node-hostname" required placeholder="ns1.yourcdn.ru">
+                </div>
+            </div>
+            
+            <div class="grid grid-2 gap-2">
+                <div class="form-group">
+                    <label class="form-label">IP Address *</label>
+                    <input type="text" class="form-input" id="node-ip" required placeholder="1.2.3.4">
+                </div>
+                
+                <div class="form-group">
+                    <label class="form-label">IPv6 Address</label>
+                    <input type="text" class="form-input" id="node-ipv6" placeholder="2001:db8::1">
+                </div>
+            </div>
+            
+            <div class="grid grid-2 gap-2">
+                <div class="form-group">
+                    <label class="form-label">Location Code *</label>
+                    <select class="form-select" id="node-location" required>
+                        <option value="RU-MSK">Moscow (RU-MSK)</option>
+                        <option value="RU-SPB">Saint Petersburg (RU-SPB)</option>
+                        <option value="RU-NSK">Novosibirsk (RU-NSK)</option>
+                        <option value="RU-EKB">Yekaterinburg (RU-EKB)</option>
+                    </select>
+                </div>
+                
+                <div class="form-group">
+                    <label class="form-label">City</label>
+                    <input type="text" class="form-input" id="node-city" placeholder="Moscow">
+                </div>
+            </div>
+            
+            <div class="form-group">
+                <label class="form-label">Datacenter</label>
+                <input type="text" class="form-input" id="node-datacenter" placeholder="DataLine">
+            </div>
+            
+            <hr style="border: none; border-top: 1px solid var(--glass-border); margin: 24px 0;">
+            
+            <h3 style="font-size: 16px; font-weight: 600; margin-bottom: 16px;">
+                <i class="fas fa-key"></i> SSH Configuration
+            </h3>
+            
+            <div class="grid grid-2 gap-2">
+                <div class="form-group">
+                    <label class="form-label">SSH Host</label>
+                    <input type="text" class="form-input" id="node-ssh-host" placeholder="1.2.3.4">
+                </div>
+                
+                <div class="form-group">
+                    <label class="form-label">SSH Port</label>
+                    <input type="number" class="form-input" id="node-ssh-port" value="22" min="1" max="65535">
+                </div>
+            </div>
+            
+            <div class="form-group">
+                <label class="form-label">SSH User</label>
+                <input type="text" class="form-input" id="node-ssh-user" placeholder="root">
+            </div>
+            
+            <div class="form-group">
+                <label class="form-label">Authentication Method</label>
+                <div class="flex gap-2">
+                    <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                        <input type="radio" name="auth_method" value="password" checked onchange="toggleAuthMethod()">
+                        <span>Password</span>
+                    </label>
+                    <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                        <input type="radio" name="auth_method" value="key" onchange="toggleAuthMethod()">
+                        <span>SSH Key</span>
+                    </label>
+                </div>
+            </div>
+
+            <div id="auth-password" class="form-group">
+                <label class="form-label">SSH Password</label>
+                <input type="password" class="form-input" id="node-ssh-password" placeholder="Root password">
+            </div>
+            
+            <div id="auth-key" class="form-group" style="display: none;">
+                <label class="form-label">SSH Private Key</label>
+                <textarea class="form-textarea" id="node-ssh-key" placeholder="-----BEGIN RSA PRIVATE KEY-----"></textarea>
+            </div>
+            
+            <div class="flex-between" style="margin-top: 24px;">
+                <label class="toggle-switch">
+                    <input type="checkbox" id="node-enabled" checked>
+                    <span class="toggle-slider"></span>
+                </label>
+                
+                <div class="flex gap-2">
+                    <button type="button" class="btn btn-secondary" onclick="closeNodeModal()">Cancel</button>
+                    <button type="submit" class="btn btn-primary">
+                        <i class="fas fa-save"></i> Save
+                    </button>
+                </div>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- Component Management Modal -->
+<div id="component-modal" class="modal" style="display: none;">
+    <div class="modal-backdrop" onclick="closeComponentModal()"></div>
+    <div class="modal-content" style="max-width: 500px;">
+        <div class="flex-between mb-3">
+            <h2 style="font-size: 24px; font-weight: 700;">Manage Components</h2>
+            <button class="btn btn-icon btn-secondary" onclick="closeComponentModal()">
+                <i class="fas fa-times"></i>
+            </button>
+        </div>
+        
+        <input type="hidden" id="component-node-id">
+        <div id="components-list"></div>
+    </div>
+</div>
+
+<style>
+.modal {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 9999;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.modal-backdrop {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.5);
+    backdrop-filter: blur(4px);
+}
+
+.modal-content {
+    position: relative;
+    background: var(--bg-secondary);
+    border: 1px solid var(--glass-border);
+    border-radius: var(--border-radius-lg);
+    padding: 32px;
+    max-height: 90vh;
+    overflow-y: auto;
+    box-shadow: var(--shadow-lg);
+    width: 90%;
+    max-width: 800px;
+}
+
+.component-item {
+    padding: 16px;
+    background: var(--bg-tertiary);
+    border-radius: var(--border-radius-sm);
+    margin-bottom: 12px;
+}
+
+.component-actions {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-top: 12px;
+}
+</style>
+
+<script src="/static/js/dns_nodes.js"></script>
+{% endblock %}

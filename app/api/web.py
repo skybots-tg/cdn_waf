@@ -90,6 +90,15 @@ async def edge_nodes_page(request: Request):
     })
 
 
+@router.get("/dns-nodes", response_class=HTMLResponse)
+async def dns_nodes_page(request: Request):
+    """DNS nodes management page (superuser only)"""
+    return templates.TemplateResponse("dns_nodes.html", {
+        "request": request,
+        "user": get_mock_user(request)
+    })
+
+
 @router.get("/edge-nodes/{node_id}", response_class=HTMLResponse)
 async def edge_node_manage_page(request: Request, node_id: int, db: AsyncSession = Depends(get_db)):
     """Edge node management page"""

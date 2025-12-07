@@ -7,4 +7,5 @@ from app.models.cache import CacheRule
 from app.models.waf import WAFRule, RateLimit, IPAccessRule
 from app.models.certificate import Certificate
 from app.models.edge_node import EdgeNode
+from app.models.dns_node import DNSNode
 from app.models.log import RequestLog
