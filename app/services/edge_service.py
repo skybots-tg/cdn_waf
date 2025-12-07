@@ -325,6 +325,19 @@ class EdgeNodeService:
             "certbot": {
                 "install": "apt-get update && apt-get install -y certbot python3-certbot-nginx",
                 "status": "certbot --version"
+            },
+            "system": {
+                "install": "apt-get update && apt-get install -y curl git build-essential python3-dev python3-venv"
+            },
+            "python": {
+                "update": "cd /opt/cdn_waf && python3 -m venv venv && ./venv/bin/pip install -r requirements.txt"
+            },
+            "agent": {
+                "start": "systemctl start cdn-waf-agent",
+                "stop": "systemctl stop cdn-waf-agent",
+                "restart": "systemctl restart cdn-waf-agent",
+                "status": "systemctl status cdn-waf-agent",
+                "update": "cd /opt/cdn_waf && git pull && systemctl restart cdn-waf-agent"
             }
         }
         
