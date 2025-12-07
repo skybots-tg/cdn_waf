@@ -467,4 +467,46 @@ body {
 .gap-2 { gap: 16px; }
 .gap-3 { gap: 24px; }
 
+/* Notifications */
+.notification {
+    background: var(--bg-secondary);
+    border-left: 4px solid var(--accent-primary);
+    padding: 16px;
+    margin-bottom: 12px;
+    border-radius: var(--border-radius-sm);
+    box-shadow: var(--shadow-md);
+    min-width: 300px;
+    max-width: 400px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    animation: slideIn 0.3s ease;
+    border: 1px solid var(--glass-border);
+}
 
+.notification-success {
+    border-left-color: var(--success);
+}
+
+.notification-error {
+    border-left-color: var(--error);
+}
+
+.notification-warning {
+    border-left-color: var(--warning);
+}
+
+.notification-info {
+    border-left-color: var(--info);
+}
+
+@keyframes slideIn {
+    from {
+        transform: translateX(100%);
+        opacity: 0;
+    }
+    to {
+        transform: translateX(0);
+        opacity: 1;
+    }
+}

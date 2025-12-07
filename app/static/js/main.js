@@ -42,6 +42,11 @@ class API {
         });
         
         if (!response.ok) {
+            if (response.status === 401) {
+                this.clearToken();
+                window.location.href = '/login';
+                return;
+            }
             let errorMsg = 'Request failed';
             try {
                 const error = await response.json();
