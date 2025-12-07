@@ -22,21 +22,21 @@
                 
                 <nav class="nav">
                     {% if user %}
-                    <a href="/dashboard" class="nav-link">
+                    <a href="/dashboard" class="nav-link {% if request.url.path.startswith('/dashboard') %}active{% endif %}">
                         <i class="fas fa-home"></i> Dashboard
                     </a>
-                    <a href="/domains" class="nav-link">
+                    <a href="/domains" class="nav-link {% if request.url.path.startswith('/domains') %}active{% endif %}">
                         <i class="fas fa-globe"></i> Domains
                     </a>
                     {% if user.get('is_superuser') %}
-                    <a href="/edge-nodes" class="nav-link">
+                    <a href="/edge-nodes" class="nav-link {% if request.url.path.startswith('/edge-nodes') %}active{% endif %}">
                         <i class="fas fa-server"></i> Edge Nodes
                     </a>
                     {% endif %}
-                    <a href="/analytics" class="nav-link">
+                    <a href="/analytics" class="nav-link {% if request.url.path.startswith('/analytics') %}active{% endif %}">
                         <i class="fas fa-chart-line"></i> Analytics
                     </a>
-                    <a href="/settings" class="nav-link">
+                    <a href="/settings" class="nav-link {% if request.url.path.startswith('/settings') %}active{% endif %}">
                         <i class="fas fa-cog"></i> Settings
                     </a>
                     {% else %}
