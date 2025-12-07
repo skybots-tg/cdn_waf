@@ -117,7 +117,8 @@ install_deps() {
     apt_install_safe \
         curl git build-essential \
         python3 python3-venv python3-dev python3-pip \
-        libpq-dev
+        libpq-dev \
+        psmisc lsof net-tools
         
     log "Системные зависимости установлены."
 }
@@ -187,23 +188,33 @@ install_dns_service() {
 
     # === Fix Port 53 Conflict ===
     log "Checking for port 53 conflicts..."
-    if ss -tuln | grep ':53 ' >/dev/null 2>&1 || lsof -i :53 >/dev/null 2>&1; then
-        warn "Port 53 is in use. Attempting to free it by disabling systemd-resolved..."
-        
-        # Stop and disable systemd-resolved if active
-        if systemctl is-active --quiet systemd-resolved; then
-            systemctl stop systemd-resolved
-            systemctl disable systemd-resolved
-            log "systemd-resolved stopped and disabled."
-            
-            # Fix resolv.conf so the server still has DNS
-            rm -f /etc/resolv.conf
-            echo "nameserver 8.8.8.8" > /etc/resolv.conf
-            echo "nameserver 1.1.1.1" >> /etc/resolv.conf
-            log "/etc/resolv.conf updated to use public DNS."
-        else
-            warn "Port 53 is used by something else (not systemd-resolved). Please check manually: lsof -i :53"
-        fi
+    
+    # Ensure tools are present (just in case deps wasn't run recently)
+    if ! command -v fuser >/dev/null 2>&1; then
+        apt_install_safe psmisc
+    fi
+
+    # Stop systemd-resolved specifically
+    if systemctl is-active --quiet systemd-resolved; then
+        log "Stopping systemd-resolved..."
+        systemctl stop systemd-resolved || true
+        systemctl disable systemd-resolved || true
+    fi
+
+    # Force kill anything on port 53
+    if fuser 53/tcp >/dev/null 2>&1 || fuser 53/udp >/dev/null 2>&1; then
+        warn "Port 53 still in use. Force killing..."
+        fuser -k -9 53/tcp || true
+        fuser -k -9 53/udp || true
+        sleep 2
+    fi
+
+    # Fix resolv.conf if we killed the local resolver
+    if [[ -L /etc/resolv.conf ]] || grep -q "127.0.0.53" /etc/resolv.conf; then
+        log "Updating /etc/resolv.conf to use public DNS..."
+        rm -f /etc/resolv.conf
+        echo "nameserver 8.8.8.8" > /etc/resolv.conf
+        echo "nameserver 1.1.1.1" >> /etc/resolv.conf
     fi
     # ============================
 
