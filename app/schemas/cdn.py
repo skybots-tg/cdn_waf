@@ -145,6 +145,13 @@ class CertificateCreate(BaseModel):
     chain_pem: Optional[str] = None
 
 
+class CertificateUpdate(BaseModel):
+    """Schema for certificate update"""
+    cert_pem: Optional[str] = Field(None, min_length=1)
+    key_pem: Optional[str] = Field(None, min_length=1)
+    chain_pem: Optional[str] = None
+
+
 class CertificateResponse(BaseModel):
     """Schema for certificate response"""
     id: int

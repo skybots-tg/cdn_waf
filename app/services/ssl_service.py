@@ -10,7 +10,7 @@ from cryptography.hazmat.primitives import serialization
 
 from app.models.certificate import Certificate
 from app.models.domain import Domain
-from app.schemas.cdn import CertificateCreate, CertificateUpdate
+from app.schemas.cdn import CertificateCreate
 
 logger = logging.getLogger(__name__)
 
