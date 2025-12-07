@@ -1,0 +1,369 @@
+{% extends "base.html" %}
+
+{% block title %}{{ domain.name }} - Settings - CDN WAF{% endblock %}
+
+{% block content %}
+<div class="container" style="padding: 32px 24px;">
+    <!-- Domain Header -->
+    <div class="flex-between mb-4">
+        <div>
+            <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 8px;">
+                <a href="/domains" style="color: var(--text-secondary); text-decoration: none;">
+                    <i class="fas fa-arrow-left"></i>
+                </a>
+                <h1 style="font-size: 32px; font-weight: 700;">{{ domain.name }}</h1>
+                <span class="badge badge-success">Active</span>
+            </div>
+            <p style="color: var(--text-secondary); font-size: 14px;">
+                Manage CDN, security, and SSL settings
+            </p>
+        </div>
+    </div>
+
+    <!-- Tabs -->
+    <div class="tabs mb-4">
+        <a href="/domains/{{ domain.id }}/dns" class="tab-link">
+            <i class="fas fa-globe"></i> DNS
+        </a>
+        <a href="/domains/{{ domain.id }}/settings" class="tab-link active">
+            <i class="fas fa-cog"></i> Settings
+        </a>
+        <a href="/domains/{{ domain.id }}/analytics" class="tab-link">
+            <i class="fas fa-chart-line"></i> Analytics
+        </a>
+    </div>
+
+    <!-- Sub-tabs -->
+    <div class="sub-tabs mb-4">
+        <button class="sub-tab-btn active" onclick="showTab('cdn')">
+            <i class="fas fa-server"></i> CDN & Cache
+        </button>
+        <button class="sub-tab-btn" onclick="showTab('origins')">
+            <i class="fas fa-network-wired"></i> Origins
+        </button>
+        <button class="sub-tab-btn" onclick="showTab('ssl')">
+            <i class="fas fa-lock"></i> SSL/TLS
+        </button>
+        <button class="sub-tab-btn" onclick="showTab('security')">
+            <i class="fas fa-shield-alt"></i> Security
+        </button>
+    </div>
+
+    <!-- CDN Tab -->
+    <div id="tab-cdn" class="tab-content">
+        <div class="glass-card mb-3">
+            <div class="flex-between mb-3">
+                <h2 style="font-size: 20px; font-weight: 600;">Cache Rules</h2>
+                <button class="btn btn-primary btn-sm" onclick="showAddCacheRuleModal()">
+                    <i class="fas fa-plus"></i> Add Rule
+                </button>
+            </div>
+            
+            <div id="cache-rules-list">
+                <p style="text-align: center; color: var(--text-muted); padding: 32px;">
+                    <i class="fas fa-spinner fa-spin"></i> Loading...
+                </p>
+            </div>
+        </div>
+
+        <div class="grid grid-2 gap-3">
+            <div class="glass-card">
+                <h3 style="font-size: 16px; font-weight: 600; margin-bottom: 16px;">
+                    <i class="fas fa-broom"></i> Cache Purge
+                </h3>
+                <div class="form-group">
+                    <button class="btn btn-secondary" style="width: 100%;" onclick="purgeCache('all')">
+                        <i class="fas fa-trash-alt"></i> Purge Everything
+                    </button>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Purge by URL</label>
+                    <input type="text" class="form-input" id="purge-url" placeholder="/path/to/file.css">
+                    <button class="btn btn-secondary mt-1" style="width: 100%;" onclick="purgeCache('url')">
+                        Purge URL
+                    </button>
+                </div>
+            </div>
+
+            <div class="glass-card">
+                <h3 style="font-size: 16px; font-weight: 600; margin-bottom: 16px;">
+                    <i class="fas fa-bug"></i> Dev Mode
+                </h3>
+                <p style="font-size: 13px; color: var(--text-secondary); margin-bottom: 16px;">
+                    Temporarily bypass cache for testing (10 minutes)
+                </p>
+                <div id="dev-mode-status">
+                    <button class="btn btn-secondary" style="width: 100%;" onclick="toggleDevMode()">
+                        <i class="fas fa-play"></i> Enable Dev Mode
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Origins Tab -->
+    <div id="tab-origins" class="tab-content" style="display: none;">
+        <div class="glass-card">
+            <div class="flex-between mb-3">
+                <h2 style="font-size: 20px; font-weight: 600;">Origin Servers</h2>
+                <button class="btn btn-primary btn-sm" onclick="showAddOriginModal()">
+                    <i class="fas fa-plus"></i> Add Origin
+                </button>
+            </div>
+            
+            <div id="origins-list">
+                <p style="text-align: center; color: var(--text-muted); padding: 32px;">
+                    <i class="fas fa-spinner fa-spin"></i> Loading...
+                </p>
+            </div>
+        </div>
+    </div>
+
+    <!-- SSL Tab -->
+    <div id="tab-ssl" class="tab-content" style="display: none;">
+        <div class="grid grid-2 gap-3 mb-3">
+            <div class="glass-card">
+                <h3 style="font-size: 16px; font-weight: 600; margin-bottom: 16px;">
+                    TLS Mode
+                </h3>
+                <select class="form-select" id="tls-mode">
+                    <option value="flexible">Flexible</option>
+                    <option value="full">Full</option>
+                    <option value="strict">Strict</option>
+                </select>
+                <p style="font-size: 12px; color: var(--text-secondary); margin-top: 8px;">
+                    Controls how TLS connections are made to origin
+                </p>
+            </div>
+
+            <div class="glass-card">
+                <h3 style="font-size: 16px; font-weight: 600; margin-bottom: 16px;">
+                    Force HTTPS
+                </h3>
+                <label class="toggle-switch">
+                    <input type="checkbox" id="force-https">
+                    <span class="toggle-slider"></span>
+                </label>
+                <p style="font-size: 12px; color: var(--text-secondary); margin-top: 8px;">
+                    Automatically redirect HTTP to HTTPS
+                </p>
+            </div>
+        </div>
+
+        <div class="glass-card mb-3">
+            <h3 style="font-size: 16px; font-weight: 600; margin-bottom: 16px;">
+                HSTS Settings
+            </h3>
+            <div class="form-group">
+                <label style="display: flex; align-items: center; gap: 8px;">
+                    <input type="checkbox" id="hsts-enabled">
+                    <span class="form-label" style="margin: 0;">Enable HSTS</span>
+                </label>
+            </div>
+            <div class="form-group">
+                <label class="form-label">Max Age (seconds)</label>
+                <input type="number" class="form-input" id="hsts-max-age" value="31536000">
+            </div>
+            <button class="btn btn-primary" onclick="saveTLSSettings()">
+                <i class="fas fa-save"></i> Save TLS Settings
+            </button>
+        </div>
+
+        <div class="glass-card">
+            <div class="flex-between mb-3">
+                <h2 style="font-size: 20px; font-weight: 600;">Certificates</h2>
+                <div class="flex gap-2">
+                    <button class="btn btn-secondary btn-sm" onclick="requestACME()">
+                        <i class="fas fa-certificate"></i> Request Let's Encrypt
+                    </button>
+                    <button class="btn btn-primary btn-sm" onclick="showUploadCertModal()">
+                        <i class="fas fa-upload"></i> Upload Certificate
+                    </button>
+                </div>
+            </div>
+            
+            <div id="certificates-list">
+                <p style="text-align: center; color: var(--text-muted); padding: 32px;">
+                    <i class="fas fa-spinner fa-spin"></i> Loading...
+                </p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Security Tab -->
+    <div id="tab-security" class="tab-content" style="display: none;">
+        <div class="glass-card mb-3">
+            <div class="flex-between mb-3">
+                <h2 style="font-size: 20px; font-weight: 600;">
+                    <i class="fas fa-shield-alt"></i> WAF Rules
+                </h2>
+                <button class="btn btn-primary btn-sm" onclick="showAddWAFRuleModal()">
+                    <i class="fas fa-plus"></i> Add Rule
+                </button>
+            </div>
+            <div id="waf-rules-list">
+                <p style="text-align: center; color: var(--text-muted); padding: 32px;">
+                    <i class="fas fa-spinner fa-spin"></i> Loading...
+                </p>
+            </div>
+        </div>
+
+        <div class="glass-card mb-3">
+            <div class="flex-between mb-3">
+                <h2 style="font-size: 20px; font-weight: 600;">
+                    <i class="fas fa-tachometer-alt"></i> Rate Limiting
+                </h2>
+                <button class="btn btn-primary btn-sm" onclick="showAddRateLimitModal()">
+                    <i class="fas fa-plus"></i> Add Limit
+                </button>
+            </div>
+            <div id="rate-limits-list">
+                <p style="text-align: center; color: var(--text-muted); padding: 32px;">
+                    <i class="fas fa-spinner fa-spin"></i> Loading...
+                </p>
+            </div>
+        </div>
+
+        <div class="glass-card">
+            <div class="flex-between mb-3">
+                <h2 style="font-size: 20px; font-weight: 600;">
+                    <i class="fas fa-ban"></i> IP Access Control
+                </h2>
+                <button class="btn btn-primary btn-sm" onclick="showAddIPRuleModal()">
+                    <i class="fas fa-plus"></i> Add Rule
+                </button>
+            </div>
+            <div id="ip-rules-list">
+                <p style="text-align: center; color: var(--text-muted); padding: 32px;">
+                    <i class="fas fa-spinner fa-spin"></i> Loading...
+                </p>
+            </div>
+        </div>
+    </div>
+</div>
+
+<style>
+.tabs {
+    display: flex;
+    gap: 8px;
+    border-bottom: 2px solid var(--glass-border);
+    padding-bottom: 4px;
+}
+
+.tab-link {
+    padding: 12px 20px;
+    color: var(--text-secondary);
+    text-decoration: none;
+    border-radius: var(--border-radius-sm) var(--border-radius-sm) 0 0;
+    transition: all var(--transition-fast);
+    font-weight: 500;
+}
+
+.tab-link:hover {
+    color: var(--text-primary);
+    background: var(--bg-tertiary);
+}
+
+.tab-link.active {
+    color: var(--accent-primary);
+    background: var(--accent-light);
+    border-bottom: 2px solid var(--accent-primary);
+}
+
+.sub-tabs {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.sub-tab-btn {
+    padding: 10px 16px;
+    background: var(--bg-tertiary);
+    border: 1px solid var(--glass-border);
+    border-radius: var(--border-radius-sm);
+    color: var(--text-primary);
+    font-weight: 500;
+    cursor: pointer;
+    transition: all var(--transition-fast);
+}
+
+.sub-tab-btn:hover {
+    background: var(--bg-secondary);
+    border-color: var(--accent-primary);
+}
+
+.sub-tab-btn.active {
+    background: var(--accent-primary);
+    color: white;
+    border-color: var(--accent-primary);
+}
+
+.tab-content {
+    animation: fadeIn 0.3s ease;
+}
+
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+        transform: translateY(10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+</style>
+
+<script>
+const DOMAIN_ID = {{ domain.id }};
+
+function showTab(tabName) {
+    // Hide all tabs
+    document.querySelectorAll('.tab-content').forEach(tab => {
+        tab.style.display = 'none';
+    });
+    
+    // Remove active class from all buttons
+    document.querySelectorAll('.sub-tab-btn').forEach(btn => {
+        btn.classList.remove('active');
+    });
+    
+    // Show selected tab
+    document.getElementById(`tab-${tabName}`).style.display = 'block';
+    
+    // Add active class to button
+    event.target.classList.add('active');
+    
+    // Load tab data
+    loadTabData(tabName);
+}
+
+function loadTabData(tabName) {
+    switch(tabName) {
+        case 'cdn':
+            loadCacheRules();
+            loadDevModeStatus();
+            break;
+        case 'origins':
+            loadOrigins();
+            break;
+        case 'ssl':
+            loadTLSSettings();
+            loadCertificates();
+            break;
+        case 'security':
+            loadWAFRules();
+            loadRateLimits();
+            loadIPRules();
+            break;
+    }
+}
+
+// Initialize
+document.addEventListener('DOMContentLoaded', () => {
+    loadTabData('cdn');
+});
+</script>
+
+<script src="/static/js/domain_settings.js"></script>
+{% endblock %}

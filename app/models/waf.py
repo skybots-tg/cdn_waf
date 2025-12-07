@@ -59,11 +59,11 @@ class RateLimit(Base):
     path_pattern = Column(String(255), nullable=True)  # e.g., /api/*, null = all paths
     
     # Limits
-    limit = Column(Integer, nullable=False)  # Number of requests
-    interval = Column(Integer, nullable=False)  # Time window in seconds
+    limit_value = Column(Integer, nullable=False)  # Number of requests
+    interval_seconds = Column(Integer, nullable=False)  # Time window in seconds
     
     # Action when limit exceeded
-    action = Column(String(20), default="block", nullable=False)  # block, throttle
+    action = Column(String(20), default="block", nullable=False)  # block, throttle, challenge
     block_duration = Column(Integer, default=300, nullable=False)  # seconds
     
     # HTTP response
@@ -77,5 +77,26 @@ class RateLimit(Base):
     
     # Relationships
     domain = relationship("Domain", back_populates="rate_limits")
+
+
+class IPAccessRule(Base):
+    """IP access control rule model"""
+    __tablename__ = "ip_access_rules"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    domain_id = Column(Integer, ForeignKey("domains.id"), nullable=False, index=True)
+    
+    rule_type = Column(String(20), nullable=False)  # whitelist, blacklist
+    ip_address = Column(String(45), nullable=False)  # IP or CIDR notation
+    description = Column(Text, nullable=True)
+    
+    enabled = Column(Boolean, default=True, nullable=False)
+    
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    # Relationships
+    domain = relationship("Domain", back_populates="ip_access_rules")
+
 
 

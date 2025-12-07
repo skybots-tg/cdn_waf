@@ -40,11 +40,11 @@ class WAFRuleResponse(BaseModel):
     name: str
     description: Optional[str] = None
     priority: int
-    action: WAFActionEnum
-    conditions: Dict[str, Any]
+    action: str
+    conditions: str  # JSON string
     enabled: bool
     created_at: datetime
-    updated_at: datetime
+    updated_at: Optional[datetime] = None
     
     class Config:
         from_attributes = True
@@ -57,8 +57,8 @@ class RateLimitCreate(BaseModel):
     key_type: str = Field(default="ip")
     custom_key: Optional[str] = None
     path_pattern: Optional[str] = None
-    limit: int = Field(..., ge=1)
-    interval: int = Field(..., ge=1)
+    limit_value: int = Field(..., ge=1)
+    interval_seconds: int = Field(..., ge=1)
     action: str = Field(default="block")
     block_duration: int = Field(default=300, ge=1)
     response_status: int = Field(default=429)
@@ -73,8 +73,8 @@ class RateLimitUpdate(BaseModel):
     key_type: Optional[str] = None
     custom_key: Optional[str] = None
     path_pattern: Optional[str] = None
-    limit: Optional[int] = Field(None, ge=1)
-    interval: Optional[int] = Field(None, ge=1)
+    limit_value: Optional[int] = Field(None, ge=1)
+    interval_seconds: Optional[int] = Field(None, ge=1)
     action: Optional[str] = None
     block_duration: Optional[int] = Field(None, ge=1)
     response_status: Optional[int] = None
@@ -90,16 +90,48 @@ class RateLimitResponse(BaseModel):
     description: Optional[str] = None
     key_type: str
     path_pattern: Optional[str] = None
-    limit: int
-    interval: int
+    limit_value: int
+    interval_seconds: int
     action: str
     block_duration: int
     response_status: int
     enabled: bool
     created_at: datetime
-    updated_at: datetime
+    updated_at: Optional[datetime] = None
     
     class Config:
         from_attributes = True
+
+
+class IPAccessRuleCreate(BaseModel):
+    """Schema for IP access rule creation"""
+    rule_type: str = Field(..., pattern="^(whitelist|blacklist)$")
+    ip_address: str = Field(..., min_length=1, max_length=45)
+    description: Optional[str] = None
+    enabled: bool = Field(default=True)
+
+
+class IPAccessRuleUpdate(BaseModel):
+    """Schema for IP access rule update"""
+    rule_type: Optional[str] = Field(None, pattern="^(whitelist|blacklist)$")
+    ip_address: Optional[str] = Field(None, min_length=1, max_length=45)
+    description: Optional[str] = None
+    enabled: Optional[bool] = None
+
+
+class IPAccessRuleResponse(BaseModel):
+    """Schema for IP access rule response"""
+    id: int
+    domain_id: int
+    rule_type: str
+    ip_address: str
+    description: Optional[str] = None
+    enabled: bool
+    created_at: datetime
+    updated_at: Optional[datetime] = None
+    
+    class Config:
+        from_attributes = True
+
 
 
