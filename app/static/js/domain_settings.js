@@ -477,7 +477,7 @@ function renderWAFRules(rules) {
 
 async function loadRateLimits() {
     try {
-        const response = await fetch(`/api/v1/domains/${DOMAIN_ID}/security/rate-limits`, {
+        const response = await fetch(`/api/v1/domains/${DOMAIN_ID}/rate-limits`, {
             headers: { 'Authorization': `Bearer ${getToken()}` }
         });
         
@@ -530,7 +530,7 @@ function renderRateLimits(limits) {
 
 async function loadIPRules() {
     try {
-        const response = await fetch(`/api/v1/domains/${DOMAIN_ID}/security/ip-rules`, {
+        const response = await fetch(`/api/v1/domains/${DOMAIN_ID}/ip-rules`, {
             headers: { 'Authorization': `Bearer ${getToken()}` }
         });
         

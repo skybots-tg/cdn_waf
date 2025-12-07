@@ -198,9 +198,23 @@
 const DOMAIN_ID = {{ domain.id }};
 
 async function loadWAFStats() {
-    // TODO: Load real stats from API
-    document.getElementById('blocked-today').textContent = '142';
-    document.getElementById('active-rules').textContent = '8';
+    try {
+        const response = await fetch(`/api/v1/domains/${DOMAIN_ID}/stats/basic?range=24h`);
+        const stats = await response.json();
+        
+        document.getElementById('blocked-today').textContent = stats.threats_blocked || '0';
+        
+        // Count active rules
+        const rulesResponse = await fetch(`/api/v1/domains/${DOMAIN_ID}/waf/rules`);
+        const rules = await rulesResponse.json();
+        const activeCount = rules.filter(r => r.enabled).length;
+        document.getElementById('active-rules').textContent = activeCount;
+        
+    } catch (error) {
+        console.error('Error loading WAF stats:', error);
+        document.getElementById('blocked-today').textContent = '-';
+        document.getElementById('active-rules').textContent = '-';
+    }
 }
 
 async function loadWAFRules() {
@@ -267,7 +281,7 @@ async function loadWAFRules() {
 
 async function loadRateLimits() {
     try {
-        const response = await fetch(`/api/v1/domains/${DOMAIN_ID}/security/rate-limits`);
+        const response = await fetch(`/api/v1/domains/${DOMAIN_ID}/rate-limits`);
         const data = await response.json();
         
         const list = document.getElementById('rate-limits-list');
@@ -315,7 +329,7 @@ async function loadRateLimits() {
 
 async function loadIPRules() {
     try {
-        const response = await fetch(`/api/v1/domains/${DOMAIN_ID}/security/ip-rules`);
+        const response = await fetch(`/api/v1/domains/${DOMAIN_ID}/ip-rules`);
         const data = await response.json();
         
         const list = document.getElementById('ip-rules-list');

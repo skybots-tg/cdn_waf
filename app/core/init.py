@@ -59,6 +59,29 @@ async def migrate_schema():
                 logger.info("Adding protocol column to origins...")
                 await session.execute(text("ALTER TABLE origins ADD COLUMN IF NOT EXISTS protocol VARCHAR(10) DEFAULT 'https' NOT NULL"))
                 await session.commit()
+
+            # 4. Check/Add health check columns to origins
+            result_health = await session.execute(text(
+                "SELECT column_name FROM information_schema.columns "
+                "WHERE table_name='origins' AND column_name='health_status'"
+            ))
+            
+            if not result_health.scalar():
+                logger.info("Adding health check columns to origins...")
+                await session.execute(text("ALTER TABLE origins ADD COLUMN IF NOT EXISTS health_status VARCHAR(20) DEFAULT 'unknown' NOT NULL"))
+                await session.execute(text("ALTER TABLE origins ADD COLUMN IF NOT EXISTS health_check_enabled BOOLEAN DEFAULT TRUE NOT NULL"))
+                await session.execute(text("ALTER TABLE origins ADD COLUMN IF NOT EXISTS health_check_url VARCHAR(255) DEFAULT '/' NOT NULL"))
+                await session.execute(text("ALTER TABLE origins ADD COLUMN IF NOT EXISTS health_check_interval INTEGER DEFAULT 30 NOT NULL"))
+                await session.execute(text("ALTER TABLE origins ADD COLUMN IF NOT EXISTS health_check_timeout INTEGER DEFAULT 5 NOT NULL"))
+                await session.execute(text("ALTER TABLE origins ADD COLUMN IF NOT EXISTS health_check_unhealthy_threshold INTEGER DEFAULT 3 NOT NULL"))
+                await session.execute(text("ALTER TABLE origins ADD COLUMN IF NOT EXISTS health_check_healthy_threshold INTEGER DEFAULT 2 NOT NULL"))
+                await session.execute(text("ALTER TABLE origins ADD COLUMN IF NOT EXISTS is_healthy BOOLEAN DEFAULT TRUE NOT NULL"))
+                await session.execute(text("ALTER TABLE origins ADD COLUMN IF NOT EXISTS last_health_check TIMESTAMP WITHOUT TIME ZONE"))
+                await session.execute(text("ALTER TABLE origins ADD COLUMN IF NOT EXISTS last_check_at TIMESTAMP WITHOUT TIME ZONE"))
+                await session.execute(text("ALTER TABLE origins ADD COLUMN IF NOT EXISTS last_health_check_response_time FLOAT"))
+                await session.execute(text("ALTER TABLE origins ADD COLUMN IF NOT EXISTS last_check_duration FLOAT"))
+                await session.execute(text("ALTER TABLE origins ADD COLUMN IF NOT EXISTS consecutive_failures INTEGER DEFAULT 0 NOT NULL"))
+                await session.commit()
                 
     except Exception as e:
         logger.error(f"Schema migration error: {e}")
