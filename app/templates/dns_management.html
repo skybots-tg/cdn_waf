@@ -12,7 +12,7 @@
                 Manage DNS records across all your domains
             </p>
         </div>
-        <button class="btn btn-primary" onclick="showAddDomainModal()">
+        <button class="btn btn-primary" onclick="window.location.href='/domains/add'">
             <i class="fas fa-plus"></i> Add Domain
         </button>
     </div>
@@ -86,7 +86,7 @@ async function loadDomains() {
                     <i class="fas fa-globe" style="font-size: 64px; margin-bottom: 24px; opacity: 0.3;"></i>
                     <h3 style="margin-bottom: 12px;">No domains yet</h3>
                     <p style="margin-bottom: 24px;">Get started by adding your first domain</p>
-                    <button class="btn btn-primary" onclick="showAddDomainModal()">
+                    <button class="btn btn-primary" onclick="window.location.href='/domains/add'">
                         <i class="fas fa-plus"></i> Add Domain
                     </button>
                 </div>
@@ -198,13 +198,10 @@ async function loadDomainRecords(domainId) {
     }
 }
 
-function showAddDomainModal() {
-    showNotification('Add domain modal coming soon', 'info');
-}
-
-// Initialize
-document.addEventListener('DOMContentLoaded', () => {
-    loadDomains();
+async function loadDomains() {
+    try {
+        const response = await fetch('/api/v1/domains');
+        const domains = await response.json();
     
     // Search functionality
     document.getElementById('search-domains').addEventListener('input', (e) => {
@@ -219,5 +216,9 @@ document.addEventListener('DOMContentLoaded', () => {
         // TODO: Implement filter
     });
 });
+
+// Initialize
+document.addEventListener('DOMContentLoaded', () => {
+    loadDomains();
 </script>
 {% endblock %}

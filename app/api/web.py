@@ -43,6 +43,15 @@ async def domains_page(request: Request):
     })
 
 
+@router.get("/domains/add", response_class=HTMLResponse)
+async def add_domain_page(request: Request):
+    """Add domain page"""
+    return templates.TemplateResponse("domain_add.html", {
+        "request": request,
+        "user": {"email": "user@example.com"}
+    })
+
+
 @router.get("/domains/{domain_id}/dns", response_class=HTMLResponse)
 async def domain_dns_page(request: Request, domain_id: int):
     """Domain DNS page"""

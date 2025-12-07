@@ -8,6 +8,7 @@ from app.core.security import (
     create_access_token,
     create_refresh_token,
     get_current_active_user,
+    get_optional_current_user,
 )
 from app.schemas.user import (
     UserCreate,
@@ -98,13 +99,15 @@ async def get_current_user_info(
 
 @router.get("/api-keys")
 async def get_api_keys(
-    current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(get_optional_current_user),
     db: AsyncSession = Depends(get_db)
 ):
     """Get all API keys for current user
     
     Note: API keys table not yet implemented. Returns empty list.
     """
+    if not current_user:
+        return []
     # TODO: Implement API keys table and service
     return []
 
@@ -112,13 +115,18 @@ async def get_api_keys(
 @router.post("/api-keys")
 async def create_api_key(
     name: str,
-    current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(get_optional_current_user),
     db: AsyncSession = Depends(get_db)
 ):
     """Create new API key for current user
     
     Note: API keys table not yet implemented.
     """
+    if not current_user:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Not authenticated"
+        )
     # TODO: Implement API key creation
     raise HTTPException(
         status_code=status.HTTP_501_NOT_IMPLEMENTED,
@@ -129,13 +137,18 @@ async def create_api_key(
 @router.delete("/api-keys/{key_id}")
 async def delete_api_key(
     key_id: str,
-    current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(get_optional_current_user),
     db: AsyncSession = Depends(get_db)
 ):
     """Delete API key
     
     Note: API keys table not yet implemented.
     """
+    if not current_user:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Not authenticated"
+        )
     # TODO: Implement API key deletion
     raise HTTPException(
         status_code=status.HTTP_501_NOT_IMPLEMENTED,

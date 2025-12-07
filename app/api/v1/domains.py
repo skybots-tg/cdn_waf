@@ -1,10 +1,12 @@
 """Domain endpoints"""
 from typing import List
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.ext.asyncio import AsyncSession
+import dns.resolver
+import dns.exception
 
 from app.core.database import get_db
-from app.core.security import get_current_active_user
+from app.core.security import get_current_active_user, get_optional_current_user
 from app.schemas.domain import (
     DomainCreate,
     DomainUpdate,
@@ -19,12 +21,86 @@ from app.models.domain import Domain
 router = APIRouter()
 
 
+@router.get("/scan-dns")
+async def scan_dns_records(
+    domain: str = Query(..., description="Domain name to scan"),
+    current_user: User = Depends(get_optional_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """Scan existing DNS records for a domain
+    
+    This endpoint queries public DNS servers to get existing records.
+    """
+    records = []
+    record_types = ['A', 'AAAA', 'MX', 'TXT', 'CNAME', 'NS']
+    
+    resolver = dns.resolver.Resolver()
+    resolver.timeout = 5
+    resolver.lifetime = 5
+    
+    for record_type in record_types:
+        try:
+            answers = resolver.resolve(domain, record_type)
+            for rdata in answers:
+                record = {
+                    'type': record_type,
+                    'name': '@',
+                    'ttl': answers.rrset.ttl,
+                    'proxied': record_type in ['A', 'AAAA', 'CNAME']  # Proxy HTTP(S) records by default
+                }
+                
+                if record_type == 'A':
+                    record['content'] = str(rdata)
+                elif record_type == 'AAAA':
+                    record['content'] = str(rdata)
+                elif record_type == 'CNAME':
+                    record['content'] = str(rdata).rstrip('.')
+                elif record_type == 'MX':
+                    record['content'] = str(rdata.exchange).rstrip('.')
+                    record['priority'] = rdata.preference
+                elif record_type == 'TXT':
+                    record['content'] = ' '.join([s.decode() if isinstance(s, bytes) else s for s in rdata.strings])
+                elif record_type == 'NS':
+                    record['content'] = str(rdata).rstrip('.')
+                    record['proxied'] = False
+                
+                records.append(record)
+        except (dns.resolver.NXDOMAIN, dns.resolver.NoAnswer, dns.resolver.NoNameservers, dns.exception.Timeout):
+            # Record type doesn't exist or timeout
+            continue
+        except Exception as e:
+            # Log error but continue
+            print(f"Error resolving {record_type} for {domain}: {e}")
+            continue
+    
+    # Also try to get www subdomain
+    try:
+        www_domain = f"www.{domain}"
+        answers = resolver.resolve(www_domain, 'A')
+        for rdata in answers:
+            records.append({
+                'type': 'A',
+                'name': 'www',
+                'content': str(rdata),
+                'ttl': answers.rrset.ttl,
+                'proxied': True
+            })
+    except:
+        pass
+    
+    return records
+
+
 @router.get("/", response_model=List[DomainResponse])
 async def list_domains(
-    current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(get_optional_current_user),
     db: AsyncSession = Depends(get_db)
 ):
     """List all domains for current user's organization"""
+    # If no user, return empty list
+    if not current_user:
+        return []
+    
     # TODO: Get organization_id from current user's context
     # For now, assume organization_id = 1
     organization_id = 1
@@ -37,10 +113,15 @@ async def list_domains(
 @router.post("/", response_model=DomainResponse, status_code=status.HTTP_201_CREATED)
 async def create_domain(
     domain_create: DomainCreate,
-    current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(get_optional_current_user),
     db: AsyncSession = Depends(get_db)
 ):
     """Create new domain"""
+    if not current_user:
+        # For development, allow domain creation without auth
+        # TODO: Require authentication in production
+        pass
+    
     # TODO: Get organization_id from current user's context
     organization_id = 1
     

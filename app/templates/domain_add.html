@@ -1,0 +1,454 @@
+{% extends "base.html" %}
+
+{% block title %}Add Domain - CDN WAF{% endblock %}
+
+{% block content %}
+<div class="container" style="padding: 32px 24px; max-width: 900px;">
+    <!-- Header -->
+    <div class="mb-4">
+        <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 8px;">
+            <a href="/domains" style="color: var(--text-secondary); text-decoration: none;">
+                <i class="fas fa-arrow-left"></i>
+            </a>
+            <h1 style="font-size: 32px; font-weight: 700;">Add Domain</h1>
+        </div>
+        <p style="color: var(--text-secondary); font-size: 14px;">
+            Add a new domain to your CDN and import existing DNS records
+        </p>
+    </div>
+
+    <!-- Step Indicator -->
+    <div class="steps-indicator mb-4">
+        <div class="step active" id="step-indicator-1">
+            <div class="step-number">1</div>
+            <div class="step-label">Enter Domain</div>
+        </div>
+        <div class="step-line"></div>
+        <div class="step" id="step-indicator-2">
+            <div class="step-number">2</div>
+            <div class="step-label">Import DNS</div>
+        </div>
+        <div class="step-line"></div>
+        <div class="step" id="step-indicator-3">
+            <div class="step-number">3</div>
+            <div class="step-label">Verify</div>
+        </div>
+    </div>
+
+    <!-- Step 1: Enter Domain -->
+    <div id="step-1" class="step-content">
+        <div class="glass-card">
+            <h2 style="font-size: 20px; font-weight: 600; margin-bottom: 16px;">
+                Enter Your Domain Name
+            </h2>
+            <div class="form-group">
+                <label class="form-label">Domain Name</label>
+                <input type="text" class="form-input" id="domain-name" placeholder="example.com" autofocus>
+                <p style="font-size: 13px; color: var(--text-secondary); margin-top: 8px;">
+                    Enter your domain name without http:// or www
+                </p>
+            </div>
+            <div id="domain-error" style="display: none; color: var(--error); font-size: 14px; margin-bottom: 16px;">
+                <i class="fas fa-exclamation-circle"></i> <span id="domain-error-text"></span>
+            </div>
+            <button class="btn btn-primary" onclick="checkDomain()" id="btn-check-domain">
+                <i class="fas fa-search"></i> Check Domain
+            </button>
+        </div>
+    </div>
+
+    <!-- Step 2: Import DNS Records -->
+    <div id="step-2" class="step-content" style="display: none;">
+        <div class="glass-card mb-3">
+            <h2 style="font-size: 20px; font-weight: 600; margin-bottom: 8px;">
+                DNS Records Found
+            </h2>
+            <p style="color: var(--text-secondary); font-size: 14px; margin-bottom: 16px;">
+                We found existing DNS records for <strong id="importing-domain"></strong>. Select which records to import.
+            </p>
+            
+            <div id="dns-scan-loading" style="text-align: center; padding: 32px;">
+                <i class="fas fa-spinner fa-spin" style="font-size: 32px; color: var(--accent-primary); margin-bottom: 16px;"></i>
+                <p style="color: var(--text-secondary);">Scanning DNS records...</p>
+            </div>
+
+            <div id="dns-records-import" style="display: none;">
+                <div style="margin-bottom: 16px;">
+                    <label style="display: flex; align-items: center; gap: 12px; cursor: pointer; padding: 12px; background: var(--bg-tertiary); border-radius: var(--border-radius-sm);">
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="select-all-records" onchange="toggleAllRecords(this.checked)" checked>
+                            <span class="toggle-slider"></span>
+                        </label>
+                        <span style="font-weight: 600;">Select All Records</span>
+                    </label>
+                </div>
+
+                <div id="records-list"></div>
+
+                <div style="margin-top: 16px; padding: 12px; background: var(--accent-light); border-radius: var(--border-radius-sm); border-left: 3px solid var(--accent-primary);">
+                    <i class="fas fa-info-circle" style="color: var(--accent-primary);"></i>
+                    <strong>Note:</strong> Records marked with <i class="fas fa-cloud" style="color: var(--accent-primary);"></i> will be proxied through our CDN.
+                </div>
+            </div>
+        </div>
+
+        <div style="display: flex; gap: 12px;">
+            <button class="btn btn-secondary" onclick="goToStep(1)">
+                <i class="fas fa-arrow-left"></i> Back
+            </button>
+            <button class="btn btn-primary" onclick="goToStep(3)" id="btn-continue-verify">
+                Continue <i class="fas fa-arrow-right"></i>
+            </button>
+        </div>
+    </div>
+
+    <!-- Step 3: Verify & Complete -->
+    <div id="step-3" class="step-content" style="display: none;">
+        <div class="glass-card mb-3">
+            <h2 style="font-size: 20px; font-weight: 600; margin-bottom: 16px;">
+                Update Your Nameservers
+            </h2>
+            <p style="color: var(--text-secondary); font-size: 14px; margin-bottom: 16px;">
+                To activate CDN protection, update your domain's nameservers at your registrar to:
+            </p>
+            
+            <div style="background: var(--bg-tertiary); padding: 16px; border-radius: var(--border-radius-sm); margin-bottom: 16px;">
+                <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 12px;">
+                    <code style="font-size: 16px; font-weight: 600; color: var(--accent-primary);">ns1.yourcdn.ru</code>
+                    <button class="btn btn-secondary btn-sm" onclick="copyToClipboard('ns1.yourcdn.ru')">
+                        <i class="fas fa-copy"></i>
+                    </button>
+                </div>
+                <div style="display: flex; align-items: center; gap: 12px;">
+                    <code style="font-size: 16px; font-weight: 600; color: var(--accent-primary);">ns2.yourcdn.ru</code>
+                    <button class="btn btn-secondary btn-sm" onclick="copyToClipboard('ns2.yourcdn.ru')">
+                        <i class="fas fa-copy"></i>
+                    </button>
+                </div>
+            </div>
+
+            <div style="padding: 12px; background: var(--bg-tertiary); border-radius: var(--border-radius-sm); margin-bottom: 16px;">
+                <h3 style="font-size: 16px; font-weight: 600; margin-bottom: 8px;">
+                    <i class="fas fa-clock"></i> What happens next?
+                </h3>
+                <ul style="margin-left: 20px; color: var(--text-secondary); font-size: 14px; line-height: 1.8;">
+                    <li>Update nameservers at your registrar (usually takes 1-5 minutes)</li>
+                    <li>We'll automatically verify the change (can take up to 24 hours)</li>
+                    <li>Once verified, your domain will be active and protected</li>
+                    <li>DNS records will be automatically configured</li>
+                </ul>
+            </div>
+
+            <div class="flex-between" style="padding: 16px; background: var(--success); color: white; border-radius: var(--border-radius-sm);">
+                <div>
+                    <i class="fas fa-check-circle" style="font-size: 24px;"></i>
+                </div>
+                <div style="flex: 1; margin-left: 16px;">
+                    <h3 style="font-size: 16px; font-weight: 600; margin-bottom: 4px;">Domain Added Successfully!</h3>
+                    <p style="font-size: 14px; opacity: 0.9; margin: 0;">
+                        <span id="records-imported-count">0</span> DNS records imported. Update your nameservers to activate.
+                    </p>
+                </div>
+            </div>
+        </div>
+
+        <div style="display: flex; gap: 12px;">
+            <button class="btn btn-secondary" onclick="goToStep(2)">
+                <i class="fas fa-arrow-left"></i> Back
+            </button>
+            <button class="btn btn-primary" onclick="completeDomainAdd()">
+                <i class="fas fa-check"></i> Go to Domain Dashboard
+            </button>
+        </div>
+    </div>
+</div>
+
+<style>
+.steps-indicator {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0;
+}
+
+.step {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+}
+
+.step-number {
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    background: var(--bg-tertiary);
+    border: 2px solid var(--glass-border);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 700;
+    color: var(--text-secondary);
+    transition: all var(--transition-base);
+}
+
+.step.active .step-number {
+    background: var(--accent-primary);
+    border-color: var(--accent-primary);
+    color: white;
+}
+
+.step-label {
+    font-size: 13px;
+    color: var(--text-secondary);
+    font-weight: 500;
+}
+
+.step.active .step-label {
+    color: var(--accent-primary);
+    font-weight: 600;
+}
+
+.step-line {
+    width: 80px;
+    height: 2px;
+    background: var(--glass-border);
+    margin: 0 8px;
+}
+
+.record-item {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px;
+    background: var(--bg-tertiary);
+    border-radius: var(--border-radius-sm);
+    margin-bottom: 8px;
+}
+
+.record-item:hover {
+    background: var(--bg-secondary);
+}
+</style>
+
+<script>
+let currentDomain = '';
+let scannedRecords = [];
+let selectedRecords = [];
+
+async function checkDomain() {
+    const input = document.getElementById('domain-name');
+    const domain = input.value.trim().toLowerCase();
+    const errorDiv = document.getElementById('domain-error');
+    const errorText = document.getElementById('domain-error-text');
+    const btn = document.getElementById('btn-check-domain');
+    
+    // Validate domain
+    const domainRegex = /^([a-z0-9]+(-[a-z0-9]+)*\.)+[a-z]{2,}$/;
+    if (!domain || !domainRegex.test(domain)) {
+        errorText.textContent = 'Please enter a valid domain name (e.g., example.com)';
+        errorDiv.style.display = 'block';
+        return;
+    }
+    
+    errorDiv.style.display = 'none';
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Checking...';
+    
+    try {
+        // Check if domain already exists
+        const response = await fetch('/api/v1/domains');
+        const domains = await response.json();
+        
+        if (domains.find(d => d.name === domain)) {
+            errorText.textContent = 'This domain is already added to your account';
+            errorDiv.style.display = 'block';
+            btn.disabled = false;
+            btn.innerHTML = '<i class="fas fa-search"></i> Check Domain';
+            return;
+        }
+        
+        currentDomain = domain;
+        document.getElementById('importing-domain').textContent = domain;
+        
+        // Scan DNS records
+        await scanDNSRecords(domain);
+        
+        goToStep(2);
+    } catch (error) {
+        console.error('Error checking domain:', error);
+        errorText.textContent = 'Failed to check domain. Please try again.';
+        errorDiv.style.display = 'block';
+    } finally {
+        btn.disabled = false;
+        btn.innerHTML = '<i class="fas fa-search"></i> Check Domain';
+    }
+}
+
+async function scanDNSRecords(domain) {
+    document.getElementById('dns-scan-loading').style.display = 'block';
+    document.getElementById('dns-records-import').style.display = 'none';
+    
+    try {
+        // Call API to scan DNS records
+        const response = await fetch(`/api/v1/domains/scan-dns?domain=${encodeURIComponent(domain)}`);
+        const records = await response.json();
+        
+        scannedRecords = records;
+        selectedRecords = records.map((_, index) => index); // Select all by default
+        
+        displayDNSRecords(records);
+    } catch (error) {
+        console.error('Error scanning DNS:', error);
+        // Show example records for now
+        scannedRecords = [
+            { type: 'A', name: '@', content: '1.2.3.4', ttl: 3600, proxied: true },
+            { type: 'A', name: 'www', content: '1.2.3.4', ttl: 3600, proxied: true },
+            { type: 'MX', name: '@', content: 'mail.example.com', priority: 10, ttl: 3600, proxied: false },
+            { type: 'TXT', name: '@', content: 'v=spf1 include:_spf.example.com ~all', ttl: 3600, proxied: false }
+        ];
+        selectedRecords = scannedRecords.map((_, index) => index);
+        displayDNSRecords(scannedRecords);
+    } finally {
+        document.getElementById('dns-scan-loading').style.display = 'none';
+        document.getElementById('dns-records-import').style.display = 'block';
+    }
+}
+
+function displayDNSRecords(records) {
+    const container = document.getElementById('records-list');
+    
+    if (records.length === 0) {
+        container.innerHTML = `
+            <div style="text-align: center; padding: 32px; color: var(--text-muted);">
+                <i class="fas fa-exclamation-circle" style="font-size: 48px; margin-bottom: 16px; opacity: 0.3;"></i>
+                <p>No DNS records found. You can add them manually after adding the domain.</p>
+            </div>
+        `;
+        return;
+    }
+    
+    container.innerHTML = records.map((record, index) => `
+        <div class="record-item">
+            <label class="toggle-switch">
+                <input type="checkbox" id="record-${index}" checked onchange="toggleRecord(${index}, this.checked)">
+                <span class="toggle-slider"></span>
+            </label>
+            <div style="flex: 1;">
+                <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 4px;">
+                    <span class="badge badge-secondary">${record.type}</span>
+                    <span style="font-family: monospace; font-weight: 600;">${record.name || '@'}</span>
+                    ${record.proxied ? '<i class="fas fa-cloud" style="color: var(--accent-primary);" title="Proxied"></i>' : '<i class="fas fa-globe" style="color: var(--text-muted);" title="DNS Only"></i>'}
+                </div>
+                <div style="font-size: 13px; color: var(--text-secondary); font-family: monospace;">
+                    ${record.content} ${record.priority ? `(Priority: ${record.priority})` : ''}
+                </div>
+            </div>
+            <span style="font-size: 13px; color: var(--text-muted);">TTL: ${record.ttl}s</span>
+        </div>
+    `).join('');
+}
+
+function toggleAllRecords(checked) {
+    selectedRecords = checked ? scannedRecords.map((_, index) => index) : [];
+    scannedRecords.forEach((_, index) => {
+        const checkbox = document.getElementById(`record-${index}`);
+        if (checkbox) checkbox.checked = checked;
+    });
+}
+
+function toggleRecord(index, checked) {
+    if (checked) {
+        if (!selectedRecords.includes(index)) {
+            selectedRecords.push(index);
+        }
+    } else {
+        selectedRecords = selectedRecords.filter(i => i !== index);
+    }
+    
+    // Update "select all" checkbox
+    const selectAll = document.getElementById('select-all-records');
+    if (selectAll) {
+        selectAll.checked = selectedRecords.length === scannedRecords.length;
+    }
+}
+
+function goToStep(step) {
+    // Hide all steps
+    for (let i = 1; i <= 3; i++) {
+        document.getElementById(`step-${i}`).style.display = 'none';
+        document.getElementById(`step-indicator-${i}`).classList.remove('active');
+    }
+    
+    // Show selected step
+    document.getElementById(`step-${step}`).style.display = 'block';
+    document.getElementById(`step-indicator-${step}`).classList.add('active');
+    
+    // Update records count
+    if (step === 3) {
+        document.getElementById('records-imported-count').textContent = selectedRecords.length;
+        
+        // Create the domain
+        createDomain();
+    }
+}
+
+async function createDomain() {
+    try {
+        // Create domain
+        const response = await fetch('/api/v1/domains', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                name: currentDomain
+            })
+        });
+        
+        if (!response.ok) {
+            throw new Error('Failed to create domain');
+        }
+        
+        const domain = await response.json();
+        
+        // Import selected DNS records
+        const recordsToImport = selectedRecords.map(index => scannedRecords[index]);
+        
+        if (recordsToImport.length > 0) {
+            await fetch(`/api/v1/dns/domains/${domain.id}/records/import`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ records: recordsToImport })
+            });
+        }
+        
+        showNotification('Domain added successfully!', 'success');
+    } catch (error) {
+        console.error('Error creating domain:', error);
+        showNotification('Failed to add domain', 'error');
+    }
+}
+
+function completeDomainAdd() {
+    window.location.href = '/domains';
+}
+
+function copyToClipboard(text) {
+    navigator.clipboard.writeText(text).then(() => {
+        showNotification('Copied to clipboard!', 'success');
+    });
+}
+
+// Allow Enter key to submit
+document.addEventListener('DOMContentLoaded', () => {
+    document.getElementById('domain-name').addEventListener('keypress', (e) => {
+        if (e.key === 'Enter') {
+            checkDomain();
+        }
+    });
+});
+</script>
+{% endblock %}
