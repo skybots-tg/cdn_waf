@@ -276,9 +276,16 @@ class DNSNodeService:
     @staticmethod
     async def update_config(node: DNSNode) -> DNSNodeCommandResult:
         from app.core.config import settings
-        # We need to replace asyncpg with psycopg for sync driver in the remote node if needed
-        # But for now passing the URL is enough.
-        env_content = f"DATABASE_URL={settings.DATABASE_URL}\n"
+        # Create a full .env file with all required settings
+        env_content = f"""
+DATABASE_URL={settings.DATABASE_URL}
+SECRET_KEY={settings.SECRET_KEY}
+REDIS_URL={settings.REDIS_URL}
+CELERY_BROKER_URL={settings.CELERY_BROKER_URL}
+CELERY_RESULT_BACKEND={settings.CELERY_RESULT_BACKEND}
+JWT_SECRET_KEY={settings.JWT_SECRET_KEY}
+ACME_EMAIL={settings.ACME_EMAIL}
+"""
         
         with tempfile.NamedTemporaryFile(mode='w', delete=False) as tmp_env:
              tmp_env.write(env_content)
