@@ -51,9 +51,9 @@ class DBResolver(BaseResolver):
     """
     
     def __init__(self):
-        self.ns1 = "ns1.yourcdn.ru"
-        self.ns2 = "ns2.yourcdn.ru"
-        self.admin_email = "admin.yourcdn.ru"
+        self.ns1 = "ns1.flarecloud.ru"
+        self.ns2 = "ns2.flarecloud.ru"
+        self.admin_email = "admin.flarecloud.ru"
         self.ttl = 300
         
     def get_nameservers(self, db: Session) -> List[str]:

@@ -30,6 +30,9 @@ class EdgeNode(Base):
     ssh_key = Column(Text, nullable=True)  # Private key
     ssh_password = Column(String(255), nullable=True)  # Password (encrypted in production!)
     
+    # API Configuration
+    api_key = Column(String(64), unique=True, nullable=True)
+    
     # Status
     enabled = Column(Boolean, default=True, nullable=False)
     status = Column(String(20), default="unknown", nullable=False)  # online, offline, maintenance

@@ -88,6 +88,42 @@
                 </form>
             </div>
 
+            <!-- Edge Node Configuration -->
+            <div class="glass-card">
+                <h3 style="font-size: 18px; font-weight: 600; margin-bottom: 20px;">
+                    <i class="fas fa-network-wired"></i> Конфигурация Edge Node
+                </h3>
+                <p style="color: var(--text-secondary); font-size: 13px; margin-bottom: 16px;">
+                    Параметры для подключения ноды к Control Plane (config.yaml).
+                </p>
+                <div class="form-group">
+                    <label class="form-label">Control Plane URL</label>
+                    <div class="input-group">
+                        <input type="text" class="form-input" value="{{ control_plane_url }}" readonly id="cp-url">
+                        <button class="btn btn-secondary" onclick="copyToClipboard('cp-url')" type="button">
+                            <i class="fas fa-copy"></i>
+                        </button>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">API Key</label>
+                    <div class="input-group">
+                        <input type="text" class="form-input" value="{{ node.api_key or '' }}" readonly id="api-key" style="font-family: monospace;">
+                        <button class="btn btn-secondary" onclick="copyToClipboard('api-key')" type="button">
+                            <i class="fas fa-copy"></i>
+                        </button>
+                        <button class="btn btn-warning" onclick="regenerateApiKey()" type="button" title="Сгенерировать новый ключ">
+                            <i class="fas fa-sync-alt"></i>
+                        </button>
+                    </div>
+                    {% if not node.api_key %}
+                    <p style="color: var(--warning); font-size: 12px; margin-top: 4px;">
+                        API ключ не задан. Сгенерируйте новый ключ для работы ноды.
+                    </p>
+                    {% endif %}
+                </div>
+            </div>
+
             <!-- SSH Configuration -->
             <div class="glass-card">
                 <h3 style="font-size: 18px; font-weight: 600; margin-bottom: 20px;">
@@ -328,10 +364,48 @@
 .terminal-info { color: var(--info); }
 .terminal-error { color: var(--error); }
 .terminal-success { color: var(--success); }
+
+.input-group {
+    display: flex;
+    gap: 8px;
+}
+.input-group .form-input {
+    flex: 1;
+}
 </style>
 
 <script>
 const NODE_ID = {{ node.id }};
+
+function copyToClipboard(elementId) {
+    const el = document.getElementById(elementId);
+    el.select();
+    el.setSelectionRange(0, 99999);
+    navigator.clipboard.writeText(el.value).then(() => {
+        showNotification('Скопировано в буфер обмена', 'success');
+    }).catch(err => {
+        showNotification('Не удалось скопировать', 'error');
+    });
+}
+
+async function regenerateApiKey() {
+    if (!confirm('Вы уверены, что хотите сгенерировать новый API ключ? Старый ключ перестанет работать, и вам придется обновить конфигурацию на ноде.')) {
+        return;
+    }
+    
+    showNotification('Генерация ключа...', 'info');
+    try {
+        const response = await api.post(`/edge-nodes/${NODE_ID}/regenerate-api-key`);
+        if (response.api_key) {
+            document.getElementById('api-key').value = response.api_key;
+            showNotification('Новый API ключ сгенерирован', 'success');
+        } else {
+             showNotification('Ошибка генерации ключа', 'error');
+        }
+    } catch (error) {
+        showNotification(`Ошибка: ${error.message}`, 'error');
+    }
+}
 
 function switchTab(tabName) {
     // Hide all contents

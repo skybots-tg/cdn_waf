@@ -122,6 +122,7 @@ async def dns_nodes_page(request: Request):
 @router.get("/edge-nodes/{node_id}", response_class=HTMLResponse)
 async def edge_node_manage_page(request: Request, node_id: int, db: AsyncSession = Depends(get_db)):
     """Edge node management page"""
+    from app.core.config import settings
     node = await EdgeNodeService.get_node(db, node_id)
     if not node:
         return templates.TemplateResponse("404.html", {"request": request}, status_code=404)
@@ -129,7 +130,8 @@ async def edge_node_manage_page(request: Request, node_id: int, db: AsyncSession
     return templates.TemplateResponse("node_manage.html", {
         "request": request,
         "user": get_mock_user(request),
-        "node": node
+        "node": node,
+        "control_plane_url": settings.PUBLIC_URL
     })
 
 

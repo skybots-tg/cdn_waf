@@ -1,5 +1,5 @@
 """Edge nodes API endpoints"""
-from typing import List, Optional
+from typing import List, Optional, Dict
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -115,6 +115,22 @@ async def delete_edge_node(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Edge node not found"
         )
+
+
+@router.post("/{node_id}/regenerate-api-key", response_model=Dict[str, str])
+async def regenerate_node_api_key(
+    node_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_superuser)
+):
+    """Regenerate API key for edge node (superuser only)"""
+    new_key = await EdgeNodeService.regenerate_api_key(db, node_id)
+    if not new_key:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Edge node not found"
+        )
+    return {"api_key": new_key}
 
 
 @router.post("/{node_id}/command", response_model=EdgeNodeCommandResult)

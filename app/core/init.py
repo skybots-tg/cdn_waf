@@ -82,6 +82,18 @@ async def migrate_schema():
                 await session.execute(text("ALTER TABLE origins ADD COLUMN IF NOT EXISTS last_check_duration FLOAT"))
                 await session.execute(text("ALTER TABLE origins ADD COLUMN IF NOT EXISTS consecutive_failures INTEGER DEFAULT 0 NOT NULL"))
                 await session.commit()
+            
+            # 5. Check/Add api_key to edge_nodes
+            result_api_key = await session.execute(text(
+                "SELECT column_name FROM information_schema.columns "
+                "WHERE table_name='edge_nodes' AND column_name='api_key'"
+            ))
+            
+            if not result_api_key.scalar():
+                logger.info("Adding api_key column to edge_nodes...")
+                await session.execute(text("ALTER TABLE edge_nodes ADD COLUMN IF NOT EXISTS api_key VARCHAR(64)"))
+                await session.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS ix_edge_nodes_api_key ON edge_nodes (api_key)"))
+                await session.commit()
                 
     except Exception as e:
         logger.error(f"Schema migration error: {e}")

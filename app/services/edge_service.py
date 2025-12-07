@@ -4,6 +4,7 @@ import logging
 import re
 import os
 import tempfile
+import secrets
 from typing import List, Optional, Dict, Any
 from datetime import datetime, timedelta
 from sqlalchemy import select, func, or_
@@ -77,13 +78,26 @@ class EdgeNodeService:
             ssh_port=node_data.ssh_port,
             ssh_user=node_data.ssh_user,
             ssh_key=node_data.ssh_key,
-            ssh_password=node_data.ssh_password
+            ssh_password=node_data.ssh_password,
+            api_key=secrets.token_urlsafe(32)
         )
         
         db.add(node)
         await db.commit()
         await db.refresh(node)
         return node
+    
+    @staticmethod
+    async def regenerate_api_key(db: AsyncSession, node_id: int) -> Optional[str]:
+        """Regenerate API key for edge node"""
+        node = await EdgeNodeService.get_node(db, node_id)
+        if not node:
+            return None
+            
+        new_key = secrets.token_urlsafe(32)
+        node.api_key = new_key
+        await db.commit()
+        return new_key
     
     @staticmethod
     async def update_node(
@@ -489,8 +503,10 @@ class EdgeNodeService:
                 config_content = config_content.replace('name: "ru-msk-01"', f'name: "{node.name}"')
                 config_content = config_content.replace('location: "RU-MSK"', f'location: "{node.location_code}"')
                 
-                # Replace Control Plane URL
+                # Replace Control Plane URL and API Key
                 config_content = config_content.replace('url: "https://control.yourcdn.ru"', f'url: "{settings.PUBLIC_URL}"')
+                if node.api_key:
+                    config_content = config_content.replace('api_key: "your-api-key-here"', f'api_key: "{node.api_key}"')
                 
                 # Write to temp file
                 with tempfile.NamedTemporaryFile(mode='w', delete=False) as tmp:

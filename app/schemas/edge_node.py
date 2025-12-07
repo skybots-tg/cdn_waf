@@ -62,6 +62,9 @@ class EdgeNodeResponse(EdgeNodeBase):
     has_ssh_key: bool = False
     has_ssh_password: bool = False
 
+    # API Configuration
+    api_key: Optional[str] = None
+
     class Config:
         from_attributes = True
 

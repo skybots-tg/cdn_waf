@@ -38,12 +38,21 @@ async def verify_edge_node(
             detail="Node is disabled"
         )
     
-    # TODO: Verify token against stored hash
-    # For now, just check if token is provided
+    # Verify token
     if not x_node_token:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid node credentials"
+            detail="Missing authentication token"
+        )
+        
+    if not node.api_key or node.api_key != x_node_token:
+        # Backward compatibility for development: if node has no key set, maybe allow? 
+        # No, security first. But since we just added the column, existing nodes have NULL.
+        # We should generate keys for them or require regeneration.
+        # For now, if node.api_key is None, we block.
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid authentication token"
         )
     
     return node
