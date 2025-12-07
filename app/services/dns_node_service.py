@@ -230,7 +230,7 @@ class DNSNodeService:
     async def install_dependencies(node: DNSNode) -> DNSNodeCommandResult:
         res = await DNSNodeService._ensure_setup_script(node)
         if not res.success: return res
-        return await DNSNodeService.execute_command(node, "/tmp/setup_dns.sh install_deps")
+        return await DNSNodeService.execute_command(node, "/tmp/setup_dns.sh install_deps", timeout=300)
 
     @staticmethod
     async def install_python_env(node: DNSNode) -> DNSNodeCommandResult:
@@ -246,7 +246,7 @@ class DNSNodeService:
              if not success:
                  return DNSNodeCommandResult(success=False, stdout="", stderr=f"Requirements upload failed: {error}", exit_code=1, execution_time=0)
         
-        return await DNSNodeService.execute_command(node, "/tmp/setup_dns.sh install_python")
+        return await DNSNodeService.execute_command(node, "/tmp/setup_dns.sh install_python", timeout=300)
 
     @staticmethod
     async def update_app_code(node: DNSNode) -> DNSNodeCommandResult:
@@ -281,7 +281,7 @@ class DNSNodeService:
                  try:
                      success, error = await DNSNodeService.upload_file(node, alembic_zip_path, "/opt/cdn_waf/alembic.zip")
                      if success:
-                         await DNSNodeService.execute_command(node, "cd /opt/cdn_waf && (apt-get install -y unzip || true) && unzip -o alembic.zip && rm alembic.zip")
+                         await DNSNodeService.execute_command(node, "cd /opt/cdn_waf && (apt-get install -y unzip || true) && unzip -o alembic.zip && rm alembic.zip", timeout=60)
                  finally:
                      if os.path.exists(alembic_zip_path):
                          os.unlink(alembic_zip_path)
@@ -292,7 +292,7 @@ class DNSNodeService:
              
         # Unzip
         unzip_cmd = "cd /opt/cdn_waf && (apt-get install -y unzip || true) && unzip -o app.zip && rm app.zip"
-        return await DNSNodeService.execute_command(node, unzip_cmd)
+        return await DNSNodeService.execute_command(node, unzip_cmd, timeout=60)
 
     @staticmethod
     async def update_config(node: DNSNode) -> DNSNodeCommandResult:
@@ -327,7 +327,7 @@ ACME_EMAIL={settings.ACME_EMAIL}
     async def install_service(node: DNSNode) -> DNSNodeCommandResult:
         res = await DNSNodeService._ensure_setup_script(node)
         if not res.success: return res
-        return await DNSNodeService.execute_command(node, "/tmp/setup_dns.sh install_dns_service")
+        return await DNSNodeService.execute_command(node, "/tmp/setup_dns.sh install_dns_service", timeout=60)
 
     @staticmethod
     async def install_certbot(node: DNSNode) -> DNSNodeCommandResult:
@@ -353,13 +353,13 @@ ACME_EMAIL={settings.ACME_EMAIL}
              try:
                  success, _ = await DNSNodeService.upload_file(node, alembic_zip_path, "/opt/cdn_waf/alembic.zip")
                  if success:
-                     await DNSNodeService.execute_command(node, "cd /opt/cdn_waf && (apt-get install -y unzip || true) && unzip -o alembic.zip && rm alembic.zip")
+                     await DNSNodeService.execute_command(node, "cd /opt/cdn_waf && (apt-get install -y unzip || true) && unzip -o alembic.zip && rm alembic.zip", timeout=60)
              finally:
                  if os.path.exists(alembic_zip_path):
                      os.unlink(alembic_zip_path)
 
         cmd = "cd /opt/cdn_waf && ./venv/bin/alembic upgrade head"
-        return await DNSNodeService.execute_command(node, cmd)
+        return await DNSNodeService.execute_command(node, cmd, timeout=120)
 
     @staticmethod
     async def issue_certificate(node: DNSNode) -> DNSNodeCommandResult:
@@ -372,11 +372,11 @@ ACME_EMAIL={settings.ACME_EMAIL}
     async def install_node(node: DNSNode) -> DNSNodeCommandResult:
         """Full installation flow"""
         steps = [
+            ("Config", DNSNodeService.update_config),
             ("Dependencies", DNSNodeService.install_dependencies),
             ("Python Env", DNSNodeService.install_python_env),
             ("Certbot", DNSNodeService.install_certbot),
             ("App Code", DNSNodeService.update_app_code),
-            ("Config", DNSNodeService.update_config),
             ("Service", DNSNodeService.install_service)
         ]
         
