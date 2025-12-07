@@ -102,8 +102,8 @@ class DBResolver(BaseResolver):
                 reply.header.rcode = RCODE.REFUSED # We are not authoritative
                 return reply
                 
-            if zone.status != DomainStatus.ACTIVE:
-                logger.debug(f"Domain inactive: {zone.name}")
+            if zone.status not in [DomainStatus.ACTIVE, DomainStatus.PENDING]:
+                logger.debug(f"Domain inactive: {zone.name} ({zone.status})")
                 reply.header.rcode = RCODE.REFUSED
                 return reply
 
