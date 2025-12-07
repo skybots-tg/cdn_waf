@@ -462,6 +462,9 @@ ACME_EMAIL={settings.ACME_EMAIL}
             if not success:
                 return DNSNodeCommandResult(success=False, stdout="", stderr=f"Failed to upload SQL: {error}", exit_code=1, execution_time=0)
             
+            # Fix permissions so postgres user can read it
+            await DNSNodeService.execute_command(node, "chmod 644 /tmp/sync_db.sql")
+
             # Execute
             # Assume DB name is cdn_waf and user cdn_user (standard from setup)
             # OR we can parse .env on the node.

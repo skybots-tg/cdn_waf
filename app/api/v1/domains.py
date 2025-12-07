@@ -20,6 +20,7 @@ from app.schemas.domain import (
 from app.services.domain_service import DomainService
 from app.models.user import User
 from app.models.domain import Domain
+from app.tasks.dns_tasks import sync_dns_nodes
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -255,6 +256,9 @@ async def create_domain(
     domain = await domain_service.create(organization_id, domain_create)
     await db.commit()
 
+    # Trigger sync to DNS nodes
+    sync_dns_nodes.delay()
+
     return domain
 
 
@@ -300,6 +304,9 @@ async def update_domain(
 
     domain = await domain_service.update(domain, domain_update)
     await db.commit()
+
+    # Trigger sync to DNS nodes
+    sync_dns_nodes.delay()
 
     return domain
 

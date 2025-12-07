@@ -32,3 +32,28 @@ async def _check_dns_health_async():
                 results[node.name] = "error"
         
         return results
+
+@celery_app.task(name="app.tasks.dns.sync_dns_nodes")
+def sync_dns_nodes():
+    """Sync DNS records to all enabled nodes"""
+    loop = asyncio.get_event_loop()
+    return loop.run_until_complete(_sync_dns_nodes_async())
+
+async def _sync_dns_nodes_async():
+    """Async implementation of DNS sync"""
+    async with async_session_maker() as db:
+        # Get all enabled nodes
+        result = await db.execute(select(DNSNode).where(DNSNode.enabled == True))
+        nodes = result.scalars().all()
+        
+        results = {}
+        for node in nodes:
+            try:
+                # Sync database
+                res = await DNSNodeService.sync_database(node, db)
+                results[node.name] = "success" if res.success else f"failed: {res.stderr}"
+            except Exception as e:
+                print(f"Error syncing DNS node {node.name}: {e}")
+                results[node.name] = f"error: {str(e)}"
+        
+        return results

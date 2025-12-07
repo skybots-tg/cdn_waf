@@ -10,6 +10,7 @@ from app.schemas.dns import DNSRecordCreate, DNSRecordUpdate, DNSRecordResponse,
 from app.models.user import User
 from app.models.dns import DNSRecord
 from app.models.domain import Domain
+from app.tasks.dns_tasks import sync_dns_nodes
 
 router = APIRouter()
 
@@ -73,6 +74,9 @@ async def create_dns_record(
     await db.commit()
     await db.refresh(record)
     
+    # Trigger sync to DNS nodes
+    sync_dns_nodes.delay()
+    
     return record
 
 
@@ -115,6 +119,11 @@ async def import_dns_records(
         count += 1
     
     await db.commit()
+    
+    # Trigger sync to DNS nodes
+    if count > 0:
+        sync_dns_nodes.delay()
+        
     return {"message": f"Imported {count} records", "count": count}
 
 
@@ -187,6 +196,9 @@ async def update_dns_record(
     await db.commit()
     await db.refresh(record)
     
+    # Trigger sync to DNS nodes
+    sync_dns_nodes.delay()
+    
     return record
 
 
@@ -212,3 +224,6 @@ async def delete_dns_record(
     
     await db.delete(record)
     await db.commit()
+    
+    # Trigger sync to DNS nodes
+    sync_dns_nodes.delay()
