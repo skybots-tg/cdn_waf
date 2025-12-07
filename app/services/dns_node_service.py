@@ -367,6 +367,10 @@ ACME_EMAIL={settings.ACME_EMAIL}
         """Sync domains and records from central DB to node DB"""
         
         # 1. Fetch data from central DB
+        # We need to sync users first because of foreign key constraints in organizations
+        users = await db_session.execute(text("SELECT * FROM users"))
+        users_data = users.all()
+
         organizations = await db_session.execute(text("SELECT * FROM organizations"))
         organizations_data = organizations.all()
         
@@ -383,9 +387,21 @@ ACME_EMAIL={settings.ACME_EMAIL}
         
         sql_lines = [
             "BEGIN;",
-            "TRUNCATE TABLE dns_records, domains, organizations CASCADE;",
+            "TRUNCATE TABLE dns_records, domains, organizations, users CASCADE;",
         ]
         
+        # Users
+        for user in users_data:
+            # Handle booleans and NULLs
+            is_active = 'TRUE' if user.is_active else 'FALSE'
+            is_superuser = 'TRUE' if user.is_superuser else 'FALSE'
+            last_login = f"'{user.last_login}'" if user.last_login else "NULL"
+            
+            sql_lines.append(
+                f"INSERT INTO users (id, email, password_hash, full_name, is_active, is_superuser, last_login, created_at, updated_at) "
+                f"VALUES ({user.id}, '{user.email}', '{user.password_hash}', '{user.full_name}', {is_active}, {is_superuser}, {last_login}, '{user.created_at}', '{user.updated_at}');"
+            )
+
         # Organizations
         for org in organizations_data:
             # Manually map columns instead of using mapped metadata to avoid reflection issues
