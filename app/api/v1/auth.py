@@ -79,8 +79,8 @@ async def login(
     await db.commit()
     
     # Create tokens
-    access_token = create_access_token({"sub": user.id})
-    refresh_token = create_refresh_token({"sub": user.id})
+    access_token = create_access_token({"sub": str(user.id)})
+    refresh_token = create_refresh_token({"sub": str(user.id)})
     
     return TokenResponse(
         access_token=access_token,
