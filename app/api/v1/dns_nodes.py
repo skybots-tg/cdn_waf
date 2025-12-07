@@ -1,5 +1,5 @@
 """DNS Nodes API"""
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -140,3 +140,16 @@ async def get_component_status(
         raise HTTPException(status_code=404, detail="Node not found")
     
     return await DNSNodeService.get_component_status(node, component)
+
+@router.post("/{node_id}/check-health")
+async def check_node_health(
+    node_id: int,
+    current_user: User = Depends(get_current_active_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """Check node health and update status"""
+    node = await DNSNodeService.get_node(db, node_id)
+    if not node:
+        raise HTTPException(status_code=404, detail="Node not found")
+    
+    return await DNSNodeService.check_health(node, db)

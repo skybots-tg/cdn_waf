@@ -8,7 +8,7 @@ from typing import List, Optional
 
 from dnslib import (
     DNSRecord, DNSHeader, RR, QTYPE, A, AAAA, CNAME, MX, NS, SOA, TXT,
-    RCODE, QCLASS, DNSLabel
+    RCODE, CLASS, DNSLabel
 )
 from dnslib.server import DNSServer, BaseResolver
 from sqlalchemy import create_engine, select, and_

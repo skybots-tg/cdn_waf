@@ -517,29 +517,34 @@ async function installAll() {
 }
 
 async function checkConnection() {
-    showNotification('Checking connection...', 'info');
+    showNotification('Checking connection & Health...', 'info');
     try {
-        const response = await fetch(`/api/v1/dns-nodes/${NODE_ID}`, {
+        const response = await fetch(`/api/v1/dns-nodes/${NODE_ID}/check-health`, {
+             method: 'POST',
              headers: { 'Authorization': `Bearer ${localStorage.getItem('access_token')}` }
         });
-        const node = await response.json();
         
-        // Also check SSH
-        const sshRes = await fetch(`/api/v1/dns-nodes/${NODE_ID}/command`, {
-             method: 'POST',
-             headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${localStorage.getItem('access_token')}`
-             },
-             body: JSON.stringify({ command: 'echo "pong"' })
-        });
-        const sshData = await sshRes.json();
-        
-        if (sshData.success) {
-             showNotification('Connection OK', 'success');
-        } else {
-             showNotification('Connection Failed: ' + sshData.stderr, 'error');
+        if (!response.ok) {
+             const error = await response.json();
+             throw new Error(error.detail || 'Health check failed');
         }
+        
+        const data = await response.json();
+        
+        if (data.status === 'online') {
+             showNotification('Node is Online', 'success');
+             document.querySelector('.badge').className = 'badge badge-success';
+             document.querySelector('.badge').innerText = 'online';
+        } else if (data.status === 'offline') {
+             showNotification('Node is Offline (but accessible)', 'warning');
+             document.querySelector('.badge').className = 'badge badge-error';
+             document.querySelector('.badge').innerText = 'offline';
+        } else {
+             showNotification('Node status: ' + data.status, 'error');
+             document.querySelector('.badge').className = 'badge badge-error';
+             document.querySelector('.badge').innerText = data.status;
+        }
+        
     } catch (error) {
         showNotification(error.message, 'error');
     }

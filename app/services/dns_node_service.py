@@ -433,3 +433,25 @@ class DNSNodeService:
              return DNSComponentStatus(component=component, installed=res.success, running=True, status_text="Configured" if res.success else "Missing")
 
         return DNSComponentStatus(component=component, installed=False, running=False, status_text="Unknown")
+
+    @staticmethod
+    async def check_health(node: DNSNode, db: AsyncSession = None) -> Dict[str, Any]:
+        """Check node health and update status"""
+        
+        # Check service status
+        res = await DNSNodeService.get_component_status(node, "dns_service")
+        
+        status = "online" if res.running else ("offline" if res.installed else "unknown")
+        
+        # If we have DB session, update status
+        if db:
+            node.status = status
+            node.last_heartbeat = datetime.utcnow()
+            await db.commit()
+            await db.refresh(node)
+            
+        return {
+            "status": status,
+            "service_active": res.running,
+            "installed": res.installed
+        }
