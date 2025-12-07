@@ -42,8 +42,14 @@ class API {
         });
         
         if (!response.ok) {
-            const error = await response.json();
-            throw new Error(error.detail || 'Request failed');
+            let errorMsg = 'Request failed';
+            try {
+                const error = await response.json();
+                errorMsg = error.detail || error.message || errorMsg;
+            } catch (e) {
+                errorMsg = `Server Error (${response.status}): ${response.statusText}`;
+            }
+            throw new Error(errorMsg);
         }
         
         return response.json();
