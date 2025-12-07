@@ -28,6 +28,12 @@
                     <a href="/domains" class="nav-link {% if request.url.path.startswith('/domains') %}active{% endif %}">
                         <i class="fas fa-globe"></i> Domains
                     </a>
+                    <a href="/dns" class="nav-link {% if request.url.path.startswith('/dns') %}active{% endif %}">
+                        <i class="fas fa-network-wired"></i> DNS
+                    </a>
+                    <a href="/waf" class="nav-link {% if request.url.path.startswith('/waf') %}active{% endif %}">
+                        <i class="fas fa-shield-alt"></i> WAF
+                    </a>
                     {% if user.get('is_superuser') %}
                     <a href="/edge-nodes" class="nav-link {% if request.url.path.startswith('/edge-nodes') %}active{% endif %}">
                         <i class="fas fa-server"></i> Edge Nodes
