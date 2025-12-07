@@ -14,6 +14,7 @@ from typing import Dict, Any, Optional, List
 from datetime import datetime
 import shlex
 import aiofiles
+import psutil
 
 import httpx
 import yaml
@@ -271,6 +272,35 @@ class EdgeConfigUpdater:
         # Ensure log format config exists
         self.ensure_log_format_config()
 
+    def get_system_metrics(self) -> Dict[str, float]:
+        """Get system metrics"""
+        try:
+            return {
+                "cpu_usage": psutil.cpu_percent(interval=None),
+                "memory_usage": psutil.virtual_memory().percent,
+                "disk_usage": psutil.disk_usage('/').percent,
+                "active_connections": len(psutil.net_connections())
+            }
+        except Exception as e:
+            logger.error(f"Failed to get metrics: {e}")
+            return {}
+
+    async def send_heartbeat(self):
+        """Send heartbeat with metrics"""
+        metrics = self.get_system_metrics()
+        url = f"{self.control_plane_url}/internal/edge/heartbeat"
+        headers = {
+            "X-Node-Id": str(self.node_id),
+            "X-Node-Token": self.api_key,
+        }
+        
+        try:
+            async with httpx.AsyncClient(timeout=self.request_timeout) as client:
+                await client.post(url, json=metrics, headers=headers)
+                logger.debug("Heartbeat sent")
+        except Exception as e:
+            logger.error(f"Failed to send heartbeat: {e}")
+
     def ensure_log_format_config(self):
         """Write the log format configuration file"""
         try:
@@ -480,6 +510,10 @@ class EdgeConfigUpdater:
 
         while True:
             try:
+                # Send heartbeat
+                await self.send_heartbeat()
+                
+                # Update config
                 await self.update_config()
             except Exception as e:
                 logger.error("Error in update loop: %s", e, exc_info=True)
