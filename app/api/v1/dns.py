@@ -51,10 +51,23 @@ async def create_dns_record(
             detail="Domain not found"
         )
     
+    # Normalize record name
+    # If name is absolute (ends with domain name), make it relative
+    name = record_create.name.lower()
+    domain_name = domain.name.lower()
+    
+    if name == domain_name:
+        name = "@"
+    elif name.endswith(f".{domain_name}"):
+        name = name[:-len(domain_name)-1]
+    
     # Create record
+    record_data = record_create.model_dump()
+    record_data["name"] = name
+    
     record = DNSRecord(
         domain_id=domain_id,
-        **record_create.model_dump()
+        **record_data
     )
     db.add(record)
     await db.commit()
@@ -81,10 +94,22 @@ async def import_dns_records(
         )
     
     count = 0
+    domain_name = domain.name.lower()
+    
     for record_data in import_data.records:
+        # Normalize name
+        name = record_data.name.lower()
+        if name == domain_name:
+            name = "@"
+        elif name.endswith(f".{domain_name}"):
+            name = name[:-len(domain_name)-1]
+            
+        data = record_data.model_dump()
+        data["name"] = name
+        
         record = DNSRecord(
             domain_id=domain_id,
-            **record_data.model_dump()
+            **data
         )
         db.add(record)
         count += 1
@@ -139,6 +164,23 @@ async def update_dns_record(
     
     # Update fields
     update_data = record_update.model_dump(exclude_unset=True)
+    
+    # Normalize name if present
+    if "name" in update_data:
+        # We need domain to normalize
+        domain_result = await db.execute(select(Domain).where(Domain.id == record.domain_id))
+        domain = domain_result.scalar_one_or_none()
+        
+        if domain:
+             name = update_data["name"].lower()
+             domain_name = domain.name.lower()
+             if name == domain_name:
+                 update_data["name"] = "@"
+             elif name.endswith(f".{domain_name}"):
+                 update_data["name"] = name[:-len(domain_name)-1]
+             else:
+                 update_data["name"] = name
+
     for field, value in update_data.items():
         setattr(record, field, value)
     

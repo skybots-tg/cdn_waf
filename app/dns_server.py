@@ -11,7 +11,7 @@ from dnslib import (
     RCODE, CLASS, DNSLabel
 )
 from dnslib.server import DNSServer, BaseResolver
-from sqlalchemy import create_engine, select, and_
+from sqlalchemy import create_engine, select, and_, or_
 from sqlalchemy.orm import sessionmaker, Session
 
 from app.core.config import settings
@@ -146,7 +146,13 @@ class DBResolver(BaseResolver):
             # Look for records
             records = db.execute(
                 select(DNSModel).where(
-                    and_(DNSModel.domain_id == zone.id, DNSModel.name == record_name)
+                    and_(
+                        DNSModel.domain_id == zone.id,
+                        or_(
+                            DNSModel.name == record_name,
+                            DNSModel.name == domain_name  # Handle absolute names in DB
+                        )
+                    )
                     # We might want to filter by type, but CNAME handling is special
                 )
             ).scalars().all()
