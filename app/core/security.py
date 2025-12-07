@@ -97,6 +97,13 @@ async def get_current_active_user(current_user = Depends(get_current_user)):
     return current_user
 
 
+async def get_current_superuser(current_user = Depends(get_current_user)):
+    """Get current superuser"""
+    if not current_user.is_superuser:
+        raise HTTPException(status_code=403, detail="Not enough privileges")
+    return current_user
+
+
 async def get_optional_current_user(
     db: AsyncSession = Depends(get_db)
 ):
@@ -108,5 +115,3 @@ async def get_optional_current_user(
     # TODO: For production, implement proper optional authentication
     # For now, return None to allow all requests during development
     return None
-
-
