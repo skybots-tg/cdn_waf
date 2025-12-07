@@ -409,7 +409,7 @@ ACME_EMAIL={settings.ACME_EMAIL}
         for record in dns_records_data:
             priority = str(record.priority) if record.priority is not None else "NULL"
             weight = str(record.weight) if record.weight is not None else "NULL"
-            comment = f"'{record.comment.replace('\'', '\'\'')}'" if record.comment else "NULL"
+            comment = f"'{record.comment.replace(chr(39), chr(39)+chr(39))}'" if record.comment else "NULL"
             
             # Escape content properly
             content = record.content.replace("'", "''")
