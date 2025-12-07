@@ -30,6 +30,12 @@ logger = logging.getLogger("dns_server")
 # Sync Database Connection
 # We need to replace 'postgresql+asyncpg' with 'postgresql' for sync driver
 SYNC_DATABASE_URL = str(settings.DATABASE_URL).replace("postgresql+asyncpg", "postgresql")
+
+# Fix for localhost connection issues in some environments (like Docker vs Host)
+if "@db:" not in SYNC_DATABASE_URL and ("@localhost" in SYNC_DATABASE_URL or "@127.0.0.1" in SYNC_DATABASE_URL):
+    # Try to use 127.0.0.1 explicitly instead of localhost to avoid IPv6 issues if PG is only IPv4
+    SYNC_DATABASE_URL = SYNC_DATABASE_URL.replace("@localhost", "@127.0.0.1")
+
 engine = create_engine(SYNC_DATABASE_URL, pool_pre_ping=True)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
