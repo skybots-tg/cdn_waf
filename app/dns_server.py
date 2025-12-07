@@ -193,7 +193,21 @@ class DBResolver(BaseResolver):
             
             # Logic for Proxied records (A, AAAA, CNAME)
             # If any record for this name is proxied, we return Edge Node IPs
-            is_proxied = any(r.proxied for r in records if r.type in ['A', 'AAAA', 'CNAME'])
+            # We must check the queried record specifically or the CNAME chain
+            
+            # Find the specific record being queried
+            target_record = next((r for r in matching_records), None)
+            
+            # If we are querying A/AAAA and the record exists and is proxied -> return Edge IPs
+            # OR if we are querying A/AAAA and there is a CNAME that is proxied -> return Edge IPs (CNAME Flattening for root or just proxying)
+            
+            is_proxied = False
+            
+            if target_record and target_record.proxied and qtype_name in ['A', 'AAAA']:
+                is_proxied = True
+            elif cname_records and cname_records[0].proxied and qtype_name in ['A', 'AAAA', 'CNAME']:
+                # If CNAME is proxied, we return A records of Edge Nodes (CNAME Flattening-like behavior for CDN)
+                is_proxied = True
             
             if is_proxied and qtype_name in ['A', 'AAAA']:
                 # Return Edge Node IPs

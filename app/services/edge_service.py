@@ -252,7 +252,8 @@ class EdgeNodeService:
                 "host": ssh_host,
                 "port": ssh_port,
                 "username": ssh_user,
-                "known_hosts": None  # Security: In production, manage known_hosts!
+                "known_hosts": None,  # Security: In production, manage known_hosts!
+                "client_keys": None
             }
 
             if ssh_key:
@@ -420,7 +421,8 @@ class EdgeNodeService:
                 "host": ssh_host,
                 "port": ssh_port,
                 "username": ssh_user,
-                "known_hosts": None
+                "known_hosts": None,
+                "client_keys": None,
             }
             if ssh_key:
                 client_keys = [asyncssh.import_private_key(ssh_key)]
