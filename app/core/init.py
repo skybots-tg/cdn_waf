@@ -2,9 +2,10 @@
 import asyncio
 import logging
 from sqlalchemy import text, select
-from app.core.database import AsyncSessionLocal, engine
+from app.core.database import AsyncSessionLocal, engine, Base
+import app.models # Register all models
 from app.core.config import settings
-from app.models import Base
+# from app.models import Base
 from app.models.user import User
 from app.models.organization import Organization, OrganizationRole, OrganizationMember
 from app.core.security import get_password_hash
