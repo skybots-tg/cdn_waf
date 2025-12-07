@@ -6,6 +6,7 @@ from contextlib import asynccontextmanager
 
 from app.core.config import settings
 from app.core.redis import redis_client
+from app.core.init import init_system
 
 
 @asynccontextmanager
@@ -13,6 +14,8 @@ async def lifespan(app: FastAPI):
     """Application lifespan events"""
     # Startup
     await redis_client.connect()
+    # Initialize system (create tables, seed data)
+    await init_system()
     yield
     # Shutdown
     await redis_client.disconnect()
