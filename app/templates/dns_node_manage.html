@@ -239,6 +239,23 @@
                 </p>
             </div>
 
+            <!-- Migrations -->
+            <div class="glass-card" id="card-migrations">
+                <div class="flex-between mb-3">
+                    <div style="display: flex; gap: 12px; align-items: center;">
+                        <div class="component-icon"><i class="fas fa-database"></i></div>
+                        <div>
+                            <h4 style="font-weight: 600;">Database Migrations</h4>
+                            <span class="status-dot status-warning"></span> <span class="status-text" style="font-size: 12px; color: var(--text-muted);">Checking...</span>
+                        </div>
+                    </div>
+                    <button class="btn btn-sm btn-secondary" onclick="runAction('run_migrations')">Run Migrations</button>
+                </div>
+                <p style="font-size: 13px; color: var(--text-secondary);">
+                    Apply database schema changes (alembic upgrade head)
+                </p>
+            </div>
+
             <!-- DNS Service -->
             <div class="glass-card" id="card-dns_service">
                 <div class="flex-between mb-3">
@@ -472,6 +489,7 @@ async function runAction(action) {
     else if (action === 'issue_cert') { component = 'certbot'; cmd = 'issue'; }
     else if (action === 'update_app') { component = 'app_code'; cmd = 'install'; }
     else if (action === 'update_config') { component = 'config'; cmd = 'install'; }
+    else if (action === 'run_migrations') { component = 'migrations'; cmd = 'install'; }
     else if (action === 'install_service') { component = 'dns_service'; cmd = 'install'; }
     else if (action === 'restart_service') { component = 'dns_service'; cmd = 'restart'; }
     
@@ -587,6 +605,7 @@ async function checkAllComponents() {
         { id: 'certbot', card: 'card-certbot' },
         { id: 'app_code', card: 'card-app_code' },
         { id: 'config', card: 'card-config' },
+        { id: 'migrations', card: 'card-migrations' },
         { id: 'dns_service', card: 'card-dns_service' }
     ];
     

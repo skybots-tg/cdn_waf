@@ -315,6 +315,15 @@ ACME_EMAIL={settings.ACME_EMAIL}
         return await DNSNodeService.execute_command(node, "/tmp/setup_dns.sh install_certbot")
 
     @staticmethod
+    async def run_migrations(node: DNSNode) -> DNSNodeCommandResult:
+        """Run database migrations"""
+        # Ensure alembic.ini exists (it should be there from deploy_code/install_python)
+        # But we can try to copy it again just in case?
+        # Let's just run the command.
+        cmd = "cd /opt/cdn_waf && ./venv/bin/alembic upgrade head"
+        return await DNSNodeService.execute_command(node, cmd)
+
+    @staticmethod
     async def issue_certificate(node: DNSNode) -> DNSNodeCommandResult:
         """Issue SSL certificate for the node hostname"""
         cmd = f"certbot certonly --standalone -d {node.hostname} --non-interactive --agree-tos --email admin@yourcdn.ru" # TODO: use config email
@@ -363,6 +372,8 @@ ACME_EMAIL={settings.ACME_EMAIL}
                 return await DNSNodeService.install_service(node)
             elif component == "certbot":
                 return await DNSNodeService.install_certbot(node)
+            elif component == "migrations":
+                return await DNSNodeService.run_migrations(node)
             elif component == "dns_server": # Alias for full install? Or just service?
                  # If user clicks "Install" on "DNS Server" component in old UI
                  return await DNSNodeService.install_node(node)
@@ -419,6 +430,17 @@ ACME_EMAIL={settings.ACME_EMAIL}
                  running=True, # Always "running" as CLI tool
                  version=version,
                  status_text="Installed" if installed else "Missing"
+             )
+
+        if component == "migrations":
+             # Check if alembic exists
+             res = await DNSNodeService.execute_command(node, "[ -x /opt/cdn_waf/venv/bin/alembic ]")
+             # Maybe check current revision? Too complex for now.
+             return DNSComponentStatus(
+                 component=component, 
+                 installed=res.success, 
+                 running=True, 
+                 status_text="Ready" if res.success else "Missing Alembic"
              )
 
         # For other components, we can check existence of files
