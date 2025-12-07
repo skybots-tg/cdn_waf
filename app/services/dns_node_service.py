@@ -3,6 +3,7 @@ import asyncio
 import logging
 import os
 import tempfile
+import shutil
 from typing import List, Optional, Dict, Any
 from datetime import datetime
 from sqlalchemy import select, func
@@ -204,82 +205,190 @@ class DNSNodeService:
             return False
 
     @staticmethod
-    async def install_node(node: DNSNode) -> DNSNodeCommandResult:
-        """Install DNS node software"""
-        # 1. Upload setup script
+    async def get_logs(node: DNSNode, lines: int = 100) -> str:
+        """Get service logs"""
+        cmd = f"journalctl -u cdn-waf-dns -n {lines} --no-pager"
+        res = await DNSNodeService.execute_command(node, cmd)
+        return res.stdout if res.success else f"Error reading logs: {res.stderr}"
+
+    # Granular Installation Methods
+    
+    @staticmethod
+    async def _ensure_setup_script(node: DNSNode) -> DNSNodeCommandResult:
         setup_script = "dns_node/setup.sh"
         if not os.path.exists(setup_script):
              return DNSNodeCommandResult(success=False, stdout="", stderr="Setup script missing", exit_code=1, execution_time=0)
         
+        # Check if remote exists? Just upload.
         if not await DNSNodeService.upload_file(node, setup_script, "/tmp/setup_dns.sh"):
-             return DNSNodeCommandResult(success=False, stdout="", stderr="Upload failed", exit_code=1, execution_time=0)
+             return DNSNodeCommandResult(success=False, stdout="", stderr="Upload setup script failed", exit_code=1, execution_time=0)
         
-        await DNSNodeService.execute_command(node, "chmod +x /tmp/setup_dns.sh")
+        return await DNSNodeService.execute_command(node, "chmod +x /tmp/setup_dns.sh")
+
+    @staticmethod
+    async def install_dependencies(node: DNSNode) -> DNSNodeCommandResult:
+        res = await DNSNodeService._ensure_setup_script(node)
+        if not res.success: return res
+        return await DNSNodeService.execute_command(node, "/tmp/setup_dns.sh install_deps")
+
+    @staticmethod
+    async def install_python_env(node: DNSNode) -> DNSNodeCommandResult:
+        res = await DNSNodeService._ensure_setup_script(node)
+        if not res.success: return res
         
-        # 2. Upload requirements
+        # Upload requirements
         if not await DNSNodeService.upload_file(node, "requirements.txt", "/opt/cdn_waf/requirements.txt"):
              # Try creating dir first
              await DNSNodeService.execute_command(node, "mkdir -p /opt/cdn_waf")
              if not await DNSNodeService.upload_file(node, "requirements.txt", "/opt/cdn_waf/requirements.txt"):
                  return DNSNodeCommandResult(success=False, stdout="", stderr="Requirements upload failed", exit_code=1, execution_time=0)
         
-        # 3. Upload App Code (simplified: just copying necessary files? No, we need the whole structure)
-        # This is complex via SCP one-by-one. 
-        # Better strategy: Zip the app and upload.
+        return await DNSNodeService.execute_command(node, "/tmp/setup_dns.sh install_python")
+
+    @staticmethod
+    async def update_app_code(node: DNSNode) -> DNSNodeCommandResult:
         import shutil
+        import tempfile
         
-        # Create a temporary zip of 'app' folder
-        # We need to include 'app' folder itself
+        # Zip the app
         with tempfile.NamedTemporaryFile(suffix=".zip", delete=False) as tmp_zip:
+             # Zip 'app' folder and 'dns_node' folder potentially? No, just 'app'.
              shutil.make_archive(tmp_zip.name.replace('.zip', ''), 'zip', root_dir='.', base_dir='app')
              zip_path = tmp_zip.name
         
         try:
+             # Ensure dir exists
+             await DNSNodeService.execute_command(node, "mkdir -p /opt/cdn_waf")
+             
              if not await DNSNodeService.upload_file(node, zip_path, "/opt/cdn_waf/app.zip"):
                  return DNSNodeCommandResult(success=False, stdout="", stderr="App upload failed", exit_code=1, execution_time=0)
         finally:
-             os.unlink(zip_path)
+             if os.path.exists(zip_path):
+                 os.unlink(zip_path)
              
-        # 4. Unzip on remote
-        unzip_cmd = "cd /opt/cdn_waf && apt-get update && apt-get install -y unzip && unzip -o app.zip && rm app.zip"
-        await DNSNodeService.execute_command(node, unzip_cmd)
+        # Unzip
+        unzip_cmd = "cd /opt/cdn_waf && (apt-get install -y unzip || true) && unzip -o app.zip && rm app.zip"
+        return await DNSNodeService.execute_command(node, unzip_cmd)
 
-        # 5. Create .env file with DATABASE_URL
-        # In production, we should handle this securely. 
-        # Here we just assume we want to point to the central DB.
+    @staticmethod
+    async def update_config(node: DNSNode) -> DNSNodeCommandResult:
         from app.core.config import settings
+        # We need to replace asyncpg with psycopg for sync driver in the remote node if needed
+        # But for now passing the URL is enough.
         env_content = f"DATABASE_URL={settings.DATABASE_URL}\n"
+        
         with tempfile.NamedTemporaryFile(mode='w', delete=False) as tmp_env:
              tmp_env.write(env_content)
              env_path = tmp_env.name
         
         try:
-             await DNSNodeService.upload_file(node, env_path, "/opt/cdn_waf/.env")
+             await DNSNodeService.execute_command(node, "mkdir -p /opt/cdn_waf")
+             if not await DNSNodeService.upload_file(node, env_path, "/opt/cdn_waf/.env"):
+                  return DNSNodeCommandResult(success=False, stdout="", stderr="Config upload failed", exit_code=1, execution_time=0)
         finally:
-             os.unlink(env_path)
+             if os.path.exists(env_path):
+                 os.unlink(env_path)
+        
+        return DNSNodeCommandResult(success=True, stdout="Config updated", stderr="", exit_code=0, execution_time=0)
 
-        # 6. Run setup script steps
-        # Install deps
-        await DNSNodeService.execute_command(node, "/tmp/setup_dns.sh install_deps")
-        # Install python
-        await DNSNodeService.execute_command(node, "/tmp/setup_dns.sh install_python")
-        # Install service
+    @staticmethod
+    async def install_service(node: DNSNode) -> DNSNodeCommandResult:
+        res = await DNSNodeService._ensure_setup_script(node)
+        if not res.success: return res
         return await DNSNodeService.execute_command(node, "/tmp/setup_dns.sh install_dns_service")
+
+    @staticmethod
+    async def install_node(node: DNSNode) -> DNSNodeCommandResult:
+        """Full installation flow"""
+        steps = [
+            ("Dependencies", DNSNodeService.install_dependencies),
+            ("Python Env", DNSNodeService.install_python_env),
+            ("App Code", DNSNodeService.update_app_code),
+            ("Config", DNSNodeService.update_config),
+            ("Service", DNSNodeService.install_service)
+        ]
+        
+        stdout = []
+        for name, func in steps:
+            res = await func(node)
+            stdout.append(f"[{name}] {res.stdout}")
+            if not res.success:
+                return DNSNodeCommandResult(
+                    success=False, 
+                    stdout="\n".join(stdout), 
+                    stderr=f"[{name}] Failed: {res.stderr}", 
+                    exit_code=res.exit_code, 
+                    execution_time=0
+                )
+        
+        return DNSNodeCommandResult(success=True, stdout="\n".join(stdout), stderr="", exit_code=0, execution_time=0)
+
+    @staticmethod
+    async def manage_component_action(node: DNSNode, component: str, action: str) -> DNSNodeCommandResult:
+        if action == "install":
+            if component == "dependencies":
+                return await DNSNodeService.install_dependencies(node)
+            elif component == "python_env":
+                return await DNSNodeService.install_python_env(node)
+            elif component == "app_code":
+                return await DNSNodeService.update_app_code(node)
+            elif component == "config":
+                return await DNSNodeService.update_config(node)
+            elif component == "dns_service":
+                return await DNSNodeService.install_service(node)
+            elif component == "dns_server": # Alias for full install? Or just service?
+                 # If user clicks "Install" on "DNS Server" component in old UI
+                 return await DNSNodeService.install_node(node)
+        
+        # Service management
+        if component in ["dns_service", "dns_server"]:
+             cmd_map = {
+                "start": "systemctl start cdn-waf-dns",
+                "stop": "systemctl stop cdn-waf-dns",
+                "restart": "systemctl restart cdn-waf-dns",
+                "status": "systemctl status cdn-waf-dns"
+            }
+             if action in cmd_map:
+                 return await DNSNodeService.execute_command(node, cmd_map[action])
+
+        return DNSNodeCommandResult(
+            success=False,
+            stdout="",
+            stderr=f"Unknown component or action: {component} {action}",
+            exit_code=1,
+            execution_time=0
+        )
 
     @staticmethod
     async def get_component_status(node: DNSNode, component: str) -> DNSComponentStatus:
         """Get component status"""
-        if component == "dns_server":
+        if component in ["dns_server", "dns_service"]:
              cmd = "systemctl is-active cdn-waf-dns"
              res = await DNSNodeService.execute_command(node, cmd)
              running = res.stdout.strip() == "active"
              return DNSComponentStatus(
-                 component="dns_server",
-                 installed=res.success or running, # if active, it is installed
+                 component=component,
+                 installed=res.success or running,
                  running=running,
                  status_text="Active" if running else "Inactive"
              )
         
-        # ... other components ...
-        return DNSComponentStatus(component=component, installed=False, running=False, status_text="Unknown")
+        # For other components, we can check existence of files
+        if component == "dependencies":
+             # Check for python3
+             res = await DNSNodeService.execute_command(node, "which python3")
+             return DNSComponentStatus(component=component, installed=res.success, running=True, status_text="Installed" if res.success else "Missing")
+        
+        if component == "python_env":
+             res = await DNSNodeService.execute_command(node, "[ -d /opt/cdn_waf/venv ]")
+             return DNSComponentStatus(component=component, installed=res.success, running=True, status_text="Installed" if res.success else "Missing")
 
+        if component == "app_code":
+             res = await DNSNodeService.execute_command(node, "[ -d /opt/cdn_waf/app ]")
+             return DNSComponentStatus(component=component, installed=res.success, running=True, status_text="Installed" if res.success else "Missing")
+        
+        if component == "config":
+             res = await DNSNodeService.execute_command(node, "[ -f /opt/cdn_waf/.env ]")
+             return DNSComponentStatus(component=component, installed=res.success, running=True, status_text="Configured" if res.success else "Missing")
+
+        return DNSComponentStatus(component=component, installed=False, running=False, status_text="Unknown")

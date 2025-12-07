@@ -212,7 +212,7 @@ def main():
     tcp_server.start_thread()
 
     try:
-        while udp_server.isAlive():
+        while udp_server.is_alive():
             import time
             time.sleep(1)
     except KeyboardInterrupt:

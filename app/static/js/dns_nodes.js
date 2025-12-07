@@ -88,6 +88,9 @@ function renderNodes(nodes) {
                     <button class="btn btn-icon btn-sm btn-secondary" onclick="showComponentModal(${node.id})" title="Components / Install">
                         <i class="fas fa-cogs"></i>
                     </button>
+                    <button class="btn btn-icon btn-sm btn-secondary" onclick="showLogModal(${node.id})" title="View Logs">
+                        <i class="fas fa-file-alt"></i>
+                    </button>
                     <button class="btn btn-icon btn-sm" style="background: var(--error); color: white;" 
                             onclick="deleteNode(${node.id})" title="Delete">
                         <i class="fas fa-trash"></i>
@@ -253,35 +256,29 @@ async function deleteNode(nodeId) {
 // Show component management modal
 async function showComponentModal(nodeId) {
     document.getElementById('component-node-id').value = nodeId;
+    currentNodeId = nodeId;
     
-    const components = ['dns_server'];
+    // Detailed components for "nuance tracking"
+    const components = [
+        { id: 'dependencies', name: 'System Dependencies' },
+        { id: 'python_env', name: 'Python Environment' },
+        { id: 'app_code', name: 'Application Code' },
+        { id: 'config', name: 'Configuration' },
+        { id: 'dns_service', name: 'DNS Service' }
+    ];
+    
     const componentsList = document.getElementById('components-list');
     
-    componentsList.innerHTML = components.map(component => `
+    componentsList.innerHTML = components.map(comp => `
         <div class="component-item">
             <div class="flex-between mb-2">
-                <h4 style="font-weight: 600; text-transform: capitalize;">${component.replace('_', ' ')}</h4>
-                <div id="status-${component}-${nodeId}">
+                <h4 style="font-weight: 600; text-transform: capitalize;">${comp.name}</h4>
+                <div id="status-${comp.id}-${nodeId}">
                     <i class="fas fa-spinner fa-spin"></i>
                 </div>
             </div>
             <div class="component-actions">
-                <button class="btn btn-sm btn-secondary" onclick="manageComponent(${nodeId}, '${component}', 'status')">
-                    <i class="fas fa-info-circle"></i> Status
-                </button>
-                <button class="btn btn-sm btn-secondary" onclick="manageComponent(${nodeId}, '${component}', 'start')">
-                    <i class="fas fa-play"></i> Start
-                </button>
-                <button class="btn btn-sm btn-secondary" onclick="manageComponent(${nodeId}, '${component}', 'stop')">
-                    <i class="fas fa-stop"></i> Stop
-                </button>
-                <button class="btn btn-sm btn-secondary" onclick="manageComponent(${nodeId}, '${component}', 'restart')">
-                    <i class="fas fa-redo"></i> Restart
-                </button>
-                <button class="btn btn-sm" style="background: var(--info); color: white;" 
-                        onclick="manageComponent(${nodeId}, '${component}', 'install')">
-                    <i class="fas fa-download"></i> Install
-                </button>
+                ${getComponentActions(comp.id, nodeId)}
             </div>
         </div>
     `).join('');
@@ -289,8 +286,89 @@ async function showComponentModal(nodeId) {
     document.getElementById('component-modal').style.display = 'flex';
     
     // Load status for each component
-    for (const component of components) {
-        loadComponentStatus(nodeId, component);
+    for (const comp of components) {
+        loadComponentStatus(nodeId, comp.id);
+    }
+}
+
+function getComponentActions(component, nodeId) {
+    let actions = '';
+    
+    // Common install/update action
+    actions += `
+        <button class="btn btn-sm" style="background: var(--info); color: white;" 
+                onclick="manageComponent(${nodeId}, '${component}', 'install')" title="Install / Update">
+            <i class="fas fa-download"></i> Install
+        </button>
+    `;
+
+    // Service specific actions
+    if (component === 'dns_service') {
+        actions = `
+            <button class="btn btn-sm btn-secondary" onclick="manageComponent(${nodeId}, '${component}', 'status')">
+                <i class="fas fa-info-circle"></i> Status
+            </button>
+            <button class="btn btn-sm btn-secondary" onclick="manageComponent(${nodeId}, '${component}', 'start')">
+                <i class="fas fa-play"></i> Start
+            </button>
+            <button class="btn btn-sm btn-secondary" onclick="manageComponent(${nodeId}, '${component}', 'stop')">
+                <i class="fas fa-stop"></i> Stop
+            </button>
+            <button class="btn btn-sm btn-secondary" onclick="manageComponent(${nodeId}, '${component}', 'restart')">
+                <i class="fas fa-redo"></i> Restart
+            </button>
+            ${actions}
+        `;
+    }
+    
+    return actions;
+}
+
+// Log Viewer Functions
+let logRefreshInterval = null;
+
+function showLogModal(nodeId) {
+    currentNodeId = nodeId;
+    document.getElementById('log-modal').style.display = 'flex';
+    refreshLogs();
+    
+    // Auto refresh logs every 5 seconds
+    if (logRefreshInterval) clearInterval(logRefreshInterval);
+    logRefreshInterval = setInterval(refreshLogs, 5000);
+}
+
+function closeLogModal() {
+    document.getElementById('log-modal').style.display = 'none';
+    if (logRefreshInterval) {
+        clearInterval(logRefreshInterval);
+        logRefreshInterval = null;
+    }
+    currentNodeId = null;
+}
+
+async function refreshLogs() {
+    if (!currentNodeId) return;
+    
+    const lines = document.getElementById('log-lines').value;
+    const logContent = document.getElementById('log-content');
+    
+    try {
+        const response = await fetch(`/api/v1/dns-nodes/${currentNodeId}/logs?lines=${lines}`, {
+            headers: {
+                'Authorization': `Bearer ${getToken()}`
+            }
+        });
+        
+        if (!response.ok) throw new Error('Failed to load logs');
+        
+        const data = await response.json();
+        logContent.textContent = data.logs || 'No logs available.';
+        
+        // Auto scroll to bottom if near bottom? For now just stay.
+        logContent.scrollTop = logContent.scrollHeight;
+    } catch (error) {
+        console.error('Error loading logs:', error);
+        logContent.textContent = 'Error loading logs: ' + error.message;
     }
 }
 

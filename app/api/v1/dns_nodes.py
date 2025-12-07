@@ -96,31 +96,7 @@ async def manage_component(
     if not node:
         raise HTTPException(status_code=404, detail="Node not found")
         
-    if action.action == "install" and action.component == "dns_server":
-        return await DNSNodeService.install_node(node)
-        
-    cmd_map = {
-        "dns_server": {
-            "start": "systemctl start cdn-waf-dns",
-            "stop": "systemctl stop cdn-waf-dns",
-            "restart": "systemctl restart cdn-waf-dns",
-            "status": "systemctl status cdn-waf-dns"
-        }
-    }
-    
-    if action.component in cmd_map and action.action in cmd_map[action.component]:
-        cmd = cmd_map[action.component][action.action]
-        return await DNSNodeService.execute_command(node, cmd)
-        
-    # Fallback to direct command if not in map but component/action valid
-    # But for now just return error
-    return DNSNodeCommandResult(
-        success=False,
-        stdout="",
-        stderr=f"Unknown component or action: {action.component} {action.action}",
-        exit_code=1,
-        execution_time=0
-    )
+    return await DNSNodeService.manage_component_action(node, action.component, action.action)
 
 @router.post("/{node_id}/command", response_model=DNSNodeCommandResult)
 async def execute_command(
@@ -135,6 +111,21 @@ async def execute_command(
         raise HTTPException(status_code=404, detail="Node not found")
     
     return await DNSNodeService.execute_command(node, command.command, command.timeout)
+
+@router.get("/{node_id}/logs")
+async def get_node_logs(
+    node_id: int,
+    lines: int = 100,
+    current_user: User = Depends(get_current_active_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """Get DNS node logs"""
+    node = await DNSNodeService.get_node(db, node_id)
+    if not node:
+        raise HTTPException(status_code=404, detail="Node not found")
+    
+    logs = await DNSNodeService.get_logs(node, lines)
+    return {"logs": logs}
 
 @router.get("/{node_id}/components/{component}", response_model=DNSComponentStatus)
 async def get_component_status(
