@@ -17,6 +17,8 @@ from app.schemas.edge_node import (
     EdgeComponentStatus
 )
 
+from app.models.log import RequestLog
+
 logger = logging.getLogger(__name__)
 
 
@@ -134,13 +136,26 @@ class EdgeNodeService:
         )
         maintenance = maintenance_result.scalar() or 0
         
+        # Calculate real bandwidth (sum bytes_sent)
+        bandwidth_result = await db.execute(
+            select(func.sum(RequestLog.bytes_sent))
+        )
+        total_bytes = bandwidth_result.scalar() or 0
+        total_bandwidth_gb = round(total_bytes / (1024 * 1024 * 1024), 2)
+
+        # Calculate real total requests
+        requests_result = await db.execute(
+            select(func.count(RequestLog.id))
+        )
+        total_requests = requests_result.scalar() or 0
+        
         return EdgeNodeStats(
             total_nodes=total,
             online_nodes=online,
             offline_nodes=offline,
             maintenance_nodes=maintenance,
-            total_bandwidth=0.0,  # TODO: Calculate from analytics
-            total_requests=0  # TODO: Calculate from analytics
+            total_bandwidth=total_bandwidth_gb,
+            total_requests=total_requests
         )
     
     @staticmethod

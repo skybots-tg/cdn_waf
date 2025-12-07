@@ -1,7 +1,12 @@
 """Web routes for HTML pages"""
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Request, Depends, HTTPException
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core.database import get_db
+from app.services.edge_service import EdgeNodeService
+from app.services.domain_service import DomainService
 
 router = APIRouter()
 templates = Jinja2Templates(directory="app/templates")
@@ -62,12 +67,17 @@ async def add_domain_page(request: Request):
 
 
 @router.get("/domains/{domain_id}/dns", response_class=HTMLResponse)
-async def domain_dns_page(request: Request, domain_id: int):
+async def domain_dns_page(request: Request, domain_id: int, db: AsyncSession = Depends(get_db)):
     """Domain DNS page"""
+    domain_service = DomainService(db)
+    domain = await domain_service.get_by_id(domain_id)
+    if not domain:
+        return templates.TemplateResponse("404.html", {"request": request}, status_code=404)
+        
     return templates.TemplateResponse("domain_dns.html", {
         "request": request,
         "user": get_mock_user(request),
-        "domain": {"id": domain_id, "name": "example.com"}  # TODO: Get real domain
+        "domain": domain
     })
 
 
@@ -81,20 +91,12 @@ async def edge_nodes_page(request: Request):
 
 
 @router.get("/edge-nodes/{node_id}", response_class=HTMLResponse)
-async def edge_node_manage_page(request: Request, node_id: int):
+async def edge_node_manage_page(request: Request, node_id: int, db: AsyncSession = Depends(get_db)):
     """Edge node management page"""
-    # Mock node data for now
-    node = {
-        "id": node_id,
-        "name": f"Node-{node_id}",
-        "ip_address": "192.168.1.100",
-        "location": "Moscow, RU",
-        "location_code": "RU-MSK",
-        "status": "active",
-        "enabled": True,
-        "ssh_user": "root",
-        "ssh_port": 22
-    }
+    node = await EdgeNodeService.get_node(db, node_id)
+    if not node:
+        return templates.TemplateResponse("404.html", {"request": request}, status_code=404)
+
     return templates.TemplateResponse("node_manage.html", {
         "request": request,
         "user": get_mock_user(request),
@@ -103,32 +105,47 @@ async def edge_node_manage_page(request: Request, node_id: int):
 
 
 @router.get("/domains/{domain_id}/settings", response_class=HTMLResponse)
-async def domain_settings_page(request: Request, domain_id: int):
+async def domain_settings_page(request: Request, domain_id: int, db: AsyncSession = Depends(get_db)):
     """Domain settings page"""
+    domain_service = DomainService(db)
+    domain = await domain_service.get_by_id(domain_id)
+    if not domain:
+        return templates.TemplateResponse("404.html", {"request": request}, status_code=404)
+
     return templates.TemplateResponse("domain_settings.html", {
         "request": request,
         "user": get_mock_user(request),
-        "domain": {"id": domain_id, "name": "example.com"}  # TODO: Get real domain
+        "domain": domain
     })
 
 
 @router.get("/domains/{domain_id}/waf", response_class=HTMLResponse)
-async def domain_waf_page(request: Request, domain_id: int):
+async def domain_waf_page(request: Request, domain_id: int, db: AsyncSession = Depends(get_db)):
     """Domain WAF page"""
+    domain_service = DomainService(db)
+    domain = await domain_service.get_by_id(domain_id)
+    if not domain:
+        return templates.TemplateResponse("404.html", {"request": request}, status_code=404)
+
     return templates.TemplateResponse("domain_waf.html", {
         "request": request,
         "user": get_mock_user(request),
-        "domain": {"id": domain_id, "name": "example.com"}  # TODO: Get real domain
+        "domain": domain
     })
 
 
 @router.get("/domains/{domain_id}/analytics", response_class=HTMLResponse)
-async def domain_analytics_page(request: Request, domain_id: int):
+async def domain_analytics_page(request: Request, domain_id: int, db: AsyncSession = Depends(get_db)):
     """Domain analytics page"""
+    domain_service = DomainService(db)
+    domain = await domain_service.get_by_id(domain_id)
+    if not domain:
+        return templates.TemplateResponse("404.html", {"request": request}, status_code=404)
+
     return templates.TemplateResponse("domain_analytics.html", {
         "request": request,
         "user": get_mock_user(request),
-        "domain": {"id": domain_id, "name": "example.com"}  # TODO: Get real domain
+        "domain": domain
     })
 
 

@@ -54,3 +54,12 @@ class EdgeNode(Base):
     @property
     def has_ssh_password(self) -> bool:
         return bool(self.ssh_password)
+
+    @property
+    def location(self) -> str:
+        parts = []
+        if self.city:
+            parts.append(self.city)
+        if self.country_code:
+            parts.append(self.country_code)
+        return ", ".join(parts) if parts else self.location_code

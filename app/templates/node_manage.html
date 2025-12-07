@@ -471,11 +471,15 @@ async function installAll() {
 async function checkConnection() {
     showNotification('Проверка соединения...', 'info');
     try {
-        // Mock connection check
-        await new Promise(r => setTimeout(r, 1000));
-        showNotification('Связь с нодой установлена (23ms)', 'success');
+        const response = await api.post(`/edge-nodes/${NODE_ID}/health-check`);
+        if (response.status === 'online') {
+            showNotification('Связь с нодой установлена', 'success');
+            // Update CPU/Memory/Disk in UI if elements exist (optional)
+        } else {
+             showNotification(`Связь отсутствует: ${response.error || 'Unknown error'}`, 'error');
+        }
     } catch (error) {
-        showNotification('Нет связи с нодой', 'error');
+        showNotification(`Ошибка связи: ${error.message}`, 'error');
     }
 }
 </script>
