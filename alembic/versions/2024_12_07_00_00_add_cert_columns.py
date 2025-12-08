@@ -1,7 +1,7 @@
 """add_certificate_issuer_and_subject
 
-Revision ID: 8a9b2c3d4e5f
-Revises: 
+Revision ID: 2024_12_07_00_00_add_cert_columns
+Revises: 9188ee2f20e6
 Create Date: 2024-12-07 12:00:00.000000
 
 """
@@ -10,7 +10,7 @@ import sqlalchemy as sa
 
 
 # revision identifiers, used by Alembic.
-revision = '8a9b2c3d4e5f'
+revision = '2024_12_07_00_00_add_cert_columns'
 down_revision = '9188ee2f20e6'
 branch_labels = None
 depends_on = None
