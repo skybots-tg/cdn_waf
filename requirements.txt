@@ -32,8 +32,9 @@ pyotp==2.9.0
 asyncssh==2.14.2
 
 # ACME/Let's Encrypt
-acme==2.9.0
-certbot==2.9.0
+acme==2.11.0
+certbot==2.11.0
+josepy==1.14.0
 
 # DNS
 dnspython==2.5.0

@@ -114,8 +114,7 @@ class SSLService:
         from app.core.config import settings
         import acme.client
         import acme.messages
-        import jose.jwk
-        import jose.jws
+        import acme.challenges
         from cryptography.hazmat.primitives import serialization
         from cryptography.hazmat.primitives.asymmetric import rsa
         from cryptography import x509
@@ -171,7 +170,6 @@ class SSLService:
             key_size=2048,
             backend=default_backend()
         )
-        acc_jwk = jose.jwk.JWK.from_pyca(acc_key)
         
         # 3. Register Account
         net = acme.client.ClientNetwork(acc_key, user_agent="FlareCloud/1.0")
