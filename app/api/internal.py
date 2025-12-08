@@ -203,16 +203,6 @@ async def get_edge_config(
         )
         waf_rules = waf_rules_result.scalars().all()
         
-        # Certificate
-        from app.models.certificate import CertificateStatus
-        cert_result = await db.execute(
-            select(Certificate).where(
-                Certificate.domain_id == domain.id,
-                Certificate.status == CertificateStatus.ISSUED
-            ).order_by(Certificate.not_after.desc())
-        )
-        certificate = cert_result.scalar_one_or_none()
-        
         # Load TLS settings from domain_tls_settings table
         tls_settings_result = await db.execute(
             select(DomainTLSSettings).where(DomainTLSSettings.domain_id == domain.id)
@@ -229,6 +219,17 @@ async def get_edge_config(
                 full_name = domain.name
             else:
                 full_name = f"{sub_name}.{domain.name}"
+            
+            # Find certificate for this specific subdomain
+            from app.models.certificate import CertificateStatus
+            cert_result = await db.execute(
+                select(Certificate).where(
+                    Certificate.domain_id == domain.id,
+                    Certificate.status == CertificateStatus.ISSUED,
+                    Certificate.common_name == full_name
+                ).order_by(Certificate.not_after.desc())
+            )
+            certificate = cert_result.scalar_one_or_none()
                 
             domain_config = {
                 "id": domain.id,
