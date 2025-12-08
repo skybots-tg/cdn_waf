@@ -14,11 +14,12 @@ celery_app = Celery(
     ]
 )
 
-celery_app.conf.task_routes = {
-    "app.tasks.certificate.*": {"queue": "certificates"},
-    "app.tasks.dns.*": {"queue": "dns"},
-    "app.tasks.edge.*": {"queue": "edge"},
-}
+# Removed task_routes - all tasks will use default queue
+# celery_app.conf.task_routes = {
+#     "app.tasks.certificate.*": {"queue": "certificates"},
+#     "app.tasks.dns.*": {"queue": "dns"},
+#     "app.tasks.edge.*": {"queue": "edge"},
+# }
 
 celery_app.conf.update(
     task_serializer="json",
