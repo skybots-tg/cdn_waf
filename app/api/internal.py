@@ -58,6 +58,33 @@ async def verify_edge_node(
     return node
 
 
+@router.get("/debug-db")
+async def debug_db_state(db: AsyncSession = Depends(get_db)):
+    """Debug endpoint to check DB state"""
+    domains_result = await db.execute(select(Domain))
+    domains = domains_result.scalars().all()
+    
+    result = {"domains": []}
+    for d in domains:
+        origins_result = await db.execute(select(Origin).where(Origin.domain_id == d.id))
+        origins = origins_result.scalars().all()
+        
+        result["domains"].append({
+            "id": d.id,
+            "name": d.name,
+            "status": d.status,
+            "origins": [
+                {
+                    "id": o.id,
+                    "host": o.origin_host,
+                    "enabled": o.enabled,
+                    "domain_id": o.domain_id
+                } for o in origins
+            ]
+        })
+    return result
+
+
 @router.get("/config")
 async def get_edge_config(
     since_version: Optional[int] = None,
@@ -82,19 +109,23 @@ async def get_edge_config(
         }
     
     # Get all active domains (simplified - in production filter by node assignment)
+    print("DEBUG: Fetching active domains")
     domains_result = await db.execute(
         select(Domain).where(Domain.status == "active")
     )
     domains = domains_result.scalars().all()
+    print(f"DEBUG: Found {len(domains)} active domains")
     
     config_domains = []
     
     for domain in domains:
         # Get origins
+        print(f"DEBUG: Fetching origins for domain {domain.name} (ID: {domain.id})")
         origins_result = await db.execute(
             select(Origin).where(Origin.domain_id == domain.id, Origin.enabled == True)
         )
         origins = origins_result.scalars().all()
+        print(f"DEBUG: Found {len(origins)} enabled origins for domain {domain.name}")
         
         # Get cache rules
         cache_rules_result = await db.execute(
