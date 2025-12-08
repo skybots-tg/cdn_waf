@@ -48,7 +48,8 @@ class Settings(BaseSettings):
     
     # ACME/Let's Encrypt
     ACME_EMAIL: str
-    ACME_DIRECTORY_URL: str = "https://acme-v02.api.letsencrypt.org/directory"
+    ACME_DIRECTORY_URL: str = "https://acme-staging-v02.api.letsencrypt.org/directory"  # Use staging for now to avoid rate limits
+    ACME_ACCOUNT_KEY_PATH: str = "./data/acme_account_key.pem"  # Path to persistent account key
     
     # Edge Nodes
     EDGE_CONFIG_UPDATE_INTERVAL: int = 30

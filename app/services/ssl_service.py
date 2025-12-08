@@ -12,6 +12,7 @@ from cryptography.hazmat.primitives import serialization
 from app.models.certificate import Certificate
 from app.models.domain import Domain
 from app.schemas.cdn import CertificateCreate
+from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -181,16 +182,43 @@ class SSLService:
             logger.warning(f"No pending certificate found for domain {domain.name}")
             return
 
-        # 2. Generate Account Key
-        acc_key_crypto = rsa.generate_private_key(
-            public_exponent=65537,
-            key_size=2048,
-            backend=default_backend()
-        )
+        # 2. Load or Generate Account Key
+        import os
+        from pathlib import Path
+        
+        account_key_path = Path(settings.ACME_ACCOUNT_KEY_PATH)
+        account_key_path.parent.mkdir(parents=True, exist_ok=True)
+        
+        if account_key_path.exists():
+            # Load existing account key
+            logger.info(f"Loading existing ACME account key from {account_key_path}")
+            with open(account_key_path, 'rb') as f:
+                acc_key_crypto = serialization.load_pem_private_key(
+                    f.read(),
+                    password=None,
+                    backend=default_backend()
+                )
+        else:
+            # Generate new account key
+            logger.info(f"Generating new ACME account key and saving to {account_key_path}")
+            acc_key_crypto = rsa.generate_private_key(
+                public_exponent=65537,
+                key_size=2048,
+                backend=default_backend()
+            )
+            # Save it for future use
+            with open(account_key_path, 'wb') as f:
+                f.write(acc_key_crypto.private_bytes(
+                    encoding=serialization.Encoding.PEM,
+                    format=serialization.PrivateFormat.PKCS8,
+                    encryption_algorithm=serialization.NoEncryption()
+                ))
+            logger.info("ACME account key saved")
+        
         # Wrap the key in josepy JWK format for acme library
         acc_key = jose.JWKRSA(key=acc_key_crypto)
         
-        # 3. Register Account
+        # 3. Initialize ACME Client and Register/Query Account
         logger.info(f"Connecting to ACME server: {settings.ACME_DIRECTORY_URL}")
         net = acme.client.ClientNetwork(acc_key, user_agent="FlareCloud/1.0")
         directory = acme.messages.Directory.from_json(
@@ -199,20 +227,30 @@ class SSLService:
         client = acme.client.ClientV2(directory, net)
         logger.info("ACME client initialized")
         
+        # Try to register or query existing account
         try:
-            regr = client.new_account(
-                acme.messages.NewRegistration.from_data(
-                    email=settings.ACME_EMAIL,
-                    terms_of_service_agreed=True
+            if account_key_path.exists():
+                # Key exists, account probably already registered - query it
+                regr = client.new_account(
+                    acme.messages.NewRegistration.from_data(
+                        email=settings.ACME_EMAIL,
+                        terms_of_service_agreed=True,
+                        only_return_existing=True  # Don't create new, just query
+                    )
                 )
-            )
-            logger.info("ACME account registered successfully")
+                logger.info("Using existing ACME account")
+            else:
+                # New key, register new account
+                regr = client.new_account(
+                    acme.messages.NewRegistration.from_data(
+                        email=settings.ACME_EMAIL,
+                        terms_of_service_agreed=True
+                    )
+                )
+                logger.info("New ACME account registered successfully")
         except Exception as e:
-            # Assuming account already exists, we would look it up, but simplified here
-            # In production, store account key persistently!
-            logger.warning(f"Account registration warning (might exist): {e}")
-            # If it exists, we proceed (acme lib handles key reuse usually if initialized correctly)
-            # But here we generated a NEW key, so we are registering a NEW account.
+            logger.warning(f"Account operation warning: {e}")
+            # Continue anyway - the client is initialized with the key
         
         # 4. Generate Certificate Key and CSR first (required for acme 2.x)
         pkey = rsa.generate_private_key(
