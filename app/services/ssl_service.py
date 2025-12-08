@@ -266,9 +266,14 @@ class SSLService:
             # 6. Set Challenge Token/Response
             response, validation = http_challenge.response_and_validation(acc_key)
             
-            # ACME tokens are base64url encoded bytes - convert properly
-            # The token attribute is already a string in josepy
-            token_str = str(http_challenge.chall.token)
+            # ACME tokens are base64url encoded - josepy returns bytes, need to decode
+            token_raw = http_challenge.chall.token
+            if isinstance(token_raw, bytes):
+                # Decode bytes to string (base64url is ASCII-safe)
+                token_str = token_raw.decode('ascii')
+            else:
+                token_str = str(token_raw)
+            
             # Validation might be bytes from josepy, decode it
             if isinstance(validation, bytes):
                 validation_str = validation.decode('utf-8')
@@ -276,7 +281,7 @@ class SSLService:
                 validation_str = str(validation)
             
             logger.info(f"Storing challenge token: {token_str[:20]}... for domain {authz.identifier.value}")
-            logger.info(f"Token type: {type(http_challenge.chall.token)}, Validation type: {type(validation)}")
+            logger.info(f"Token (decoded): {token_str}")
             
             from app.core.redis import redis_client
             if redis_client:
