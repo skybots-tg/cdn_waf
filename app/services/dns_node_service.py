@@ -254,46 +254,34 @@ class DNSNodeService:
         import shutil
         import tempfile
         
-        # Zip the app
-        with tempfile.NamedTemporaryFile(suffix=".zip", delete=False) as tmp_zip:
-             shutil.make_archive(tmp_zip.name.replace('.zip', ''), 'zip', root_dir='.', base_dir='app')
-             zip_path = tmp_zip.name
+        # Собираем общий архив с app + alembic + alembic.ini в один шаг
+        with tempfile.TemporaryDirectory() as tmpdir:
+            bundle_root = os.path.join(tmpdir, "bundle")
+            os.makedirs(bundle_root, exist_ok=True)
+            
+            # Копируем директории
+            shutil.copytree("app", os.path.join(bundle_root, "app"))
+            if os.path.exists("alembic"):
+                shutil.copytree("alembic", os.path.join(bundle_root, "alembic"))
+            # alembic.ini
+            if os.path.exists("alembic.ini"):
+                shutil.copy("alembic.ini", os.path.join(bundle_root, "alembic.ini"))
+            # requirements.txt (полезно для venv)
+            if os.path.exists("requirements.txt"):
+                shutil.copy("requirements.txt", os.path.join(bundle_root, "requirements.txt"))
+            
+            zip_base = os.path.join(tmpdir, "bundle")
+            zip_path = shutil.make_archive(zip_base, "zip", root_dir=bundle_root)
         
-        try:
-             # Ensure dir exists
-             await DNSNodeService.execute_command(node, "mkdir -p /opt/cdn_waf")
-             
-             success, error = await DNSNodeService.upload_file(node, zip_path, "/opt/cdn_waf/app.zip")
-             if not success:
-                 return DNSNodeCommandResult(success=False, stdout="", stderr=f"App upload failed: {error}", exit_code=1, execution_time=0)
-             
-             # Also upload alembic.ini explicitly here
-             if os.path.exists("alembic.ini"):
-                 success, error = await DNSNodeService.upload_file(node, "alembic.ini", "/opt/cdn_waf/alembic.ini")
-                 if not success:
-                     logger.warning(f"Failed to upload alembic.ini to {node.name}: {error}")
-             
-             # Upload alembic directory if it exists locally
-             if os.path.exists("alembic"):
-                 with tempfile.NamedTemporaryFile(suffix=".zip", delete=False) as tmp_alembic_zip:
-                     shutil.make_archive(tmp_alembic_zip.name.replace('.zip', ''), 'zip', root_dir='.', base_dir='alembic')
-                     alembic_zip_path = tmp_alembic_zip.name
-                 
-                 try:
-                     success, error = await DNSNodeService.upload_file(node, alembic_zip_path, "/opt/cdn_waf/alembic.zip")
-                     if success:
-                         await DNSNodeService.execute_command(node, "cd /opt/cdn_waf && (apt-get install -y unzip || true) && unzip -o alembic.zip && rm alembic.zip", timeout=60)
-                 finally:
-                     if os.path.exists(alembic_zip_path):
-                         os.unlink(alembic_zip_path)
-
-        finally:
-             if os.path.exists(zip_path):
-                 os.unlink(zip_path)
-             
-        # Unzip
-        unzip_cmd = "cd /opt/cdn_waf && (apt-get install -y unzip || true) && unzip -o app.zip && rm app.zip"
-        return await DNSNodeService.execute_command(node, unzip_cmd, timeout=60)
+        # Ensure remote dir
+        await DNSNodeService.execute_command(node, "mkdir -p /opt/cdn_waf")
+        
+        success, error = await DNSNodeService.upload_file(node, zip_path, "/opt/cdn_waf/bundle.zip")
+        if not success:
+            return DNSNodeCommandResult(success=False, stdout="", stderr=f"Bundle upload failed: {error}", exit_code=1, execution_time=0)
+        
+        unzip_cmd = "cd /opt/cdn_waf && (apt-get install -y unzip || true) && unzip -o bundle.zip && rm bundle.zip"
+        return await DNSNodeService.execute_command(node, unzip_cmd, timeout=120)
 
     @staticmethod
     async def update_config(node: DNSNode) -> DNSNodeCommandResult:
@@ -339,28 +327,9 @@ ACME_EMAIL={settings.ACME_EMAIL}
     @staticmethod
     async def run_migrations(node: DNSNode) -> DNSNodeCommandResult:
         """Run database migrations"""
-        # Ensure alembic.ini exists (it should be there from deploy_code/install_python)
-        # Try to upload it again just in case it's missing
-        if os.path.exists("alembic.ini"):
-             await DNSNodeService.upload_file(node, "alembic.ini", "/opt/cdn_waf/alembic.ini")
-        
-        # Also ensure alembic directory is present (might be missing if only app code updated)
-        if os.path.exists("alembic"):
-             import shutil
-             import tempfile
-             with tempfile.NamedTemporaryFile(suffix=".zip", delete=False) as tmp_alembic_zip:
-                 shutil.make_archive(tmp_alembic_zip.name.replace('.zip', ''), 'zip', root_dir='.', base_dir='alembic')
-                 alembic_zip_path = tmp_alembic_zip.name
-             try:
-                 success, _ = await DNSNodeService.upload_file(node, alembic_zip_path, "/opt/cdn_waf/alembic.zip")
-                 if success:
-                     await DNSNodeService.execute_command(node, "cd /opt/cdn_waf && (apt-get install -y unzip || true) && unzip -o alembic.zip && rm alembic.zip", timeout=60)
-             finally:
-                 if os.path.exists(alembic_zip_path):
-                     os.unlink(alembic_zip_path)
-
+        # На этом этапе update_app_code уже положил alembic и alembic.ini в /opt/cdn_waf
         cmd = "cd /opt/cdn_waf && ./venv/bin/alembic upgrade head"
-        return await DNSNodeService.execute_command(node, cmd, timeout=120)
+        return await DNSNodeService.execute_command(node, cmd, timeout=180)
     
     @staticmethod
     async def sync_database(node: DNSNode, db_session: AsyncSession) -> DNSNodeCommandResult:
