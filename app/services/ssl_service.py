@@ -122,12 +122,37 @@ class SSLService:
         from cryptography.x509.oid import NameOID
         from cryptography.hazmat.primitives import hashes
         
+        from app.models.dns import DNSRecord
+        
         # 1. Get domain and certificate record
         domain = await db.execute(select(Domain).where(Domain.id == domain_id))
         domain = domain.scalar_one_or_none()
         if not domain:
             logger.error(f"Domain {domain_id} not found for ACME processing")
             return
+
+        # Fetch subdomains from DNS (for SANs)
+        dns_records_result = await db.execute(
+            select(DNSRecord).where(
+                DNSRecord.domain_id == domain.id,
+                DNSRecord.type == "A"
+            )
+        )
+        dns_records = dns_records_result.scalars().all()
+        
+        # Determine SANs (Subject Alternative Names)
+        sans = set()
+        sans.add(domain.name) # Always include root
+        for r in dns_records:
+            if r.proxied: # Only include proxied records
+                if r.name == "@":
+                    sans.add(domain.name)
+                else:
+                    sans.add(f"{r.name}.{domain.name}")
+        
+        # Convert to list and ensure unique
+        identifiers_list = sorted(list(sans))
+        logger.info(f"Requesting certificate for: {identifiers_list}")
 
         cert = await db.execute(
             select(Certificate).where(
@@ -170,13 +195,16 @@ class SSLService:
             # But here we generated a NEW key, so we are registering a NEW account.
         
         # 4. Create Order
+        # Identifiers from SANs list
+        acme_identifiers = [
+            acme.messages.Identifier(
+                typ=acme.messages.IDENTIFIER_FQDN,
+                value=name
+            ) for name in identifiers_list
+        ]
+        
         order = client.new_order(acme.messages.NewOrder.from_data(
-            identifiers=[
-                acme.messages.Identifier(
-                    typ=acme.messages.IDENTIFIER_FQDN,
-                    value=domain.name
-                )
-            ]
+            identifiers=acme_identifiers
         ))
         
         # 5. Process Authorizations
@@ -244,9 +272,23 @@ class SSLService:
             key_size=2048,
             backend=default_backend()
         )
-        csr = x509.CertificateSigningRequestBuilder().subject_name(x509.Name([
-            x509.NameAttribute(NameOID.COMMON_NAME, domain.name),
-        ])).sign(pkey, hashes.SHA256(), default_backend())
+        
+        # Build CSR with SANs
+        # First name is Common Name
+        common_name = identifiers_list[0]
+        san_dns_names = [x509.DNSName(name) for name in identifiers_list]
+        
+        csr_builder = x509.CertificateSigningRequestBuilder().subject_name(x509.Name([
+            x509.NameAttribute(NameOID.COMMON_NAME, common_name),
+        ]))
+        
+        # Add SAN extension
+        csr_builder = csr_builder.add_extension(
+            x509.SubjectAlternativeName(san_dns_names),
+            critical=False,
+        )
+        
+        csr = csr_builder.sign(pkey, hashes.SHA256(), default_backend())
         
         finalized_order = client.finalize_order(order, datetime.utcnow() + timedelta(minutes=5), csr.public_bytes(serialization.Encoding.DER))
         
