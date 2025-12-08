@@ -52,6 +52,7 @@ NGINX_TEMPLATE = Template("""
 
 {% for domain in domains %}
 {% set safe_name = domain.name|replace('.', '_') %}
+{% set backend_protocol = 'https' if domain.tls_settings.mode in ['full', 'strict'] else 'http' %}
 
 # Domain: {{ domain.name }}
 
@@ -60,7 +61,7 @@ proxy_cache_path /var/cache/nginx/{{ safe_name }} levels=1:2 keys_zone={{ safe_n
 
 upstream {{ safe_name }}_backend {
     {% for origin in domain.origins %}
-    server {{ origin.host }}:{{ origin.port }} weight={{ origin.weight }} {% if origin.is_backup %}backup{% endif %};
+    server {{ origin.host }}:{{ origin.port if backend_protocol == 'http' else (443 if origin.port == 80 else origin.port) }} weight={{ origin.weight }} {% if origin.is_backup %}backup{% endif %};
     {% endfor %}
 }
 
@@ -90,7 +91,7 @@ server {
         proxy_cache_valid 200 {{ rule.ttl }}s;
         {% endif %}
 
-        proxy_pass {{ domain.origins[0].protocol }}://{{ safe_name }}_backend;
+        proxy_pass {{ backend_protocol }}://{{ safe_name }}_backend;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
@@ -107,7 +108,7 @@ server {
     {% endif %}
 
     location / {
-        proxy_pass {{ domain.origins[0].protocol }}://{{ safe_name }}_backend;
+        proxy_pass {{ backend_protocol }}://{{ safe_name }}_backend;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
@@ -162,7 +163,7 @@ server {
         proxy_cache_valid 200 {{ rule.ttl }}s;
         {% endif %}
 
-        proxy_pass {{ domain.origins[0].protocol }}://{{ safe_name }}_backend;
+        proxy_pass {{ backend_protocol }}://{{ safe_name }}_backend;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
@@ -179,7 +180,7 @@ server {
     {% endif %}
 
     location / {
-        proxy_pass {{ domain.origins[0].protocol }}://{{ safe_name }}_backend;
+        proxy_pass {{ backend_protocol }}://{{ safe_name }}_backend;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
