@@ -115,6 +115,7 @@ class SSLService:
         import acme.client
         import acme.messages
         import acme.challenges
+        import josepy as jose
         from cryptography.hazmat.primitives import serialization
         from cryptography.hazmat.primitives.asymmetric import rsa
         from cryptography import x509
@@ -165,11 +166,13 @@ class SSLService:
             return
 
         # 2. Generate Account Key
-        acc_key = rsa.generate_private_key(
+        acc_key_crypto = rsa.generate_private_key(
             public_exponent=65537,
             key_size=2048,
             backend=default_backend()
         )
+        # Wrap the key in josepy JWK format for acme library
+        acc_key = jose.JWKRSA(key=acc_key_crypto)
         
         # 3. Register Account
         logger.info(f"Connecting to ACME server: {settings.ACME_DIRECTORY_URL}")
