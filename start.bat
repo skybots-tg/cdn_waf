@@ -1,69 +1,74 @@
 @echo off
-REM FlareCloud Quick Start Script for Windows
+REM FlareCloud Quick Start Script for Windows (Local Development)
 
 echo ========================================
-echo    FlareCloud - Quick Start Setup
+echo    FlareCloud - Local Setup
 echo ========================================
 echo.
 
-REM Check if Docker is installed
-docker --version >nul 2>&1
+REM Check if Python is installed
+python --version >nul 2>&1
 if errorlevel 1 (
-    echo X Docker is not installed. Please install Docker first.
+    echo X Python is not installed. Please install Python 3.10+ first.
     exit /b 1
 )
 
-docker-compose --version >nul 2>&1
-if errorlevel 1 (
-    echo X Docker Compose is not installed. Please install Docker Compose first.
-    exit /b 1
-)
-
-echo √ Docker and Docker Compose are installed
+echo √ Python is installed
 echo.
+
+REM Check for virtual environment
+if not exist venv (
+    echo Creating virtual environment...
+    python -m venv venv
+    echo √ Virtual environment created
+) else (
+    echo √ Virtual environment exists
+)
+
+REM Activate venv
+call venv\Scripts\activate
+
+REM Install requirements
+echo.
+echo Installing requirements...
+pip install -r requirements.txt
+echo √ Requirements installed
 
 REM Copy .env.example to .env if not exists
 if not exist .env (
+    echo.
     echo Creating .env file...
     copy .env.example .env
     echo √ .env file created
-    echo NOTE: Please edit .env and set SECRET_KEY and JWT_SECRET_KEY
+    echo NOTE: Please edit .env and set DATABASE_URL, REDIS_URL and SECRET_KEY
 ) else (
     echo √ .env file already exists
 )
 
 echo.
-echo Starting services with Docker Compose...
-docker-compose up -d
-
-echo.
-echo Waiting for services to be ready...
-timeout /t 10 /nobreak >nul
-
-echo.
 echo Applying database migrations...
-docker-compose exec -T app alembic upgrade head
+alembic upgrade head
 
 echo.
 echo ========================================
 echo    Setup Complete!
 echo ========================================
 echo.
-echo Services:
-echo   API:        http://localhost:8000
-echo   API Docs:   http://localhost:8000/docs
-echo   Flower:     http://localhost:5555
+echo To run the services, open 3 separate terminals and run:
 echo.
-echo Next steps:
-echo   1. Open http://localhost:8000 in your browser
-echo   2. Create an account
-echo   3. Add your first domain
+echo Terminal 1 (API):
+echo   venv\Scripts\activate
+echo   uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 echo.
-echo Useful commands:
-echo   View logs:      docker-compose logs -f
-echo   Stop services:  docker-compose down
-echo   Restart:        docker-compose restart
+echo Terminal 2 (DNS Server):
+echo   venv\Scripts\activate
+echo   python -m app.dns_server
+echo.
+echo Terminal 3 (Celery Worker):
+echo   venv\Scripts\activate
+echo   celery -A app.tasks.celery_app worker -l info -P gevent
+echo.
+echo Useful:
+echo   Run verification manually: python -c "from app.tasks.dns_tasks import verify_pending_domains; import asyncio; asyncio.run(verify_pending_domains())"
 echo.
 pause
-
-

@@ -87,7 +87,7 @@ class DBResolver(BaseResolver):
         qtype_num = request.q.qtype
         qtype_name = QTYPE[qtype_num]
         
-        domain_name = str(qname).rstrip('.')
+        domain_name = str(qname).rstrip('.').lower()
         
         # logger.info(f"Query: {qname} ({qtype_name})")
         
