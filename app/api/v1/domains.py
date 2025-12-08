@@ -311,6 +311,33 @@ async def update_domain(
     return domain
 
 
+from app.services.ssl_service import SSLService
+from pydantic import BaseModel
+
+class ACMERequest(BaseModel):
+    wildcard: bool = False
+
+@router.post("/{domain_id}/ssl/certificates/acme")
+async def request_acme_certificate(
+    domain_id: int,
+    request: ACMERequest,
+    current_user: User = Depends(get_optional_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Request Let's Encrypt certificate for domain"""
+    # TODO: Auth check
+    
+    try:
+        certificate = await SSLService.request_acme_certificate(
+            db, domain_id, request.wildcard
+        )
+        return {"status": "pending", "certificate_id": certificate.id}
+    except Exception as e:
+        logger.error(f"Failed to request ACME certificate: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
+        )
 @router.post("/{domain_id}/verify-ns")
 async def verify_ns(
     domain_id: int,
