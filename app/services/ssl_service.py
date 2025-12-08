@@ -223,6 +223,8 @@ class SSLService:
             
             if not http_challenge:
                 logger.error("No HTTP-01 challenge found")
+                cert.status = "failed"
+                await db.commit()
                 return
 
             # 6. Set Challenge Token/Response
@@ -253,6 +255,8 @@ class SSLService:
                 )
             else:
                 logger.error("Redis not available for ACME challenge storage")
+                cert.status = "failed"
+                await db.commit()
                 return
 
             # 7. Trigger Validation
