@@ -243,7 +243,10 @@ class SSLService:
         
         # 5. Process Authorizations
         logger.info(f"Processing {len(order.authorizations)} authorizations")
-        for authz_url in order.authorizations:
+        for authz_resource in order.authorizations:
+            # Extract URL from AuthorizationResource object
+            authz_url = authz_resource.uri if hasattr(authz_resource, 'uri') else str(authz_resource)
+            logger.info(f"Fetching authorization from {authz_url}")
             # Fetch authorization using POST-as-GET
             response = client._post_as_get(authz_url)
             authz = acme.messages.Authorization.from_json(response.json())
