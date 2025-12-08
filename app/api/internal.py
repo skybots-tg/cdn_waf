@@ -430,9 +430,8 @@ async def get_acme_challenge(
     # In production, check if domain belongs to this node?
     # For now, just return if valid token exists
     
-    validation = None
-    if redis_client and redis_client.client:
-        validation = await redis_client.client.get(f"acme:challenge:{token}")
+    if redis_client:
+        validation = await redis_client.get(f"acme:challenge:{token}")
     
     if not validation:
         raise HTTPException(

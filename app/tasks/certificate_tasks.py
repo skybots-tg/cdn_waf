@@ -14,13 +14,19 @@ def issue_certificate(domain_id: int):
     logger.info(f"Starting certificate issuance for domain_id={domain_id}")
     
     async def _issue():
+        # Ensure Redis is connected for this task
+        from app.core.redis import redis_client
+        await redis_client.connect()
+        
         async with AsyncSessionLocal() as db:
             try:
                 await SSLService.process_acme_order(db, domain_id)
             except Exception as e:
                 logger.error(f"Failed to issue certificate for domain {domain_id}: {e}")
                 # Ideally mark certificate/order as failed in DB
-                
+            finally:
+                await redis_client.disconnect()
+
     loop = asyncio.get_event_loop()
     loop.run_until_complete(_issue())
     

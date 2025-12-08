@@ -247,11 +247,12 @@ class SSLService:
             # or just write to a file that internal API can read.
             
             from app.core.redis import redis_client
-            if redis_client and redis_client.client:
-                await redis_client.client.set(
+            if redis_client:
+                # Use the wrapper method which handles the underlying client
+                await redis_client.set(
                     f"acme:challenge:{http_challenge.chall.token}", 
                     validation,
-                    ex=3600
+                    expire=3600
                 )
             else:
                 logger.error("Redis not available for ACME challenge storage")
