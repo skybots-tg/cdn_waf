@@ -428,14 +428,24 @@ async def get_acme_challenge(
     node: EdgeNode = Depends(verify_edge_node)
 ):
     """Get ACME challenge response for edge nodes"""
-    # In production, check if domain belongs to this node?
-    # For now, just return if valid token exists
+    import logging
+    logger = logging.getLogger(__name__)
+    
+    logger.info(f"ACME challenge request from edge node {node.name} for token: {token[:20]}...")
     
     validation = None
     if redis_client:
-        validation = await redis_client.get(f"acme:challenge:{token}")
+        key = f"acme:challenge:{token}"
+        validation = await redis_client.get(key)
+        logger.info(f"Redis lookup for key: {key}, found: {validation is not None}")
     
     if not validation:
+        # List all keys for debugging
+        if redis_client:
+            import redis.asyncio as redis_lib
+            all_keys = await redis_client.keys("acme:challenge:*")
+            logger.warning(f"Challenge not found. Available keys: {all_keys}")
+        
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Challenge not found"

@@ -266,11 +266,17 @@ class SSLService:
             # 6. Set Challenge Token/Response
             response, validation = http_challenge.response_and_validation(acc_key)
             
-            # Token is bytes, need to decode to string for URL/Redis key
-            token_str = http_challenge.chall.token.decode('utf-8') if isinstance(http_challenge.chall.token, bytes) else http_challenge.chall.token
-            validation_str = validation.decode('utf-8') if isinstance(validation, bytes) else validation
+            # ACME tokens are base64url encoded bytes - convert properly
+            # The token attribute is already a string in josepy
+            token_str = str(http_challenge.chall.token)
+            # Validation might be bytes from josepy, decode it
+            if isinstance(validation, bytes):
+                validation_str = validation.decode('utf-8')
+            else:
+                validation_str = str(validation)
             
             logger.info(f"Storing challenge token: {token_str[:20]}... for domain {authz.identifier.value}")
+            logger.info(f"Token type: {type(http_challenge.chall.token)}, Validation type: {type(validation)}")
             
             from app.core.redis import redis_client
             if redis_client:
@@ -280,6 +286,7 @@ class SSLService:
                     validation_str,
                     expire=3600
                 )
+                logger.info(f"Challenge stored in Redis: acme:challenge:{token_str}")
             else:
                 logger.error("Redis not available for ACME challenge storage")
                 cert.status = CertificateStatus.FAILED
