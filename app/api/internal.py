@@ -87,6 +87,7 @@ async def debug_db_state(db: AsyncSession = Depends(get_db)):
 
 
 from app.models.dns import DNSRecord
+from app.models.domain import DomainTLSSettings
 
 @router.get("/config")
 async def get_edge_config(
@@ -211,6 +212,12 @@ async def get_edge_config(
             ).order_by(Certificate.not_after.desc())
         )
         certificate = cert_result.scalar_one_or_none()
+        
+        # Load TLS settings from domain_tls_settings table
+        tls_settings_result = await db.execute(
+            select(DomainTLSSettings).where(DomainTLSSettings.domain_id == domain.id)
+        )
+        tls_settings = tls_settings_result.scalar_one_or_none()
 
         # Generate config for each subdomain found
         for sub_name, sub_origins in subdomains_map.items():
@@ -229,10 +236,10 @@ async def get_edge_config(
                 "tls": {
                     "enabled": bool(certificate),
                     "certificate_id": certificate.id if certificate else None,
-                    "mode": getattr(domain, 'tls_mode', 'flexible'),
-                    "force_https": getattr(domain, 'force_https', False),  # Временно отключаем редиректы
-                    "hsts_enabled": getattr(domain, 'hsts_enabled', False),
-                    "hsts_max_age": getattr(domain, 'hsts_max_age', 31536000)
+                    "mode": tls_settings.mode.lower() if tls_settings else 'flexible',
+                    "force_https": tls_settings.force_https if tls_settings else False,
+                    "hsts_enabled": tls_settings.hsts_enabled if tls_settings else False,
+                    "hsts_max_age": tls_settings.hsts_max_age if tls_settings else 31536000
                 },
                 "origins": sub_origins,
                 "cache_rules": [
