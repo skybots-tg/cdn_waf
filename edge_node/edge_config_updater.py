@@ -113,13 +113,38 @@ server {
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
     }
+
+    # ACME Challenge support (HTTP-01)
+    location /.well-known/acme-challenge/ {
+        # Proxy to control plane or serve from shared dir
+        # For simplicity, assume we use a central acme server (control plane)
+        # You need to replace this IP/URL with your actual ACME handler location
+        # OR implement local handling.
+        
+        # OPTION 1: Proxy to Control Plane (easiest central management)
+        # We need the control plane URL from config, but here we are in Jinja template.
+        # We can pass it in context.
+        
+        # Hardcoded fallback if not provided
+        proxy_pass {{ global_settings.acme_url|default('http://127.0.0.1:8000') }}/.well-known/acme-challenge/;
+        proxy_set_header Host $host;
+    }
 }
 {% if domain.tls_settings.force_https %}
 server {
     listen 80;
     server_name {{ domain.name }};
     access_log /var/log/nginx/cdn_access.json.log cdn_json_log;
-    return 301 https://$host$request_uri;
+    
+    # Allow ACME via HTTP even if force HTTPS is on
+    location /.well-known/acme-challenge/ {
+        proxy_pass {{ global_settings.acme_url|default('http://127.0.0.1:8000') }}/.well-known/acme-challenge/;
+        proxy_set_header Host $host;
+    }
+
+    location / {
+        return 301 https://$host$request_uri;
+    }
 }
 {% endif %}
 {% else %}
@@ -159,6 +184,12 @@ server {
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    # ACME Challenge support (HTTP-01)
+    location /.well-known/acme-challenge/ {
+        proxy_pass {{ global_settings.acme_url|default('http://127.0.0.1:8000') }}/.well-known/acme-challenge/;
+        proxy_set_header Host $host;
     }
 }
 {% endif %}
@@ -333,7 +364,13 @@ class EdgeConfigUpdater:
                     logger.debug("Control plane: config not modified (%s)", response.status_code)
                     return None
                 response.raise_for_status()
-                return response.json()
+                
+                # Inject global settings into config for template access
+                config = response.json()
+                config['global_settings'] = config.get('global_settings', {})
+                config['global_settings']['acme_url'] = self.control_plane_url
+                
+                return config
         except Exception as e:
             logger.error("Failed to fetch config: %s", e)
             return None

@@ -104,6 +104,168 @@ class SSLService:
         return certificate
     
     @staticmethod
+    async def process_acme_order(
+        db: AsyncSession,
+        domain_id: int
+    ):
+        """Process ACME certificate order"""
+        from app.models.certificate import Certificate, CertificateStatus
+        from app.models.domain import Domain
+        from app.core.config import settings
+        import acme.client
+        import acme.messages
+        import jose.jwk
+        import jose.jws
+        from cryptography.hazmat.primitives import serialization
+        from cryptography.hazmat.primitives.asymmetric import rsa
+        from cryptography import x509
+        from cryptography.x509.oid import NameOID
+        from cryptography.hazmat.primitives import hashes
+        
+        # 1. Get domain and certificate record
+        domain = await db.execute(select(Domain).where(Domain.id == domain_id))
+        domain = domain.scalar_one_or_none()
+        if not domain:
+            logger.error(f"Domain {domain_id} not found for ACME processing")
+            return
+
+        cert = await db.execute(
+            select(Certificate).where(
+                Certificate.domain_id == domain_id, 
+                Certificate.status == CertificateStatus.PENDING
+            ).order_by(Certificate.created_at.desc())
+        )
+        cert = cert.scalar_one_or_none()
+        if not cert:
+            logger.warning(f"No pending certificate found for domain {domain.name}")
+            return
+
+        # 2. Generate Account Key
+        acc_key = rsa.generate_private_key(
+            public_exponent=65537,
+            key_size=2048,
+            backend=default_backend()
+        )
+        acc_jwk = jose.jwk.JWK.from_pyca(acc_key)
+        
+        # 3. Register Account
+        net = acme.client.ClientNetwork(acc_key, user_agent="FlareCloud/1.0")
+        directory = acme.messages.Directory.from_json(
+            net.get(settings.ACME_DIRECTORY_URL).json()
+        )
+        client = acme.client.ClientV2(directory, net)
+        
+        try:
+            regr = client.new_account(
+                acme.messages.NewRegistration.from_data(
+                    email=settings.ACME_EMAIL,
+                    terms_of_service_agreed=True
+                )
+            )
+        except acme.messages.Error as e:
+            # Assuming account already exists, we would look it up, but simplified here
+            # In production, store account key persistently!
+            logger.warning(f"Account registration warning (might exist): {e}")
+            # If it exists, we proceed (acme lib handles key reuse usually if initialized correctly)
+            # But here we generated a NEW key, so we are registering a NEW account.
+        
+        # 4. Create Order
+        order = client.new_order(acme.messages.NewOrder.from_data(
+            identifiers=[
+                acme.messages.Identifier(
+                    typ=acme.messages.IDENTIFIER_FQDN,
+                    value=domain.name
+                )
+            ]
+        ))
+        
+        # 5. Process Authorizations
+        for authz_url in order.authorizations:
+            authz = client.poll(acme.messages.AuthorizationResource(
+                uri=authz_url,
+                body=acme.messages.Authorization() # Empty body initial
+            ))
+            
+            # Find HTTP-01 challenge
+            http_challenge = None
+            for chall in authz.body.challenges:
+                if isinstance(chall.chall, acme.challenges.HTTP01):
+                    http_challenge = chall
+                    break
+            
+            if not http_challenge:
+                logger.error("No HTTP-01 challenge found")
+                return
+
+            # 6. Set Challenge Token/Response
+            response, validation = http_challenge.response_and_validation(acc_key)
+            
+            # STORE TOKEN FOR EDGE NODES TO SERVE
+            # In a real system, save to DB/Redis where edge nodes can fetch via internal API
+            # Here we mock saving to a file or DB field accessible by edge nodes
+            
+            # We will add a temporary field to Certificate or a separate table for active challenges
+            # For MVP, let's assume edge nodes query the control plane for /.well-known/...
+            # and we store it in a simple way.
+            
+            # Let's save it to the certificate record temporarily (or a dedicated challenges table)
+            # Re-using acme_account_key field or similar just for storage? No, let's create a file.
+            # Better: Add endpoint in internal.py to serve this.
+            
+            # Save challenge data to DB (using JSON in acme_account_key as hack storage or creating new model)
+            # Since I cannot create new tables easily now without migration script, I will use Redis if available 
+            # or just write to a file that internal API can read.
+            
+            from app.core.redis import redis_client
+            if redis_client and redis_client.client:
+                await redis_client.client.set(
+                    f"acme:challenge:{http_challenge.chall.token}", 
+                    validation,
+                    ex=3600
+                )
+            else:
+                logger.error("Redis not available for ACME challenge storage")
+                return
+
+            # 7. Trigger Validation
+            client.answer_challenge(http_challenge, response)
+            
+            # 8. Wait for valid status
+            final_authz = client.poll(authz)
+            if final_authz.body.status != acme.messages.STATUS_VALID:
+                logger.error(f"Authorization failed: {final_authz.body.status}")
+                cert.status = "failed"
+                await db.commit()
+                return
+
+        # 9. Finalize Order (CSR)
+        pkey = rsa.generate_private_key(
+            public_exponent=65537,
+            key_size=2048,
+            backend=default_backend()
+        )
+        csr = x509.CertificateSigningRequestBuilder().subject_name(x509.Name([
+            x509.NameAttribute(NameOID.COMMON_NAME, domain.name),
+        ])).sign(pkey, hashes.SHA256(), default_backend())
+        
+        finalized_order = client.finalize_order(order, datetime.utcnow() + timedelta(minutes=5), csr.public_bytes(serialization.Encoding.DER))
+        
+        # 10. Save Certificate
+        fullchain_pem = finalized_order.fullchain_pem
+        
+        cert.cert_pem = fullchain_pem
+        cert.key_pem = pkey.private_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PrivateFormat.TraditionalOpenSSL,
+            encryption_algorithm=serialization.NoEncryption()
+        ).decode()
+        cert.status = CertificateStatus.ISSUED
+        cert.not_after = finalized_order.body.certificate.not_valid_after # Approximate
+        
+        await db.commit()
+        logger.info(f"Certificate issued successfully for {domain.name}")
+
+    @staticmethod
     async def request_acme_certificate(
         db: AsyncSession,
         domain_id: int,
@@ -132,9 +294,9 @@ class SSLService:
         await db.commit()
         await db.refresh(certificate)
         
-        # TODO: Trigger Celery task to obtain certificate
-        # from app.tasks.certificate_tasks import obtain_acme_certificate
-        # obtain_acme_certificate.delay(certificate.id)
+        # Trigger Celery task to obtain certificate
+        from app.tasks.certificate_tasks import issue_certificate
+        issue_certificate.delay(domain_id)
         
         return certificate
     

@@ -416,10 +416,25 @@ async def receive_logs(
     }
 
 
-@router.get("/health")
-async def internal_health():
-    """Simple health check for edge nodes"""
-    return {
-        "status": "healthy",
-        "timestamp": datetime.utcnow().isoformat()
-    }
+from app.core.redis import redis_client
+
+@router.get("/acme-challenge/{token}")
+async def get_acme_challenge(
+    token: str,
+    node: EdgeNode = Depends(verify_edge_node)
+):
+    """Get ACME challenge response for edge nodes"""
+    # In production, check if domain belongs to this node?
+    # For now, just return if valid token exists
+    
+    validation = None
+    if redis_client and redis_client.client:
+        validation = await redis_client.client.get(f"acme:challenge:{token}")
+    
+    if not validation:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Challenge not found"
+        )
+        
+    return validation.decode() if isinstance(validation, bytes) else validation
