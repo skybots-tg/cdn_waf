@@ -230,7 +230,7 @@ async def get_edge_config(
                     "enabled": bool(certificate),
                     "certificate_id": certificate.id if certificate else None,
                     "mode": getattr(domain, 'tls_mode', 'flexible'),
-                    "force_https": getattr(domain, 'force_https', True),
+                    "force_https": getattr(domain, 'force_https', False),  # Временно отключаем редиректы
                     "hsts_enabled": getattr(domain, 'hsts_enabled', False),
                     "hsts_max_age": getattr(domain, 'hsts_max_age', 31536000)
                 },
@@ -271,7 +271,8 @@ async def get_edge_config(
         "global_settings": {
             "log_level": "info",
             "worker_connections": 4096,
-            "keepalive_timeout": 65
+            "keepalive_timeout": 65,
+            "acme_url": "https://flarecloud.ru"
         }
     }
 
