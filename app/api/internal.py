@@ -85,6 +85,8 @@ async def debug_db_state(db: AsyncSession = Depends(get_db)):
     return result
 
 
+from app.models.dns import DNSRecord
+
 @router.get("/config")
 async def get_edge_config(
     since_version: Optional[int] = None,
@@ -108,6 +110,13 @@ async def get_edge_config(
             "changed": False
         }
     
+    # Debug: Check for all domains to see if some are pending
+    all_domains_result = await db.execute(select(Domain))
+    all_domains = all_domains_result.scalars().all()
+    print(f"DEBUG: Total domains in DB: {len(all_domains)}")
+    for d in all_domains:
+        print(f"DEBUG: Domain: {d.name}, Status: {d.status}, ID: {d.id}")
+
     # Get all active domains (simplified - in production filter by node assignment)
     print("DEBUG: Fetching active domains")
     domains_result = await db.execute(
@@ -126,6 +135,40 @@ async def get_edge_config(
         )
         origins = origins_result.scalars().all()
         print(f"DEBUG: Found {len(origins)} enabled origins for domain {domain.name}")
+        
+        # If no origins found, try to fetch from DNS A records that are proxied
+        if not origins:
+            print(f"DEBUG: No origins found. Falling back to DNS A records for {domain.name}")
+            dns_result = await db.execute(
+                select(DNSRecord).where(
+                    DNSRecord.domain_id == domain.id,
+                    DNSRecord.type == "A"
+                    # We might want to filter by proxied=True, or take all A records
+                    # Cloudflare logic: if proxied=True, use content as origin
+                    # But here, content is the origin IP if user entered it.
+                )
+            )
+            dns_records = dns_result.scalars().all()
+            
+            # Create synthetic origin objects from DNS records
+            if dns_records:
+                print(f"DEBUG: Found {len(dns_records)} DNS records to use as origins")
+                for record in dns_records:
+                    # Only use records that look like IPs (simple check)
+                    # And exclude our own edge IPs if possible (not implemented here)
+                    if record.content and record.content != "@":
+                         synthetic_origin = Origin(
+                             id=record.id * 100000, # Fake ID to avoid collision
+                             domain_id=domain.id,
+                             name=f"dns-{record.name}",
+                             origin_host=record.content,
+                             origin_port=80, # Default to 80 if unknown
+                             protocol="http", # Default to http
+                             weight=record.weight or 100,
+                             is_backup=False,
+                             enabled=True
+                         )
+                         origins.append(synthetic_origin)
         
         # Get cache rules
         cache_rules_result = await db.execute(
