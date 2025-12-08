@@ -65,13 +65,28 @@ class SSLService:
         cert_data: CertificateCreate
     ) -> Certificate:
         """Create/upload certificate"""
+        # Verify domain exists
+        domain_res = await db.execute(
+            select(Domain).where(Domain.id == domain_id)
+        )
+        domain = domain_res.scalar_one_or_none()
+        if not domain:
+            raise ValueError(f"Domain {domain_id} not found")
+        
         # Parse certificate to extract info
         cert_info = SSLService._parse_certificate(cert_data.cert_pem)
         
         from app.models.certificate import CertificateStatus, CertificateType
         
         # Parse cert_type string to enum
-        cert_type_enum = CertificateType.ACME if cert_data.cert_type == "acme" else CertificateType.MANUAL
+        if isinstance(cert_data.cert_type, str):
+            cert_type_enum = (
+                CertificateType.ACME
+                if cert_data.cert_type.lower() == "acme"
+                else CertificateType.MANUAL
+            )
+        else:
+            cert_type_enum = cert_data.cert_type
         
         certificate = Certificate(
             domain_id=domain_id,
@@ -80,7 +95,7 @@ class SSLService:
             key_pem=cert_data.key_pem,  # TODO: Encrypt before storing
             chain_pem=cert_data.chain_pem,
             status=CertificateStatus.ISSUED,
-            common_name=domain.name if 'domain' in locals() else '',
+            common_name=domain.name,
             not_before=cert_info.get("not_before"),
             not_after=cert_info.get("not_after"),
             issuer=cert_info.get("issuer"),
@@ -88,13 +103,13 @@ class SSLService:
         )
         
         # Mark old certificates as expired
-        old_certs = await db.execute(
+        old_certs_result = await db.execute(
             select(Certificate).where(
                 Certificate.domain_id == domain_id,
                 Certificate.status == CertificateStatus.ISSUED
             )
         )
-        for old_cert in old_certs.scalars():
+        for old_cert in old_certs_result.scalars():
             old_cert.status = CertificateStatus.EXPIRED
         
         db.add(certificate)
@@ -198,19 +213,33 @@ class SSLService:
             # If it exists, we proceed (acme lib handles key reuse usually if initialized correctly)
             # But here we generated a NEW key, so we are registering a NEW account.
         
-        # 4. Create Order
-        # Identifiers from SANs list
-        acme_identifiers = [
-            acme.messages.Identifier(
-                typ=acme.messages.IDENTIFIER_FQDN,
-                value=name
-            ) for name in identifiers_list
-        ]
+        # 4. Generate Certificate Key and CSR first (required for acme 2.x)
+        pkey = rsa.generate_private_key(
+            public_exponent=65537,
+            key_size=2048,
+            backend=default_backend()
+        )
         
-        # In acme 2.x, client.new_order expects CSR directly, not NewOrder message
-        # We need to generate CSR first, then create order
+        # Build CSR with SANs
+        common_name = identifiers_list[0]
+        san_dns_names = [x509.DNSName(name) for name in identifiers_list]
+        
+        csr_builder = x509.CertificateSigningRequestBuilder().subject_name(x509.Name([
+            x509.NameAttribute(NameOID.COMMON_NAME, common_name),
+        ]))
+        
+        # Add SAN extension
+        csr_builder = csr_builder.add_extension(
+            x509.SubjectAlternativeName(san_dns_names),
+            critical=False,
+        )
+        
+        csr = csr_builder.sign(pkey, hashes.SHA256(), default_backend())
+        csr_pem = csr.public_bytes(serialization.Encoding.PEM)
+        
+        # Create Order with CSR
         logger.info("Creating certificate order")
-        order = client.new_order(acme_identifiers)
+        order = client.new_order(csr_pem)
         
         # 5. Process Authorizations
         for authz_url in order.authorizations:
@@ -228,7 +257,7 @@ class SSLService:
             
             if not http_challenge:
                 logger.error("No HTTP-01 challenge found")
-                cert.status = "failed"
+                cert.status = CertificateStatus.FAILED
                 await db.commit()
                 return
 
@@ -261,7 +290,7 @@ class SSLService:
                 )
             else:
                 logger.error("Redis not available for ACME challenge storage")
-                cert.status = "failed"
+                cert.status = CertificateStatus.FAILED
                 await db.commit()
                 return
 
@@ -272,53 +301,56 @@ class SSLService:
             final_authz = client.poll(authz)
             if final_authz.body.status != acme.messages.STATUS_VALID:
                 logger.error(f"Authorization failed: {final_authz.body.status}")
-                cert.status = "failed"
+                cert.status = CertificateStatus.FAILED
                 await db.commit()
                 return
 
-        # 9. Finalize Order (CSR)
-        pkey = rsa.generate_private_key(
-            public_exponent=65537,
-            key_size=2048,
-            backend=default_backend()
-        )
-        
-        # Build CSR with SANs
-        # First name is Common Name
-        common_name = identifiers_list[0]
-        san_dns_names = [x509.DNSName(name) for name in identifiers_list]
-        
-        csr_builder = x509.CertificateSigningRequestBuilder().subject_name(x509.Name([
-            x509.NameAttribute(NameOID.COMMON_NAME, common_name),
-        ]))
-        
-        # Add SAN extension
-        csr_builder = csr_builder.add_extension(
-            x509.SubjectAlternativeName(san_dns_names),
-            critical=False,
-        )
-        
-        csr = csr_builder.sign(pkey, hashes.SHA256(), default_backend())
-        
-        logger.info("Finalizing order with CSR")
-        # In acme 2.x, finalize expects deadline and csr_pem
-        finalized_order = client.finalize_order(
-            order, 
-            datetime.utcnow() + timedelta(minutes=5),
-            csr.public_bytes(serialization.Encoding.DER)
-        )
+        # 9. Finalize Order (already have CSR from earlier)
+        logger.info("Finalizing order")
+        finalized_order = client.poll_and_finalize(order)
         
         # 10. Save Certificate
         fullchain_pem = finalized_order.fullchain_pem
+        
+        # Parse leaf certificate from fullchain to extract validity dates
+        try:
+            pem_start = "-----BEGIN CERTIFICATE-----"
+            pem_end = "-----END CERTIFICATE-----"
+            start_idx = fullchain_pem.find(pem_start)
+            end_idx = fullchain_pem.find(pem_end)
+            if start_idx == -1 or end_idx == -1:
+                raise ValueError("Invalid fullchain_pem, cannot find certificate boundaries")
+            first_cert_pem = fullchain_pem[start_idx:end_idx + len(pem_end)] + "\n"
+            leaf_cert = x509.load_pem_x509_certificate(
+                first_cert_pem.encode(),
+                default_backend()
+            )
+            cert_info = {
+                "not_before": getattr(leaf_cert, "not_valid_before_utc", leaf_cert.not_valid_before),
+                "not_after": getattr(leaf_cert, "not_valid_after_utc", leaf_cert.not_valid_after),
+                "issuer": leaf_cert.issuer.rfc4514_string(),
+                "subject": leaf_cert.subject.rfc4514_string(),
+            }
+        except Exception as e:
+            logger.error(f"Failed to parse leaf certificate from fullchain: {e}")
+            cert_info = {
+                "not_before": None,
+                "not_after": None,
+                "issuer": "Unknown",
+                "subject": "Unknown",
+            }
         
         cert.cert_pem = fullchain_pem
         cert.key_pem = pkey.private_bytes(
             encoding=serialization.Encoding.PEM,
             format=serialization.PrivateFormat.TraditionalOpenSSL,
-            encryption_algorithm=serialization.NoEncryption()
+            encryption=serialization.NoEncryption()
         ).decode()
         cert.status = CertificateStatus.ISSUED
-        cert.not_after = finalized_order.body.certificate.not_valid_after # Approximate
+        cert.not_before = cert_info["not_before"]
+        cert.not_after = cert_info["not_after"]
+        cert.issuer = cert_info["issuer"]
+        cert.subject = cert_info["subject"]
         
         await db.commit()
         logger.info(f"Certificate issued successfully for {domain.name}")
@@ -403,13 +435,15 @@ class SSLService:
     ) -> List[Certificate]:
         """Get certificates expiring in X days"""
         from app.models.certificate import CertificateStatus
+        from datetime import timezone
         
-        expiry_date = datetime.utcnow() + timedelta(days=days)
+        now = datetime.now(timezone.utc)
+        expiry_date = now + timedelta(days=days)
         
         query = select(Certificate).where(
             Certificate.status == CertificateStatus.ISSUED,
             Certificate.not_after <= expiry_date,
-            Certificate.not_after > datetime.utcnow()
+            Certificate.not_after > now
         )
         
         result = await db.execute(query)
@@ -424,9 +458,13 @@ class SSLService:
                 default_backend()
             )
             
+            # Fallback for older cryptography versions
+            not_before = getattr(cert, "not_valid_before_utc", cert.not_valid_before)
+            not_after = getattr(cert, "not_valid_after_utc", cert.not_valid_after)
+            
             return {
-                "not_before": cert.not_valid_before_utc,
-                "not_after": cert.not_valid_after_utc,
+                "not_before": not_before,
+                "not_after": not_after,
                 "issuer": cert.issuer.rfc4514_string(),
                 "subject": cert.subject.rfc4514_string()
             }

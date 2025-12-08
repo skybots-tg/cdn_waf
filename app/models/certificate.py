@@ -19,6 +19,7 @@ class CertificateStatus(str, enum.Enum):
     ISSUED = "issued"
     EXPIRED = "expired"
     REVOKED = "revoked"
+    FAILED = "failed"
 
 
 class Certificate(Base):
