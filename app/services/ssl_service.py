@@ -242,15 +242,14 @@ class SSLService:
         order = client.new_order(csr_pem)
         
         # 5. Process Authorizations
+        logger.info(f"Processing {len(order.authorizations)} authorizations")
         for authz_url in order.authorizations:
-            authz = client.poll(acme.messages.AuthorizationResource(
-                uri=authz_url,
-                body=acme.messages.Authorization() # Empty body initial
-            ))
-            
+            # Fetch authorization using POST-as-GET
+            response = client._post_as_get(authz_url)
+            authz = acme.messages.Authorization.from_json(response.json())
             # Find HTTP-01 challenge
             http_challenge = None
-            for chall in authz.body.challenges:
+            for chall in authz.challenges:
                 if isinstance(chall.chall, acme.challenges.HTTP01):
                     http_challenge = chall
                     break
@@ -297,10 +296,22 @@ class SSLService:
             # 7. Trigger Validation
             client.answer_challenge(http_challenge, response)
             
-            # 8. Wait for valid status
-            final_authz = client.poll(authz)
-            if final_authz.body.status != acme.messages.STATUS_VALID:
-                logger.error(f"Authorization failed: {final_authz.body.status}")
+            # 8. Wait for valid status - poll the authorization URL again
+            import time
+            for _ in range(10):  # Try 10 times
+                time.sleep(2)  # Wait 2 seconds between polls
+                response = client._post_as_get(authz_url)
+                authz_status = acme.messages.Authorization.from_json(response.json())
+                if authz_status.status == acme.messages.STATUS_VALID:
+                    logger.info(f"Authorization validated successfully for {authz.identifier.value}")
+                    break
+                elif authz_status.status == acme.messages.STATUS_INVALID:
+                    logger.error(f"Authorization failed for {authz.identifier.value}: {authz_status}")
+                    cert.status = CertificateStatus.FAILED
+                    await db.commit()
+                    return
+            else:
+                logger.error(f"Authorization timeout for {authz.identifier.value}")
                 cert.status = CertificateStatus.FAILED
                 await db.commit()
                 return
