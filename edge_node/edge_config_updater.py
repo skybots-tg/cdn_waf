@@ -68,7 +68,7 @@ upstream {{ safe_name }}_backend {
 {% if domain.tls_settings.enabled and domain.tls_certificate %}
 server {
     listen 443 ssl http2;
-    server_name {{ domain.name }} *.{{ domain.name }};
+    server_name {{ domain.name }};
 
     access_log /var/log/nginx/cdn_access.json.log cdn_json_log;
 
@@ -117,7 +117,7 @@ server {
 {% if domain.tls_settings.force_https %}
 server {
     listen 80;
-    server_name {{ domain.name }} *.{{ domain.name }};
+    server_name {{ domain.name }};
     access_log /var/log/nginx/cdn_access.json.log cdn_json_log;
     return 301 https://$host$request_uri;
 }
@@ -126,7 +126,7 @@ server {
 # HTTP-only domain (TLS disabled or certificate unavailable)
 server {
     listen 80;
-    server_name {{ domain.name }} *.{{ domain.name }};
+    server_name {{ domain.name }};
     access_log /var/log/nginx/cdn_access.json.log cdn_json_log;
 
     {% if domain.cache_rules %}
