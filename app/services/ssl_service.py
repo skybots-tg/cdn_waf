@@ -172,11 +172,13 @@ class SSLService:
         )
         
         # 3. Register Account
+        logger.info(f"Connecting to ACME server: {settings.ACME_DIRECTORY_URL}")
         net = acme.client.ClientNetwork(acc_key, user_agent="FlareCloud/1.0")
         directory = acme.messages.Directory.from_json(
             net.get(settings.ACME_DIRECTORY_URL).json()
         )
         client = acme.client.ClientV2(directory, net)
+        logger.info("ACME client initialized")
         
         try:
             regr = client.new_account(

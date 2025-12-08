@@ -22,7 +22,7 @@ def issue_certificate(domain_id: int):
             try:
                 await SSLService.process_acme_order(db, domain_id)
             except Exception as e:
-                logger.error(f"Failed to issue certificate for domain {domain_id}: {e}")
+                logger.error(f"Failed to issue certificate for domain {domain_id}: {e}", exc_info=True)
                 # Ideally mark certificate/order as failed in DB
             finally:
                 await redis_client.disconnect()
