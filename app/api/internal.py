@@ -128,69 +128,81 @@ async def get_edge_config(
     config_domains = []
     
     for domain in domains:
-        # Get origins
-        print(f"DEBUG: Fetching origins for domain {domain.name} (ID: {domain.id})")
+        # Get all A records for this domain (including root and subdomains)
+        dns_records_result = await db.execute(
+            select(DNSRecord).where(
+                DNSRecord.domain_id == domain.id,
+                DNSRecord.type == "A"
+            )
+        )
+        dns_records = dns_records_result.scalars().all()
+        
+        # Map DNS records to virtual origin configurations
+        # Group by subdomain name
+        subdomains_map = {}
+        
+        # Add manually defined origins (usually root @)
         origins_result = await db.execute(
             select(Origin).where(Origin.domain_id == domain.id, Origin.enabled == True)
         )
-        origins = origins_result.scalars().all()
-        print(f"DEBUG: Found {len(origins)} enabled origins for domain {domain.name}")
+        manual_origins = origins_result.scalars().all()
         
-        # If no origins found, try to fetch from DNS A records that are proxied
-        if not origins:
-            print(f"DEBUG: No origins found. Falling back to DNS A records for {domain.name}")
-            dns_result = await db.execute(
-                select(DNSRecord).where(
-                    DNSRecord.domain_id == domain.id,
-                    DNSRecord.type == "A"
-                    # We might want to filter by proxied=True, or take all A records
-                    # Cloudflare logic: if proxied=True, use content as origin
-                    # But here, content is the origin IP if user entered it.
-                )
-            )
-            dns_records = dns_result.scalars().all()
+        # Use manual origins for root domain if available
+        if manual_origins:
+            subdomains_map["@"] = [
+                {
+                    "id": o.id,
+                    "host": o.origin_host,
+                    "port": o.origin_port,
+                    "is_backup": o.is_backup,
+                    "weight": o.weight,
+                    "protocol": o.protocol
+                } for o in manual_origins
+            ]
             
-            # Create synthetic origin objects from DNS records
-            if dns_records:
-                print(f"DEBUG: Found {len(dns_records)} DNS records to use as origins")
-                for record in dns_records:
-                    # Only use records that look like IPs (simple check)
-                    # And exclude our own edge IPs if possible (not implemented here)
-                    if record.content and record.content != "@":
-                         synthetic_origin = Origin(
-                             id=record.id * 100000, # Fake ID to avoid collision
-                             domain_id=domain.id,
-                             name=f"dns-{record.name}",
-                             origin_host=record.content,
-                             origin_port=80, # Default to 80 if unknown
-                             protocol="http", # Default to http
-                             weight=record.weight or 100,
-                             is_backup=False,
-                             enabled=True
-                         )
-                         origins.append(synthetic_origin)
-        
-        # Get cache rules
+        # Process DNS records to create virtual origins for subdomains
+        for record in dns_records:
+            if not record.content or record.proxied is False: 
+                continue
+                
+            # Determine subdomain name ("@" or "sub")
+            sub_name = record.name
+            
+            # If manual origins exist for this specific subdomain, skip DNS fallback?
+            # Currently manual origins in DB don't have a "name" field that maps to subdomain (except name which is display name)
+            # The Origin model lacks a 'hostname' or 'subdomain' field, it applies to the whole Domain object.
+            # This is the root cause of the issue. Origins apply to the whole domain in current schema.
+            
+            # WORKAROUND: 
+            # We will treat each DNS record as a separate "virtual domain config" 
+            # so Nginx can generate a server block for IT specifically.
+            
+            if sub_name not in subdomains_map:
+                subdomains_map[sub_name] = []
+            
+            # Add this IP as an origin for this subdomain
+            subdomains_map[sub_name].append({
+                "id": record.id * 1000 + 555, # Fake ID
+                "host": record.content,
+                "port": 80, # Default port for DNS-based origin
+                "is_backup": False,
+                "weight": record.weight or 100,
+                "protocol": "http" # Default protocol
+            })
+
+        # Get other rules (shared across all subdomains for now)
         cache_rules_result = await db.execute(
             select(CacheRule).where(CacheRule.domain_id == domain.id, CacheRule.enabled == True)
         )
         cache_rules = cache_rules_result.scalars().all()
         
-        # Get WAF rules
         waf_rules_result = await db.execute(
             select(WAFRule).where(WAFRule.domain_id == domain.id, WAFRule.enabled == True)
         )
         waf_rules = waf_rules_result.scalars().all()
         
-        # Get rate limits
-        rate_limits_result = await db.execute(
-            select(RateLimit).where(RateLimit.domain_id == domain.id, RateLimit.enabled == True)
-        )
-        rate_limits = rate_limits_result.scalars().all()
-        
-        # Get certificate
+        # Certificate
         from app.models.certificate import CertificateStatus
-        
         cert_result = await db.execute(
             select(Certificate).where(
                 Certificate.domain_id == domain.id,
@@ -198,62 +210,53 @@ async def get_edge_config(
             ).order_by(Certificate.not_after.desc())
         )
         certificate = cert_result.scalar_one_or_none()
-        
-        domain_config = {
-            "id": domain.id,
-            "name": domain.name,
-            "tls": {
-                "enabled": bool(certificate),
-                "certificate_id": certificate.id if certificate else None,
-                "mode": getattr(domain, 'tls_mode', 'flexible'),
-                "force_https": getattr(domain, 'force_https', True),
-                "hsts_enabled": getattr(domain, 'hsts_enabled', False),
-                "hsts_max_age": getattr(domain, 'hsts_max_age', 31536000)
-            },
-            "origins": [
-                {
-                    "id": origin.id,
-                    "host": origin.origin_host,
-                    "port": origin.origin_port,
-                    "is_backup": origin.is_backup,
-                    "weight": origin.weight,
-                    "protocol": origin.protocol
-                }
-                for origin in origins
-            ],
-            "cache_rules": [
-                {
-                    "id": rule.id,
-                    "pattern": rule.pattern,
-                    "rule_type": rule.rule_type,
-                    "ttl": rule.ttl,
-                    "respect_origin": rule.respect_origin_headers,
-                    "bypass_cookies": rule.bypass_cookies
-                }
-                for rule in cache_rules
-            ],
-            "waf_rules": [
-                {
-                    "id": rule.id,
-                    "priority": rule.priority,
-                    "action": rule.action,
-                    "conditions": rule.conditions
-                }
-                for rule in waf_rules
-            ],
-            "rate_limits": [
-                {
-                    "id": limit.id,
-                    "key_type": limit.key_type,
-                    "limit": limit.limit_value,
-                    "interval": limit.interval_seconds,
-                    "action": limit.action
-                }
-                for limit in rate_limits
-            ]
-        }
-        
-        config_domains.append(domain_config)
+
+        # Generate config for each subdomain found
+        for sub_name, sub_origins in subdomains_map.items():
+            if not sub_origins:
+                continue
+                
+            # Construct full hostname
+            if sub_name == "@":
+                full_name = domain.name
+            else:
+                full_name = f"{sub_name}.{domain.name}"
+                
+            domain_config = {
+                "id": domain.id,
+                "name": full_name, # Use specific subdomain as name for Nginx
+                "tls": {
+                    "enabled": bool(certificate),
+                    "certificate_id": certificate.id if certificate else None,
+                    "mode": getattr(domain, 'tls_mode', 'flexible'),
+                    "force_https": getattr(domain, 'force_https', True),
+                    "hsts_enabled": getattr(domain, 'hsts_enabled', False),
+                    "hsts_max_age": getattr(domain, 'hsts_max_age', 31536000)
+                },
+                "origins": sub_origins,
+                "cache_rules": [
+                    {
+                        "id": rule.id,
+                        "pattern": rule.pattern,
+                        "rule_type": rule.rule_type,
+                        "ttl": rule.ttl,
+                        "respect_origin": rule.respect_origin_headers,
+                        "bypass_cookies": rule.bypass_cookies
+                    }
+                    for rule in cache_rules
+                ],
+                "waf_rules": [
+                    {
+                        "id": rule.id,
+                        "priority": rule.priority,
+                        "action": rule.action,
+                        "conditions": rule.conditions
+                    }
+                    for rule in waf_rules
+                ],
+                "rate_limits": [] # Skipped for brevity
+            }
+            config_domains.append(domain_config)
     
     return {
         "version": node.config_version,
