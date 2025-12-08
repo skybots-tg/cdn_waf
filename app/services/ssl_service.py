@@ -190,7 +190,8 @@ class SSLService:
                     terms_of_service_agreed=True
                 )
             )
-        except acme.messages.Error as e:
+            logger.info("ACME account registered successfully")
+        except Exception as e:
             # Assuming account already exists, we would look it up, but simplified here
             # In production, store account key persistently!
             logger.warning(f"Account registration warning (might exist): {e}")
@@ -206,9 +207,10 @@ class SSLService:
             ) for name in identifiers_list
         ]
         
-        order = client.new_order(acme.messages.NewOrder.from_data(
-            identifiers=acme_identifiers
-        ))
+        # In acme 2.x, client.new_order expects CSR directly, not NewOrder message
+        # We need to generate CSR first, then create order
+        logger.info("Creating certificate order")
+        order = client.new_order(acme_identifiers)
         
         # 5. Process Authorizations
         for authz_url in order.authorizations:
@@ -298,7 +300,13 @@ class SSLService:
         
         csr = csr_builder.sign(pkey, hashes.SHA256(), default_backend())
         
-        finalized_order = client.finalize_order(order, datetime.utcnow() + timedelta(minutes=5), csr.public_bytes(serialization.Encoding.DER))
+        logger.info("Finalizing order with CSR")
+        # In acme 2.x, finalize expects deadline and csr_pem
+        finalized_order = client.finalize_order(
+            order, 
+            datetime.utcnow() + timedelta(minutes=5),
+            csr.public_bytes(serialization.Encoding.DER)
+        )
         
         # 10. Save Certificate
         fullchain_pem = finalized_order.fullchain_pem
