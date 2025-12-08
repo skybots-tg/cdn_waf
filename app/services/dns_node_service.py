@@ -446,6 +446,7 @@ ACME_EMAIL={settings.ACME_EMAIL}
             ("Python Env", DNSNodeService.install_python_env),
             ("Certbot", DNSNodeService.install_certbot),
             ("App Code", DNSNodeService.update_app_code),
+            ("Migrations", DNSNodeService.run_migrations),
             ("Service", DNSNodeService.install_service)
         ]
         
