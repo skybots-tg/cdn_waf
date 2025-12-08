@@ -266,28 +266,18 @@ class SSLService:
             # 6. Set Challenge Token/Response
             response, validation = http_challenge.response_and_validation(acc_key)
             
-            # STORE TOKEN FOR EDGE NODES TO SERVE
-            # In a real system, save to DB/Redis where edge nodes can fetch via internal API
-            # Here we mock saving to a file or DB field accessible by edge nodes
+            # Token is bytes, need to decode to string for URL/Redis key
+            token_str = http_challenge.chall.token.decode('utf-8') if isinstance(http_challenge.chall.token, bytes) else http_challenge.chall.token
+            validation_str = validation.decode('utf-8') if isinstance(validation, bytes) else validation
             
-            # We will add a temporary field to Certificate or a separate table for active challenges
-            # For MVP, let's assume edge nodes query the control plane for /.well-known/...
-            # and we store it in a simple way.
-            
-            # Let's save it to the certificate record temporarily (or a dedicated challenges table)
-            # Re-using acme_account_key field or similar just for storage? No, let's create a file.
-            # Better: Add endpoint in internal.py to serve this.
-            
-            # Save challenge data to DB (using JSON in acme_account_key as hack storage or creating new model)
-            # Since I cannot create new tables easily now without migration script, I will use Redis if available 
-            # or just write to a file that internal API can read.
+            logger.info(f"Storing challenge token: {token_str[:20]}... for domain {authz.identifier.value}")
             
             from app.core.redis import redis_client
             if redis_client:
-                # Use the wrapper method which handles the underlying client
+                # Store token -> validation mapping
                 await redis_client.set(
-                    f"acme:challenge:{http_challenge.chall.token}", 
-                    validation,
+                    f"acme:challenge:{token_str}", 
+                    validation_str,
                     expire=3600
                 )
             else:

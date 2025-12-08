@@ -1,6 +1,7 @@
 """Internal API for edge nodes to pull configuration"""
 from typing import Dict, Any, List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Header, status
+from fastapi.responses import PlainTextResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from datetime import datetime, timezone
@@ -421,7 +422,7 @@ async def receive_logs(
 
 from app.core.redis import redis_client
 
-@router.get("/acme-challenge/{token}")
+@router.get("/acme-challenge/{token}", response_class=PlainTextResponse)
 async def get_acme_challenge(
     token: str,
     node: EdgeNode = Depends(verify_edge_node)
@@ -430,6 +431,7 @@ async def get_acme_challenge(
     # In production, check if domain belongs to this node?
     # For now, just return if valid token exists
     
+    validation = None
     if redis_client:
         validation = await redis_client.get(f"acme:challenge:{token}")
     
@@ -438,5 +440,6 @@ async def get_acme_challenge(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Challenge not found"
         )
-        
-    return validation.decode() if isinstance(validation, bytes) else validation
+    
+    # Return plain text (required by ACME spec)
+    return PlainTextResponse(content=validation)
