@@ -3,7 +3,7 @@ from typing import Dict, Any, List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Header, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
-from datetime import datetime
+from datetime import datetime, timezone
 
 from app.core.database import get_db
 from app.models.edge_node import EdgeNode
@@ -381,6 +381,9 @@ async def receive_logs(
         if timestamp_str:
             try:
                 timestamp = datetime.fromisoformat(timestamp_str.replace("Z", "+00:00"))
+                # Ensure naive UTC for PostgreSQL
+                if timestamp.tzinfo is not None:
+                    timestamp = timestamp.astimezone(timezone.utc).replace(tzinfo=None)
             except ValueError:
                 timestamp = datetime.utcnow()
         else:

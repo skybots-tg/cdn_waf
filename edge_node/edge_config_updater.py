@@ -126,7 +126,7 @@ server {
         # We can pass it in context.
         
         # Hardcoded fallback if not provided
-        proxy_pass {{ global_settings.acme_url|default('http://127.0.0.1:8000') }}/.well-known/acme-challenge/;
+        proxy_pass {{ global_settings.acme_url|default('http://127.0.0.1:8000') }}/internal/edge/acme-challenge/;
         proxy_set_header Host $host;
     }
 }
@@ -138,7 +138,7 @@ server {
     
     # Allow ACME via HTTP even if force HTTPS is on
     location /.well-known/acme-challenge/ {
-        proxy_pass {{ global_settings.acme_url|default('http://127.0.0.1:8000') }}/.well-known/acme-challenge/;
+        proxy_pass {{ global_settings.acme_url|default('http://127.0.0.1:8000') }}/internal/edge/acme-challenge/;
         proxy_set_header Host $host;
     }
 
@@ -188,7 +188,7 @@ server {
 
     # ACME Challenge support (HTTP-01)
     location /.well-known/acme-challenge/ {
-        proxy_pass {{ global_settings.acme_url|default('http://127.0.0.1:8000') }}/.well-known/acme-challenge/;
+        proxy_pass {{ global_settings.acme_url|default('http://127.0.0.1:8000') }}/internal/edge/acme-challenge/;
         proxy_set_header Host $host;
     }
 }
