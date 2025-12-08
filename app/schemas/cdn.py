@@ -156,16 +156,18 @@ class CertificateResponse(BaseModel):
     """Schema for certificate response"""
     id: int
     domain_id: int
-    cert_type: str
+    cert_type: str = Field(alias="type") # Alias DB field 'type' to 'cert_type'
     status: str
     not_before: Optional[datetime] = None
     not_after: Optional[datetime] = None
     issuer: Optional[str] = None
     subject: Optional[str] = None
+    common_name: Optional[str] = None # Added common_name
     created_at: datetime
     
     class Config:
         from_attributes = True
+        populate_by_name = True # Allow populating by name or alias
 
 
 # TLS Settings schemas
