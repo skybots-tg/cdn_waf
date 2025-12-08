@@ -254,34 +254,31 @@ class DNSNodeService:
         import shutil
         import tempfile
         
-        # Собираем общий архив с app + alembic + alembic.ini в один шаг
-        with tempfile.TemporaryDirectory() as tmpdir:
+        tmpdir = tempfile.mkdtemp()
+        try:
             bundle_root = os.path.join(tmpdir, "bundle")
             os.makedirs(bundle_root, exist_ok=True)
             
-            # Копируем директории
             shutil.copytree("app", os.path.join(bundle_root, "app"))
             if os.path.exists("alembic"):
                 shutil.copytree("alembic", os.path.join(bundle_root, "alembic"))
-            # alembic.ini
             if os.path.exists("alembic.ini"):
                 shutil.copy("alembic.ini", os.path.join(bundle_root, "alembic.ini"))
-            # requirements.txt (полезно для venv)
             if os.path.exists("requirements.txt"):
                 shutil.copy("requirements.txt", os.path.join(bundle_root, "requirements.txt"))
             
             zip_base = os.path.join(tmpdir, "bundle")
             zip_path = shutil.make_archive(zip_base, "zip", root_dir=bundle_root)
-        
-        # Ensure remote dir
-        await DNSNodeService.execute_command(node, "mkdir -p /opt/cdn_waf")
-        
-        success, error = await DNSNodeService.upload_file(node, zip_path, "/opt/cdn_waf/bundle.zip")
-        if not success:
-            return DNSNodeCommandResult(success=False, stdout="", stderr=f"Bundle upload failed: {error}", exit_code=1, execution_time=0)
-        
-        unzip_cmd = "cd /opt/cdn_waf && (apt-get install -y unzip || true) && unzip -o bundle.zip && rm bundle.zip"
-        return await DNSNodeService.execute_command(node, unzip_cmd, timeout=120)
+            
+            await DNSNodeService.execute_command(node, "mkdir -p /opt/cdn_waf")
+            success, error = await DNSNodeService.upload_file(node, zip_path, "/opt/cdn_waf/bundle.zip")
+            if not success:
+                return DNSNodeCommandResult(success=False, stdout="", stderr=f"Bundle upload failed: {error}", exit_code=1, execution_time=0)
+            
+            unzip_cmd = "cd /opt/cdn_waf && (apt-get install -y unzip || true) && unzip -o bundle.zip && rm bundle.zip"
+            return await DNSNodeService.execute_command(node, unzip_cmd, timeout=120)
+        finally:
+            shutil.rmtree(tmpdir, ignore_errors=True)
 
     @staticmethod
     async def update_config(node: DNSNode) -> DNSNodeCommandResult:
