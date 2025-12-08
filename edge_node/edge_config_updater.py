@@ -489,6 +489,18 @@ class EdgeConfigUpdater:
         # Generate Nginx config
         nginx_config = self.generate_nginx_config(config)
 
+        # Pre-create cache directories (otherwise Nginx fails if they don't exist)
+        if config.get("domains"):
+            for domain in config["domains"]:
+                safe_name = domain["name"].replace('.', '_')
+                cache_path = Path(f"/var/cache/nginx/{safe_name}")
+                try:
+                    cache_path.mkdir(parents=True, exist_ok=True)
+                    # Optional: Set permissions? Assuming script runs as root/privileged
+                    # os.chown(str(cache_path), nginx_uid, nginx_gid)
+                except Exception as e:
+                    logger.warning("Failed to create cache dir %s: %s", cache_path, e)
+
         # Write to file
         self.nginx_config_path.parent.mkdir(parents=True, exist_ok=True)
         self.nginx_config_path.write_text(nginx_config)
