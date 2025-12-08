@@ -131,23 +131,37 @@ server {
         proxy_set_header Host $host;
     }
 }
-{% if domain.tls_settings.force_https %}
+# HTTP server for ACME challenges (always present when TLS enabled)
 server {
     listen 80;
     server_name {{ domain.name }};
     access_log /var/log/nginx/cdn_access.json.log cdn_json_log;
     
-    # Allow ACME via HTTP even if force HTTPS is on
+    # ACME Challenge support (HTTP-01)
     location /.well-known/acme-challenge/ {
         proxy_pass {{ global_settings.acme_url|default('http://127.0.0.1:8000') }}/internal/edge/acme-challenge/;
         proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
     }
-
+    
+{% if domain.tls_settings.force_https %}
+    # Redirect all other HTTP traffic to HTTPS
     location / {
         return 301 https://$host$request_uri;
     }
-}
+{% else %}
+    # Allow HTTP traffic (no redirect)
+    location / {
+        proxy_pass {{ backend_protocol }}://{{ safe_name }}_backend;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
 {% endif %}
+}
+
 {% else %}
 # HTTP-only domain (TLS disabled or certificate unavailable)
 server {
