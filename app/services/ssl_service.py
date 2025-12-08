@@ -1,5 +1,6 @@
 """SSL/TLS certificate management service"""
 import logging
+import base64
 from typing import List, Optional
 from datetime import datetime, timedelta
 from sqlalchemy import select
@@ -266,11 +267,12 @@ class SSLService:
             # 6. Set Challenge Token/Response
             response, validation = http_challenge.response_and_validation(acc_key)
             
-            # ACME tokens are base64url encoded - josepy returns bytes, need to decode
+            # ACME tokens are raw bytes that need to be base64url encoded
+            # This is the format expected in URLs and by Let's Encrypt
             token_raw = http_challenge.chall.token
             if isinstance(token_raw, bytes):
-                # Decode bytes to string (base64url is ASCII-safe)
-                token_str = token_raw.decode('ascii')
+                # Encode to base64url (URL-safe base64 without padding)
+                token_str = base64.urlsafe_b64encode(token_raw).decode('ascii').rstrip('=')
             else:
                 token_str = str(token_raw)
             
@@ -280,8 +282,8 @@ class SSLService:
             else:
                 validation_str = str(validation)
             
-            logger.info(f"Storing challenge token: {token_str[:20]}... for domain {authz.identifier.value}")
-            logger.info(f"Token (decoded): {token_str}")
+            logger.info(f"Storing challenge token: {token_str[:30]}... for domain {authz.identifier.value}")
+            logger.info(f"Full token: {token_str}")
             
             from app.core.redis import redis_client
             if redis_client:
