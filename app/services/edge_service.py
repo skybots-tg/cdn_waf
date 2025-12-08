@@ -519,37 +519,52 @@ class EdgeNodeService:
             elif component == "agent":
                 # Logic for agent install/update (upload files)
                 
-                # Prepare config
-                config_content = ""
-                with open("edge_node/config.example.yaml", "r") as f:
-                    config_content = f.read()
+                # Prepare config ONLY IF installing, or explicit config update
+                # But currently this block is called for both "install" and "update" actions for agent component
+                # If updating code, we should NOT overwrite config.yaml unless explicitly requested.
                 
-                # Replace values
-                config_content = config_content.replace("id: 1", f"id: {node.id}")
-                config_content = config_content.replace('name: "ru-msk-01"', f'name: "{node.name}"')
-                config_content = config_content.replace('location: "RU-MSK"', f'location: "{node.location_code}"')
+                update_config = True
+                if action == "update":
+                    # Check if we just want to update code
+                    # Usually update action implies updating the agent code/service
+                    # We should check if config.yaml exists on remote?
+                    # Or just assume if it's an update, we skip config overwrite.
+                    update_config = False
                 
-                # Replace Control Plane URL and API Key
-                control_plane_url = params.get("control_plane_url") if params else settings.PUBLIC_URL
-                if not control_plane_url:
-                    control_plane_url = settings.PUBLIC_URL
+                files_to_upload = [
+                    ("edge_node/edge_config_updater.py", "/opt/cdn_waf/edge_config_updater.py"),
+                    ("edge_node/requirements.txt", "/opt/cdn_waf/requirements.txt")
+                ]
                 
-                config_content = config_content.replace('url: "https://control.yourcdn.ru"', f'url: "{control_plane_url}"')
-                if node.api_key:
-                    config_content = config_content.replace('api_key: "your-api-key-here"', f'api_key: "{node.api_key}"')
+                tmp_config_path = None
                 
-                # Write to temp file
-                with tempfile.NamedTemporaryFile(mode='w', delete=False) as tmp:
-                    tmp.write(config_content)
-                    tmp_config_path = tmp.name
+                if update_config:
+                    config_content = ""
+                    with open("edge_node/config.example.yaml", "r") as f:
+                        config_content = f.read()
+                    
+                    # Replace values
+                    config_content = config_content.replace("id: 1", f"id: {node.id}")
+                    config_content = config_content.replace('name: "ru-msk-01"', f'name: "{node.name}"')
+                    config_content = config_content.replace('location: "RU-MSK"', f'location: "{node.location_code}"')
+                    
+                    # Replace Control Plane URL and API Key
+                    control_plane_url = params.get("control_plane_url") if params else settings.PUBLIC_URL
+                    if not control_plane_url:
+                        control_plane_url = settings.PUBLIC_URL
+                    
+                    config_content = config_content.replace('url: "https://control.yourcdn.ru"', f'url: "{control_plane_url}"')
+                    if node.api_key:
+                        config_content = config_content.replace('api_key: "your-api-key-here"', f'api_key: "{node.api_key}"')
+                    
+                    # Write to temp file
+                    with tempfile.NamedTemporaryFile(mode='w', delete=False) as tmp:
+                        tmp.write(config_content)
+                        tmp_config_path = tmp.name
+                    
+                    files_to_upload.append((tmp_config_path, "/opt/cdn_waf/config.yaml"))
 
                 try:
-                    files_to_upload = [
-                        ("edge_node/edge_config_updater.py", "/opt/cdn_waf/edge_config_updater.py"),
-                        ("edge_node/requirements.txt", "/opt/cdn_waf/requirements.txt"),
-                        (tmp_config_path, "/opt/cdn_waf/config.yaml") 
-                    ]
-                    
                     # Ensure directory exists
                     await EdgeNodeService.execute_command(node, "mkdir -p /opt/cdn_waf || sudo mkdir -p /opt/cdn_waf")
                     await EdgeNodeService.execute_command(node, "chown -R $USER:$USER /opt/cdn_waf || sudo chown -R $USER:$USER /opt/cdn_waf")
@@ -561,7 +576,8 @@ class EdgeNodeService:
                                 exit_code=1, execution_time=0
                             )
                 finally:
-                    os.unlink(tmp_config_path)
+                    if tmp_config_path:
+                        os.unlink(tmp_config_path)
                 
                 return await EdgeNodeService.run_setup_script(node, "install_agent_service")
 
