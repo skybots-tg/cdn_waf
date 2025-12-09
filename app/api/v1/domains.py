@@ -545,11 +545,11 @@ async def get_available_certificates(
     )
     dns_records = dns_result.scalars().all()
     
-    # Получаем все активные сертификаты
+    # Получаем все активные и pending сертификаты
     certs_result = await db.execute(
         select(Certificate).where(
             Certificate.domain_id == domain_id,
-            Certificate.status == CertificateStatus.ISSUED
+            Certificate.status.in_([CertificateStatus.ISSUED, CertificateStatus.PENDING])
         )
     )
     active_certs = certs_result.scalars().all()
@@ -560,28 +560,23 @@ async def get_available_certificates(
         if cert.common_name:
             covered_domains.add(cert.common_name)
     
-    # Формируем список доступных к выдаче
+    # Формируем список доступных к выдаче на основе DNS записей
     available = []
     
-    # Проверяем основной домен
-    if domain.name not in covered_domains:
-        available.append({
-            "subdomain": "@",
-            "fqdn": domain.name,
-            "dns_record_id": None
-        })
-    
-    # Проверяем поддомены
     for record in dns_records:
+        # Формируем FQDN
         if record.name == "@":
-            continue  # Уже проверили выше
+            fqdn = domain.name
+        else:
+            fqdn = f"{record.name}.{domain.name}"
         
-        fqdn = f"{record.name}.{domain.name}"
+        # Проверяем что для этого FQDN нет сертификата
         if fqdn not in covered_domains:
             available.append({
                 "subdomain": record.name,
                 "fqdn": fqdn,
-                "dns_record_id": record.id
+                "dns_record_id": record.id,
+                "proxied": record.proxied
             })
     
     return available
