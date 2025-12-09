@@ -50,17 +50,14 @@ NGINX_TEMPLATE = Template("""
 # Version: {{ version|default('unknown') }}
 # Generated at: {{ timestamp|default('') }}
 
-# Default server for ACME challenges (handles requests for unconfigured domains)
+# Default server for ACME challenges on HTTP (handles requests for unconfigured domains)
 server {
     listen 80 default_server;
-    listen 443 ssl default_server;
     server_name _;
     
-    # Dummy SSL certificate (required for default HTTPS server)
-    ssl_certificate /etc/ssl/certs/ssl-cert-snakeoil.pem;
-    ssl_certificate_key /etc/ssl/private/ssl-cert-snakeoil.key;
+    access_log /var/log/nginx/default_access.log;
     
-    # ACME Challenge support for any domain
+    # ACME Challenge support for any domain (even unconfigured)
     location /.well-known/acme-challenge/ {
         proxy_pass {{ global_settings.control_plane_url|default('https://flarecloud.ru') }}/.well-known/acme-challenge/;
         proxy_set_header Host {{ global_settings.control_plane_url|default('https://flarecloud.ru')|replace('https://', '')|replace('http://', '') }};
@@ -69,9 +66,9 @@ server {
         proxy_set_header X-Forwarded-Host $host;
     }
     
-    # Return 404 for all other requests
+    # Return 404 for all other requests to unconfigured domains
     location / {
-        return 404 "Domain not configured";
+        return 404 "Domain not configured on this CDN node";
     }
 }
 
