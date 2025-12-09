@@ -101,13 +101,7 @@ async def acme_challenge(token: str, request: Request):
             logger.info(f"Returning validation response (length: {len(validation)})")
     
     if not validation:
-        # List available keys for debugging
-        if redis_client:
-            all_keys = await redis_client.keys("acme:challenge:*")
-            logger.warning(f"Challenge token '{token}' not found in Redis. Available keys: {len(all_keys)}")
-            if all_keys:
-                logger.warning(f"Sample keys: {[k.decode() if isinstance(k, bytes) else k for k in all_keys[:5]]}")
-        
+        logger.warning(f"Challenge token '{token}' not found in Redis")
         raise HTTPException(
             status_code=404,
             detail=f"Challenge token not found"
