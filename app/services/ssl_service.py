@@ -2,7 +2,7 @@
 import logging
 import base64
 from typing import List, Optional
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from cryptography import x509
@@ -19,6 +19,16 @@ logger = logging.getLogger(__name__)
 
 class SSLService:
     """Service for managing SSL/TLS certificates"""
+    
+    @staticmethod
+    def _normalize_cert_dt(dt: datetime | None) -> datetime | None:
+        """Приводим datetime к наивному UTC, чтобы asyncpg не орал."""
+        if dt is None:
+            return None
+        if isinstance(dt, datetime) and dt.tzinfo is not None:
+            # приводим к UTC и выкидываем tzinfo
+            return dt.astimezone(timezone.utc).replace(tzinfo=None)
+        return dt
     
     @staticmethod
     async def get_certificates(
@@ -370,8 +380,12 @@ class SSLService:
                 default_backend()
             )
             cert_info = {
-                "not_before": getattr(leaf_cert, "not_valid_before_utc", leaf_cert.not_valid_before),
-                "not_after": getattr(leaf_cert, "not_valid_after_utc", leaf_cert.not_valid_after),
+                "not_before": SSLService._normalize_cert_dt(
+                    getattr(leaf_cert, "not_valid_before_utc", leaf_cert.not_valid_before)
+                ),
+                "not_after": SSLService._normalize_cert_dt(
+                    getattr(leaf_cert, "not_valid_after_utc", leaf_cert.not_valid_after)
+                ),
                 "issuer": leaf_cert.issuer.rfc4514_string(),
                 "subject": leaf_cert.subject.rfc4514_string(),
             }
@@ -539,8 +553,8 @@ class SSLService:
             not_after = getattr(cert, "not_valid_after_utc", cert.not_valid_after)
             
             return {
-                "not_before": not_before,
-                "not_after": not_after,
+                "not_before": SSLService._normalize_cert_dt(not_before),
+                "not_after": SSLService._normalize_cert_dt(not_after),
                 "issuer": cert.issuer.rfc4514_string(),
                 "subject": cert.subject.rfc4514_string()
             }
@@ -993,8 +1007,12 @@ class SSLService:
                 default_backend()
             )
             cert_info = {
-                "not_before": getattr(leaf_cert, "not_valid_before_utc", leaf_cert.not_valid_before),
-                "not_after": getattr(leaf_cert, "not_valid_after_utc", leaf_cert.not_valid_after),
+                "not_before": SSLService._normalize_cert_dt(
+                    getattr(leaf_cert, "not_valid_before_utc", leaf_cert.not_valid_before)
+                ),
+                "not_after": SSLService._normalize_cert_dt(
+                    getattr(leaf_cert, "not_valid_after_utc", leaf_cert.not_valid_after)
+                ),
                 "issuer": leaf_cert.issuer.rfc4514_string(),
                 "subject": leaf_cert.subject.rfc4514_string(),
             }
