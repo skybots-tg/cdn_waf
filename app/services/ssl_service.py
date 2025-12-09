@@ -305,12 +305,10 @@ class SSLService:
             # 6. Set Challenge Token/Response
             response, validation = http_challenge.response_and_validation(acc_key)
             
-            # ACME tokens are raw bytes that need to be base64url encoded
-            # This is the format expected in URLs and by Let's Encrypt
             token_raw = http_challenge.chall.token
             if isinstance(token_raw, bytes):
-                # Encode to base64url (URL-safe base64 without padding)
-                token_str = base64.urlsafe_b64encode(token_raw).decode('ascii').rstrip('=')
+                # ACME token уже пригоден для URL, просто декодируем
+                token_str = token_raw.decode("ascii")
             else:
                 token_str = str(token_raw)
             
@@ -661,13 +659,12 @@ class SSLService:
         )
         client = acme.client.ClientV2(directory, net)
         
-        # Register or query account
+        # Register or query account (ACME v2, 2025)
         acme_email = email or settings.ACME_EMAIL
         regr = None
-        
         try:
             if account_key_path.exists():
-                # Try to use existing account
+                # Ключ есть, пробуем получить уже существующий аккаунт
                 try:
                     regr = client.new_account(
                         acme.messages.NewRegistration.from_data(
@@ -676,24 +673,29 @@ class SSLService:
                             only_return_existing=True
                         )
                     )
-                    add_log(CertificateLogLevel.INFO, "Using existing ACME account")
+                    # Если сюда дошло — сервер вернул 201/201 и аккаунт создан сейчас
+                    add_log(CertificateLogLevel.INFO, "Using existing ACME account (new_account returned successfully)")
                     await db.commit()
                 except acme.errors.ConflictError as conflict_error:
-                    # Account already exists - this is fine, use the location from error
+                    # Для ACME v2: 200 + Location → ConflictError с location = account URL
                     logger.info(f"ACME account already exists (ConflictError): {conflict_error}")
-                    # ConflictError contains the account URL - use it to query the account
-                    account_uri = str(conflict_error).strip()
+                    account_uri = getattr(conflict_error, "location", str(conflict_error).strip())
+                    # Минимальное тело регистрации: достаточно email, key подтянется с сервера
+                    reg_body = acme.messages.Registration.from_data(email=acme_email)
                     regr = acme.messages.RegistrationResource(
                         uri=account_uri,
-                        body=acme.messages.Registration.from_data(
-                            key=account_key.public_key(),
-                            contact=(f'mailto:{acme_email}',)
-                        )
+                        body=reg_body,
                     )
-                    add_log(CertificateLogLevel.INFO, "Using existing ACME account (resolved conflict)")
+                    # ВАЖНО: чтобы дальше все запросы шли с kid
+                    client.net.account = regr
+                    add_log(
+                        CertificateLogLevel.INFO,
+                        "Using existing ACME account (resolved from ConflictError)"
+                    )
                     await db.commit()
                 except Exception as account_error:
-                    # If account doesn't exist, create a new one
+                    # ACME v2: если only_return_existing=true, а аккаунта нет,
+                    # сервер может вернуть accountDoesNotExist
                     if "accountDoesNotExist" in str(account_error):
                         logger.info("ACME account doesn't exist, creating new one")
                         regr = client.new_account(
@@ -702,16 +704,22 @@ class SSLService:
                                 terms_of_service_agreed=True
                             )
                         )
-                        add_log(CertificateLogLevel.SUCCESS, f"ACME account created with email: {acme_email}")
+                        # ClientV2.new_account сам положит результат в client.net.account
+                        add_log(
+                            CertificateLogLevel.SUCCESS,
+                            f"ACME account created with email: {acme_email}"
+                        )
                         await db.commit()
                     else:
-                        # Other errors should be logged as warnings
                         logger.warning(f"Account operation warning: {account_error}")
-                        add_log(CertificateLogLevel.WARNING, f"Account operation warning: {str(account_error)}")
+                        add_log(
+                            CertificateLogLevel.WARNING,
+                            f"Account operation warning: {str(account_error)}"
+                        )
                         await db.commit()
                         raise
             else:
-                # No existing key, create new account
+                # Ключа не было (теоретически), создали выше — регистрируем новый аккаунт
                 try:
                     regr = client.new_account(
                         acme.messages.NewRegistration.from_data(
@@ -719,29 +727,41 @@ class SSLService:
                             terms_of_service_agreed=True
                         )
                     )
-                    add_log(CertificateLogLevel.SUCCESS, f"ACME account registered with email: {acme_email}")
+                    # new_account сам поставит client.net.account
+                    add_log(
+                        CertificateLogLevel.SUCCESS,
+                        f"ACME account registered with email: {acme_email}"
+                    )
                     await db.commit()
                 except acme.errors.ConflictError as conflict_error:
-                    # Account already exists - use the location from error
+                    # Редкий кейс: аккаунт уже есть, а мы думали, что его нет
                     logger.info(f"ACME account already exists (ConflictError): {conflict_error}")
-                    account_uri = str(conflict_error).strip()
+                    account_uri = getattr(conflict_error, "location", str(conflict_error).strip())
+                    reg_body = acme.messages.Registration.from_data(email=acme_email)
                     regr = acme.messages.RegistrationResource(
                         uri=account_uri,
-                        body=acme.messages.Registration.from_data(
-                            key=account_key.public_key(),
-                            contact=(f'mailto:{acme_email}',)
-                        )
+                        body=reg_body,
                     )
-                    add_log(CertificateLogLevel.INFO, "Using existing ACME account (resolved conflict)")
+                    client.net.account = regr
+                    add_log(
+                        CertificateLogLevel.INFO,
+                        "Using existing ACME account (resolved conflict in no-key branch)"
+                    )
                     await db.commit()
         except Exception as e:
-            # Final catch for any unexpected errors
-            if regr is None:  # Only log if we couldn't create an account at all
+            # Финальный фолбэк: аккаунт вообще не получили
+            if regr is None:
                 logger.error(f"Failed to register/retrieve ACME account: {e}", exc_info=True)
-                add_log(CertificateLogLevel.ERROR, f"Failed to register ACME account: {str(e)}")
+                add_log(
+                    CertificateLogLevel.ERROR,
+                    f"Failed to register ACME account: {str(e)}"
+                )
                 cert.status = CertificateStatus.FAILED
                 await db.commit()
                 return
+        # На всякий случай: если net.account не выставлен, а regr есть — выставим
+        if client.net.account is None and regr is not None:
+            client.net.account = regr
         
         # 4. Generate Certificate Key and CSR
         add_log(CertificateLogLevel.INFO, "Generating certificate key and CSR")
@@ -822,7 +842,8 @@ class SSLService:
             
             token_raw = http_challenge.chall.token
             if isinstance(token_raw, bytes):
-                token_str = base64.urlsafe_b64encode(token_raw).decode('ascii').rstrip('=')
+                # ACME token уже пригоден для URL, просто декодируем
+                token_str = token_raw.decode("ascii")
             else:
                 token_str = str(token_raw)
             
