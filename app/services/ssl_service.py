@@ -663,17 +663,41 @@ class SSLService:
         
         # Register or query account
         acme_email = email or settings.ACME_EMAIL
+        regr = None
+        
         try:
             if account_key_path.exists():
-                regr = client.new_account(
-                    acme.messages.NewRegistration.from_data(
-                        email=acme_email,
-                        terms_of_service_agreed=True,
-                        only_return_existing=True
+                # Try to use existing account
+                try:
+                    regr = client.new_account(
+                        acme.messages.NewRegistration.from_data(
+                            email=acme_email,
+                            terms_of_service_agreed=True,
+                            only_return_existing=True
+                        )
                     )
-                )
-                add_log(CertificateLogLevel.INFO, "Using existing ACME account")
+                    add_log(CertificateLogLevel.INFO, "Using existing ACME account")
+                    await db.commit()
+                except Exception as account_error:
+                    # If account doesn't exist, create a new one
+                    if "accountDoesNotExist" in str(account_error):
+                        logger.info("ACME account doesn't exist, creating new one")
+                        regr = client.new_account(
+                            acme.messages.NewRegistration.from_data(
+                                email=acme_email,
+                                terms_of_service_agreed=True
+                            )
+                        )
+                        add_log(CertificateLogLevel.SUCCESS, f"ACME account created with email: {acme_email}")
+                        await db.commit()
+                    else:
+                        # Other errors should be logged as warnings
+                        logger.warning(f"Account operation warning: {account_error}")
+                        add_log(CertificateLogLevel.WARNING, f"Account operation warning: {str(account_error)}")
+                        await db.commit()
+                        raise
             else:
+                # No existing key, create new account
                 regr = client.new_account(
                     acme.messages.NewRegistration.from_data(
                         email=acme_email,
@@ -681,11 +705,15 @@ class SSLService:
                     )
                 )
                 add_log(CertificateLogLevel.SUCCESS, f"ACME account registered with email: {acme_email}")
-            await db.commit()
+                await db.commit()
         except Exception as e:
-            logger.warning(f"Account operation warning: {e}")
-            add_log(CertificateLogLevel.WARNING, f"Account operation warning: {str(e)}")
-            await db.commit()
+            # Final catch for any unexpected errors
+            if regr is None:  # Only log if we couldn't create an account at all
+                logger.error(f"Failed to register/retrieve ACME account: {e}", exc_info=True)
+                add_log(CertificateLogLevel.ERROR, f"Failed to register ACME account: {str(e)}")
+                cert.status = CertificateStatus.FAILED
+                await db.commit()
+                return
         
         # 4. Generate Certificate Key and CSR
         add_log(CertificateLogLevel.INFO, "Generating certificate key and CSR")
@@ -717,7 +745,16 @@ class SSLService:
         await db.commit()
         
         logger.info("Creating certificate order")
-        order = client.new_order(csr_pem)
+        try:
+            order = client.new_order(csr_pem)
+            add_log(CertificateLogLevel.SUCCESS, f"ACME order created successfully")
+            await db.commit()
+        except Exception as e:
+            logger.error(f"Failed to create ACME order: {e}", exc_info=True)
+            add_log(CertificateLogLevel.ERROR, f"Failed to create ACME order: {str(e)}")
+            cert.status = CertificateStatus.FAILED
+            await db.commit()
+            return
         
         # 5. Process Authorizations
         add_log(CertificateLogLevel.INFO, f"Processing authorization for {fqdn}")
@@ -728,8 +765,15 @@ class SSLService:
             authz_url = authz_resource.uri if hasattr(authz_resource, 'uri') else str(authz_resource)
             logger.info(f"Fetching authorization from {authz_url}")
             
-            response = client._post_as_get(authz_url)
-            authz = acme.messages.Authorization.from_json(response.json())
+            try:
+                response = client._post_as_get(authz_url)
+                authz = acme.messages.Authorization.from_json(response.json())
+            except Exception as e:
+                logger.error(f"Failed to fetch authorization: {e}", exc_info=True)
+                add_log(CertificateLogLevel.ERROR, f"Failed to fetch authorization: {str(e)}")
+                cert.status = CertificateStatus.FAILED
+                await db.commit()
+                return
             
             # Find HTTP-01 challenge
             http_challenge = None
@@ -783,14 +827,25 @@ class SSLService:
             add_log(CertificateLogLevel.INFO, f"Requesting ACME validation for {fqdn}")
             await db.commit()
             
-            client.answer_challenge(http_challenge, response)
+            try:
+                client.answer_challenge(http_challenge, response)
+            except Exception as e:
+                logger.error(f"Failed to answer challenge: {e}", exc_info=True)
+                add_log(CertificateLogLevel.ERROR, f"Failed to answer challenge: {str(e)}")
+                cert.status = CertificateStatus.FAILED
+                await db.commit()
+                return
             
             # 8. Wait for validation
             import time
             for attempt in range(10):
                 time.sleep(2)
-                response = client._post_as_get(authz_url)
-                authz_status = acme.messages.Authorization.from_json(response.json())
+                try:
+                    response = client._post_as_get(authz_url)
+                    authz_status = acme.messages.Authorization.from_json(response.json())
+                except Exception as e:
+                    logger.error(f"Failed to check authorization status (attempt {attempt + 1}): {e}")
+                    continue
                 
                 if authz_status.status == acme.messages.STATUS_VALID:
                     logger.info(f"Authorization validated successfully for {fqdn}")
@@ -819,7 +874,14 @@ class SSLService:
         await db.commit()
         
         logger.info("Finalizing order")
-        finalized_order = client.poll_and_finalize(order)
+        try:
+            finalized_order = client.poll_and_finalize(order)
+        except Exception as e:
+            logger.error(f"Failed to finalize order: {e}", exc_info=True)
+            add_log(CertificateLogLevel.ERROR, f"Failed to finalize certificate order: {str(e)}")
+            cert.status = CertificateStatus.FAILED
+            await db.commit()
+            return
         
         # 10. Save Certificate
         fullchain_pem = finalized_order.fullchain_pem

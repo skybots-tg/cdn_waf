@@ -385,6 +385,14 @@ body {
 .table td {
     padding: 16px;
     border-top: 1px solid var(--glass-border);
+    max-width: 300px; /* Limit cell width to prevent overflow */
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.table td[title] {
+    cursor: help; /* Show help cursor when there's a title attribute */
 }
 
 .table tbody tr {

@@ -297,8 +297,8 @@ function renderDNSRecords(records) {
     tbody.innerHTML = records.map(record => `
         <tr>
             <td><strong>${record.type}</strong></td>
-            <td>${record.name}</td>
-            <td>${record.content}</td>
+            <td title="${record.name}">${record.name}</td>
+            <td title="${record.content}">${record.content}</td>
             <td>${record.ttl}</td>
             <td>
                 ${record.proxied ? '<span class="badge badge-orange">Proxied</span>' : '<span class="badge">DNS Only</span>'}
