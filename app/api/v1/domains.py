@@ -368,7 +368,7 @@ async def verify_ns(
     return {"verified": verified, "domain_id": domain_id}
 
 
-@router.post("/domains/{domain_id}/issue-certificate/{subdomain}")
+@router.post("/{domain_id}/issue-certificate/{subdomain}")
 async def issue_subdomain_certificate(
     domain_id: int,
     subdomain: str,
@@ -451,7 +451,7 @@ async def issue_subdomain_certificate(
     })
 
 
-@router.get("/domains/{domain_id}/certificates")
+@router.get("/{domain_id}/certificates")
 async def list_domain_certificates(
     domain_id: int,
     db: AsyncSession = Depends(get_db),
@@ -488,7 +488,7 @@ async def list_domain_certificates(
     ]
 
 
-@router.delete("/domains/{domain_id}/certificates/{cert_id}")
+@router.delete("/{domain_id}/certificates/{cert_id}")
 async def delete_certificate(
     domain_id: int,
     cert_id: int,
@@ -522,7 +522,7 @@ async def delete_certificate(
     return {"status": "deleted", "certificate_id": cert_id}
 
 
-@router.get("/domains/{domain_id}/certificates/available")
+@router.get("/{domain_id}/certificates/available")
 async def get_available_certificates(
     domain_id: int,
     db: AsyncSession = Depends(get_db),
@@ -591,7 +591,7 @@ async def get_available_certificates(
     return available
 
 
-@router.post("/domains/{domain_id}/certificates/issue")
+@router.post("/{domain_id}/certificates/issue")
 async def issue_certificate_for_subdomain(
     domain_id: int,
     subdomain: str,
@@ -690,7 +690,7 @@ async def issue_certificate_for_subdomain(
     })
 
 
-@router.get("/domains/{domain_id}/certificates/{cert_id}/logs")
+@router.get("/{domain_id}/certificates/{cert_id}/logs")
 async def get_certificate_logs(
     domain_id: int,
     cert_id: int,
