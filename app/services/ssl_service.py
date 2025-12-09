@@ -388,7 +388,7 @@ class SSLService:
         cert.key_pem = pkey.private_bytes(
             encoding=serialization.Encoding.PEM,
             format=serialization.PrivateFormat.TraditionalOpenSSL,
-            encryption=serialization.NoEncryption()
+            encryption_algorithm=serialization.NoEncryption(),
         ).decode()
         cert.status = CertificateStatus.ISSUED
         cert.not_before = cert_info["not_before"]
@@ -1011,7 +1011,7 @@ class SSLService:
         cert.key_pem = pkey.private_bytes(
             encoding=serialization.Encoding.PEM,
             format=serialization.PrivateFormat.TraditionalOpenSSL,
-            encryption=serialization.NoEncryption()
+            encryption_algorithm=serialization.NoEncryption(),
         ).decode()
         cert.status = CertificateStatus.ISSUED
         cert.not_before = cert_info["not_before"]
