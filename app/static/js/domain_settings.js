@@ -909,7 +909,10 @@ function editIPRule(id) { alert('Not implemented'); }
 function deleteIPRule(id) { alert('Not implemented'); }
 
 // Utility functions
-// Note: getToken() is now defined globally in main.js
+function getToken() {
+    // Try to get token from localStorage (access_token is the main key)
+    return localStorage.getItem('access_token') || localStorage.getItem('auth_token') || '';
+}
 
 function escapeHtml(text) {
     if (!text) return '';
