@@ -166,17 +166,39 @@
             </button>
         </div>
 
+        <div class="glass-card mb-3">
+            <h3 style="font-size: 16px; font-weight: 600; margin-bottom: 16px;">
+                <i class="fas fa-envelope"></i> ACME Settings
+            </h3>
+            <div class="form-group">
+                <label class="form-label">Default Email for Certificate Notifications</label>
+                <input type="email" class="form-input" id="acme-default-email" 
+                       placeholder="your@email.com">
+                <p style="font-size: 12px; color: var(--text-secondary); margin-top: 4px;">
+                    This email will be used for Let's Encrypt notifications (expiry warnings, etc.)
+                </p>
+            </div>
+            <button class="btn btn-primary" onclick="saveACMESettings()">
+                <i class="fas fa-save"></i> Save ACME Settings
+            </button>
+        </div>
+
         <div class="glass-card">
             <div class="flex-between mb-3">
-                <h2 style="font-size: 20px; font-weight: 600;">Certificates</h2>
+                <h2 style="font-size: 20px; font-weight: 600;">SSL Certificates</h2>
                 <div class="flex gap-2">
-                    <button class="btn btn-secondary btn-sm" onclick="requestACME()">
-                        <i class="fas fa-certificate"></i> Request Let's Encrypt
-                    </button>
                     <button class="btn btn-primary btn-sm" onclick="showUploadCertModal()">
                         <i class="fas fa-upload"></i> Upload Certificate
                     </button>
                 </div>
+            </div>
+            
+            <div style="background: var(--bg-tertiary); padding: 12px; border-radius: 8px; margin-bottom: 16px;">
+                <p style="font-size: 13px; color: var(--text-secondary); margin: 0;">
+                    <i class="fas fa-info-circle"></i> 
+                    Certificates are automatically available for all proxied DNS A records. 
+                    Click "Issue" to request a free Let's Encrypt certificate for any subdomain.
+                </p>
             </div>
             
             <div id="certificates-list">
@@ -347,6 +369,7 @@ function loadTabData(tabName) {
         case 'ssl':
             loadTLSSettings();
             loadCertificates();
+            loadACMESettings();
             break;
         case 'security':
             loadWAFRules();

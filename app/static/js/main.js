@@ -1,3 +1,49 @@
+// Global Auth Helper
+function getToken() {
+    return localStorage.getItem('access_token') || '';
+}
+
+// Global Auth Check
+function checkAuth() {
+    const publicPages = ['/login', '/signup', '/'];
+    const currentPath = window.location.pathname;
+    
+    // Skip auth check for public pages
+    if (publicPages.includes(currentPath)) {
+        return true;
+    }
+    
+    const token = getToken();
+    if (!token) {
+        console.warn('No auth token found, redirecting to login');
+        window.location.href = '/login?redirect=' + encodeURIComponent(currentPath);
+        return false;
+    }
+    
+    return true;
+}
+
+// Global Fetch Interceptor for 401 handling
+(function() {
+    const originalFetch = window.fetch;
+    window.fetch = function(...args) {
+        return originalFetch.apply(this, args).then(response => {
+            if (response.status === 401) {
+                // Unauthorized - redirect to login
+                const currentPath = window.location.pathname;
+                const publicPages = ['/login', '/signup', '/'];
+                
+                if (!publicPages.includes(currentPath)) {
+                    localStorage.removeItem('access_token');
+                    console.warn('Unauthorized request detected, redirecting to login');
+                    window.location.href = '/login?redirect=' + encodeURIComponent(currentPath);
+                }
+            }
+            return response;
+        });
+    };
+})();
+
 // Theme Toggle
 function initThemeToggle() {
     const themeToggle = document.getElementById('theme-toggle');
@@ -136,7 +182,11 @@ async function handleLogin(event) {
         const response = await api.post('/auth/login', { email, password });
         api.setToken(response.access_token);
         showNotification('Login successful!', 'success');
-        window.location.href = '/dashboard';
+        
+        // Redirect to the page user was trying to access, or dashboard by default
+        const urlParams = new URLSearchParams(window.location.search);
+        const redirectTo = urlParams.get('redirect') || '/dashboard';
+        window.location.href = redirectTo;
     } catch (error) {
         showNotification(error.message, 'error');
     }
@@ -238,7 +288,7 @@ function renderDNSRecords(records) {
     if (records.length === 0) {
         tbody.innerHTML = `
             <tr>
-                <td colspan="6" class="text-center text-secondary">No DNS records found</td>
+                <td colspan="7" class="text-center text-secondary">No DNS records found</td>
             </tr>
         `;
         return;
@@ -254,6 +304,13 @@ function renderDNSRecords(records) {
                 ${record.proxied ? '<span class="badge badge-orange">Proxied</span>' : '<span class="badge">DNS Only</span>'}
             </td>
             <td>
+                ${record.type === 'A' || record.type === 'AAAA' ? `
+                    <button onclick="issueCertificate('${record.name}')" class="btn btn-sm btn-primary" title="Issue Let's Encrypt Certificate">
+                        <i class="fas fa-certificate"></i>
+                    </button>
+                ` : '<span class="text-secondary">-</span>'}
+            </td>
+            <td>
                 <button onclick="editRecord(${record.id})" class="btn btn-sm btn-secondary">Edit</button>
                 <button onclick="deleteRecord(${record.id})" class="btn btn-sm btn-secondary">Delete</button>
             </td>
@@ -265,13 +322,8 @@ function renderDNSRecords(records) {
 document.addEventListener('DOMContentLoaded', () => {
     initThemeToggle();
     
-    // Check if user is logged in
-    const token = localStorage.getItem('access_token');
-    const publicPages = ['/login', '/signup', '/'];
-    
-    if (!token && !publicPages.includes(window.location.pathname)) {
-        window.location.href = '/login';
-    }
+    // Check authorization on all pages
+    checkAuth();
 });
 
 

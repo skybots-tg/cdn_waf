@@ -2,6 +2,7 @@
 import asyncio
 import logging
 from celery import shared_task
+from sqlalchemy import select
 from app.tasks import celery_app
 from app.core.database import AsyncSessionLocal
 from app.services.ssl_service import SSLService
@@ -47,3 +48,46 @@ def check_expiring_certificates():
     # TODO: Implement certificate expiry checking
     print("Checking expiring certificates")
     return {"status": "success", "checked": 0}
+
+
+@celery_app.task(name="app.tasks.certificate.issue_single_certificate")
+def issue_single_certificate(certificate_id: int, email: str = None):
+    """Issue SSL certificate for a specific subdomain using ACME"""
+    logger.info(f"Starting single certificate issuance for certificate_id={certificate_id}")
+    
+    async def _issue():
+        # Ensure Redis is connected for this task
+        from app.core.redis import redis_client
+        await redis_client.connect()
+        
+        async with AsyncSessionLocal() as db:
+            try:
+                await SSLService.process_single_acme_order(db, certificate_id, email)
+            except Exception as e:
+                logger.error(f"Failed to issue certificate {certificate_id}: {e}", exc_info=True)
+                # Mark certificate as failed
+                from app.models.certificate import Certificate, CertificateStatus
+                from app.models.certificate_log import CertificateLog, CertificateLogLevel
+                
+                cert_result = await db.execute(
+                    select(Certificate).where(Certificate.id == certificate_id)
+                )
+                cert = cert_result.scalar_one_or_none()
+                if cert:
+                    cert.status = CertificateStatus.FAILED
+                    
+                    log_entry = CertificateLog(
+                        certificate_id=certificate_id,
+                        level=CertificateLogLevel.ERROR,
+                        message=f"Certificate issuance failed: {str(e)}",
+                        details=str(e)
+                    )
+                    db.add(log_entry)
+                    await db.commit()
+            finally:
+                await redis_client.disconnect()
+
+    loop = asyncio.get_event_loop()
+    loop.run_until_complete(_issue())
+    
+    return {"status": "processed", "certificate_id": certificate_id}

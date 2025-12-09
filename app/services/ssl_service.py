@@ -555,3 +555,320 @@ class SSLService:
         
         await db.commit()
         return True
+    
+    @staticmethod
+    async def process_single_acme_order(
+        db: AsyncSession,
+        certificate_id: int,
+        email: str = None
+    ):
+        """
+        Process ACME certificate order for a single certificate (one subdomain)
+        This is optimized version that issues certificate for specific FQDN only
+        """
+        from app.models.certificate import Certificate, CertificateStatus
+        from app.models.domain import Domain
+        from app.models.certificate_log import CertificateLog, CertificateLogLevel
+        from app.core.config import settings
+        import acme.client
+        import acme.messages
+        import acme.challenges
+        import josepy as jose
+        from cryptography.hazmat.primitives import serialization
+        from cryptography.hazmat.primitives.asymmetric import rsa
+        from cryptography import x509
+        from cryptography.x509.oid import NameOID
+        from cryptography.hazmat.primitives import hashes
+        
+        def add_log(level: CertificateLogLevel, message: str, details: str = None):
+            """Helper to add log entry"""
+            log_entry = CertificateLog(
+                certificate_id=certificate_id,
+                level=level,
+                message=message,
+                details=details
+            )
+            db.add(log_entry)
+        
+        # 1. Get certificate record
+        cert = await db.execute(select(Certificate).where(Certificate.id == certificate_id))
+        cert = cert.scalar_one_or_none()
+        if not cert:
+            logger.error(f"Certificate {certificate_id} not found")
+            return
+        
+        # Get domain
+        domain = await db.execute(select(Domain).where(Domain.id == cert.domain_id))
+        domain = domain.scalar_one_or_none()
+        if not domain:
+            logger.error(f"Domain {cert.domain_id} not found")
+            cert.status = CertificateStatus.FAILED
+            add_log(CertificateLogLevel.ERROR, f"Domain not found")
+            await db.commit()
+            return
+        
+        # Use certificate's common_name as the only identifier
+        fqdn = cert.common_name
+        identifiers_list = [fqdn]
+        
+        add_log(CertificateLogLevel.INFO, f"Starting certificate issuance for {fqdn}")
+        await db.commit()
+        
+        logger.info(f"Requesting certificate for: {fqdn}")
+
+        # 2. Load or Generate Account Key
+        import os
+        from pathlib import Path
+        
+        account_key_path = Path(settings.ACME_ACCOUNT_KEY_PATH)
+        account_key_path.parent.mkdir(parents=True, exist_ok=True)
+        
+        if account_key_path.exists():
+            logger.info(f"Loading existing ACME account key")
+            with open(account_key_path, 'rb') as f:
+                acc_key_crypto = serialization.load_pem_private_key(
+                    f.read(),
+                    password=None,
+                    backend=default_backend()
+                )
+        else:
+            logger.info(f"Generating new ACME account key")
+            acc_key_crypto = rsa.generate_private_key(
+                public_exponent=65537,
+                key_size=2048,
+                backend=default_backend()
+            )
+            with open(account_key_path, 'wb') as f:
+                f.write(acc_key_crypto.private_bytes(
+                    encoding=serialization.Encoding.PEM,
+                    format=serialization.PrivateFormat.PKCS8,
+                    encryption_algorithm=serialization.NoEncryption()
+                ))
+            add_log(CertificateLogLevel.INFO, "Generated new ACME account key")
+            await db.commit()
+        
+        # Wrap the key in josepy JWK format
+        acc_key = jose.JWKRSA(key=acc_key_crypto)
+        
+        # 3. Initialize ACME Client
+        add_log(CertificateLogLevel.INFO, f"Connecting to ACME server: {settings.ACME_DIRECTORY_URL}")
+        await db.commit()
+        
+        logger.info(f"Connecting to ACME server: {settings.ACME_DIRECTORY_URL}")
+        net = acme.client.ClientNetwork(acc_key, user_agent="FlareCloud/1.0")
+        directory = acme.messages.Directory.from_json(
+            net.get(settings.ACME_DIRECTORY_URL).json()
+        )
+        client = acme.client.ClientV2(directory, net)
+        
+        # Register or query account
+        acme_email = email or settings.ACME_EMAIL
+        try:
+            if account_key_path.exists():
+                regr = client.new_account(
+                    acme.messages.NewRegistration.from_data(
+                        email=acme_email,
+                        terms_of_service_agreed=True,
+                        only_return_existing=True
+                    )
+                )
+                add_log(CertificateLogLevel.INFO, "Using existing ACME account")
+            else:
+                regr = client.new_account(
+                    acme.messages.NewRegistration.from_data(
+                        email=acme_email,
+                        terms_of_service_agreed=True
+                    )
+                )
+                add_log(CertificateLogLevel.SUCCESS, f"ACME account registered with email: {acme_email}")
+            await db.commit()
+        except Exception as e:
+            logger.warning(f"Account operation warning: {e}")
+            add_log(CertificateLogLevel.WARNING, f"Account operation warning: {str(e)}")
+            await db.commit()
+        
+        # 4. Generate Certificate Key and CSR
+        add_log(CertificateLogLevel.INFO, "Generating certificate key and CSR")
+        await db.commit()
+        
+        pkey = rsa.generate_private_key(
+            public_exponent=65537,
+            key_size=2048,
+            backend=default_backend()
+        )
+        
+        # Build CSR
+        san_dns_names = [x509.DNSName(fqdn)]
+        
+        csr_builder = x509.CertificateSigningRequestBuilder().subject_name(x509.Name([
+            x509.NameAttribute(NameOID.COMMON_NAME, fqdn),
+        ]))
+        
+        csr_builder = csr_builder.add_extension(
+            x509.SubjectAlternativeName(san_dns_names),
+            critical=False,
+        )
+        
+        csr = csr_builder.sign(pkey, hashes.SHA256(), default_backend())
+        csr_pem = csr.public_bytes(serialization.Encoding.PEM)
+        
+        # Create Order
+        add_log(CertificateLogLevel.INFO, "Creating ACME order")
+        await db.commit()
+        
+        logger.info("Creating certificate order")
+        order = client.new_order(csr_pem)
+        
+        # 5. Process Authorizations
+        add_log(CertificateLogLevel.INFO, f"Processing authorization for {fqdn}")
+        await db.commit()
+        
+        logger.info(f"Processing authorization")
+        for authz_resource in order.authorizations:
+            authz_url = authz_resource.uri if hasattr(authz_resource, 'uri') else str(authz_resource)
+            logger.info(f"Fetching authorization from {authz_url}")
+            
+            response = client._post_as_get(authz_url)
+            authz = acme.messages.Authorization.from_json(response.json())
+            
+            # Find HTTP-01 challenge
+            http_challenge = None
+            for chall in authz.challenges:
+                if isinstance(chall.chall, acme.challenges.HTTP01):
+                    http_challenge = chall
+                    break
+            
+            if not http_challenge:
+                logger.error("No HTTP-01 challenge found")
+                cert.status = CertificateStatus.FAILED
+                add_log(CertificateLogLevel.ERROR, "No HTTP-01 challenge found in authorization")
+                await db.commit()
+                return
+
+            # 6. Set Challenge Token/Response
+            response, validation = http_challenge.response_and_validation(acc_key)
+            
+            token_raw = http_challenge.chall.token
+            if isinstance(token_raw, bytes):
+                token_str = base64.urlsafe_b64encode(token_raw).decode('ascii').rstrip('=')
+            else:
+                token_str = str(token_raw)
+            
+            if isinstance(validation, bytes):
+                validation_str = validation.decode('utf-8')
+            else:
+                validation_str = str(validation)
+            
+            add_log(CertificateLogLevel.INFO, f"Storing HTTP-01 challenge token for domain {fqdn}")
+            await db.commit()
+            
+            logger.info(f"Storing challenge token: {token_str[:30]}...")
+            
+            from app.core.redis import redis_client
+            if redis_client:
+                await redis_client.set(
+                    f"acme:challenge:{token_str}", 
+                    validation_str,
+                    expire=3600
+                )
+                logger.info(f"Challenge stored in Redis")
+            else:
+                logger.error("Redis not available")
+                cert.status = CertificateStatus.FAILED
+                add_log(CertificateLogLevel.ERROR, "Redis not available for challenge storage")
+                await db.commit()
+                return
+
+            # 7. Trigger Validation
+            add_log(CertificateLogLevel.INFO, f"Requesting ACME validation for {fqdn}")
+            await db.commit()
+            
+            client.answer_challenge(http_challenge, response)
+            
+            # 8. Wait for validation
+            import time
+            for attempt in range(10):
+                time.sleep(2)
+                response = client._post_as_get(authz_url)
+                authz_status = acme.messages.Authorization.from_json(response.json())
+                
+                if authz_status.status == acme.messages.STATUS_VALID:
+                    logger.info(f"Authorization validated successfully for {fqdn}")
+                    add_log(CertificateLogLevel.SUCCESS, f"Authorization validated successfully for {fqdn}")
+                    await db.commit()
+                    break
+                elif authz_status.status == acme.messages.STATUS_INVALID:
+                    logger.error(f"Authorization failed for {fqdn}: {authz_status}")
+                    cert.status = CertificateStatus.FAILED
+                    add_log(CertificateLogLevel.ERROR, f"Authorization failed for {fqdn}", str(authz_status))
+                    await db.commit()
+                    return
+                
+                if attempt < 9:
+                    add_log(CertificateLogLevel.INFO, f"Waiting for validation (attempt {attempt + 1}/10)...")
+                    await db.commit()
+            else:
+                logger.error(f"Authorization timeout for {fqdn}")
+                cert.status = CertificateStatus.FAILED
+                add_log(CertificateLogLevel.ERROR, f"Authorization timeout for {fqdn}")
+                await db.commit()
+                return
+
+        # 9. Finalize Order
+        add_log(CertificateLogLevel.INFO, "Finalizing certificate order")
+        await db.commit()
+        
+        logger.info("Finalizing order")
+        finalized_order = client.poll_and_finalize(order)
+        
+        # 10. Save Certificate
+        fullchain_pem = finalized_order.fullchain_pem
+        
+        # Parse leaf certificate
+        try:
+            pem_start = "-----BEGIN CERTIFICATE-----"
+            pem_end = "-----END CERTIFICATE-----"
+            start_idx = fullchain_pem.find(pem_start)
+            end_idx = fullchain_pem.find(pem_end)
+            if start_idx == -1 or end_idx == -1:
+                raise ValueError("Invalid fullchain_pem")
+            first_cert_pem = fullchain_pem[start_idx:end_idx + len(pem_end)] + "\n"
+            leaf_cert = x509.load_pem_x509_certificate(
+                first_cert_pem.encode(),
+                default_backend()
+            )
+            cert_info = {
+                "not_before": getattr(leaf_cert, "not_valid_before_utc", leaf_cert.not_valid_before),
+                "not_after": getattr(leaf_cert, "not_valid_after_utc", leaf_cert.not_valid_after),
+                "issuer": leaf_cert.issuer.rfc4514_string(),
+                "subject": leaf_cert.subject.rfc4514_string(),
+            }
+        except Exception as e:
+            logger.error(f"Failed to parse certificate: {e}")
+            cert_info = {
+                "not_before": None,
+                "not_after": None,
+                "issuer": "Unknown",
+                "subject": "Unknown",
+            }
+        
+        cert.cert_pem = fullchain_pem
+        cert.key_pem = pkey.private_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PrivateFormat.TraditionalOpenSSL,
+            encryption=serialization.NoEncryption()
+        ).decode()
+        cert.status = CertificateStatus.ISSUED
+        cert.not_before = cert_info["not_before"]
+        cert.not_after = cert_info["not_after"]
+        cert.issuer = cert_info["issuer"]
+        cert.subject = cert_info["subject"]
+        
+        add_log(
+            CertificateLogLevel.SUCCESS, 
+            f"Certificate issued successfully for {fqdn}",
+            f"Valid until: {cert_info['not_after']}"
+        )
+        
+        await db.commit()
+        logger.info(f"Certificate issued successfully for {fqdn}")

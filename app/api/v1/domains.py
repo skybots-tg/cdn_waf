@@ -1,9 +1,13 @@
 """Domain endpoints"""
 from typing import List, Optional, Set, Tuple
 from fastapi import APIRouter, Depends, HTTPException, status, Query
+from fastapi.responses import JSONResponse
 from fastapi.concurrency import run_in_threadpool
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
 import logging
+
+from app.core.config import settings
 
 import dns.resolver
 import dns.exception
@@ -20,6 +24,8 @@ from app.schemas.domain import (
 from app.services.domain_service import DomainService
 from app.models.user import User
 from app.models.domain import Domain
+from app.models.dns import DNSRecord
+from app.models.certificate import Certificate, CertificateStatus
 from app.tasks.dns_tasks import sync_dns_nodes
 
 router = APIRouter()
@@ -360,3 +366,367 @@ async def verify_ns(
     await db.commit()
 
     return {"verified": verified, "domain_id": domain_id}
+
+
+@router.post("/domains/{domain_id}/issue-certificate/{subdomain}")
+async def issue_subdomain_certificate(
+    domain_id: int,
+    subdomain: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """
+    Выпустить Let's Encrypt сертификат для домена или поддомена
+    
+    Args:
+        domain_id: ID домена
+        subdomain: @ для основного домена, или имя A-записи для поддомена
+    """
+    # Получаем домен
+    result = await db.execute(select(Domain).where(Domain.id == domain_id))
+    domain = result.scalar_one_or_none()
+    
+    if not domain:
+        raise HTTPException(status_code=404, detail="Domain not found")
+    
+    # Проверяем права доступа
+    if domain.organization_id != current_user.organization_id:
+        raise HTTPException(status_code=403, detail="Access denied")
+    
+    # Формируем полное имя домена
+    if subdomain == "@":
+        fqdn = domain.name
+    else:
+        # Проверяем существует ли такая A-запись
+        dns_result = await db.execute(
+            select(DNSRecord).where(
+                DNSRecord.domain_id == domain_id,
+                DNSRecord.name == subdomain,
+                DNSRecord.type == "A"
+            )
+        )
+        dns_record = dns_result.scalar_one_or_none()
+        if not dns_record:
+            raise HTTPException(status_code=404, detail=f"DNS A record '{subdomain}' not found")
+        
+        fqdn = f"{subdomain}.{domain.name}"
+    
+    # Проверяем нет ли уже активного сертификата
+    existing_cert = await db.execute(
+        select(Certificate).where(
+            Certificate.domain_id == domain_id,
+            Certificate.common_name == fqdn,
+            Certificate.status == CertificateStatus.ISSUED
+        )
+    )
+    if existing_cert.scalar_one_or_none():
+        raise HTTPException(
+            status_code=400, 
+            detail=f"Certificate for {fqdn} already exists. Delete it first if you want to reissue."
+        )
+    
+    # Создаем PENDING сертификат
+    cert = Certificate(
+        domain_id=domain_id,
+        type="acme",
+        status=CertificateStatus.PENDING,
+        common_name=fqdn,
+        issuer=None,
+        subject=None,
+        auto_renew=True
+    )
+    db.add(cert)
+    await db.commit()
+    await db.refresh(cert)
+    
+    # Запускаем задачу выпуска в фоне через Celery
+    from app.tasks.certificate_tasks import issue_certificate
+    issue_certificate.delay(domain_id)
+    
+    return JSONResponse({
+        "status": "pending",
+        "message": f"Certificate issuance started for {fqdn}",
+        "certificate_id": cert.id,
+        "fqdn": fqdn
+    })
+
+
+@router.get("/domains/{domain_id}/certificates")
+async def list_domain_certificates(
+    domain_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """Получить список всех сертификатов для домена"""
+    result = await db.execute(select(Domain).where(Domain.id == domain_id))
+    domain = result.scalar_one_or_none()
+    
+    if not domain:
+        raise HTTPException(status_code=404, detail="Domain not found")
+    
+    if domain.organization_id != current_user.organization_id:
+        raise HTTPException(status_code=403, detail="Access denied")
+    
+    # Получаем все сертификаты
+    certs_result = await db.execute(
+        select(Certificate).where(Certificate.domain_id == domain_id)
+        .order_by(Certificate.created_at.desc())
+    )
+    certificates = certs_result.scalars().all()
+    
+    return [
+        {
+            "id": cert.id,
+            "common_name": cert.common_name,
+            "status": cert.status.value,
+            "issuer": cert.issuer,
+            "not_before": cert.not_before.isoformat() if cert.not_before else None,
+            "not_after": cert.not_after.isoformat() if cert.not_after else None,
+            "created_at": cert.created_at.isoformat()
+        }
+        for cert in certificates
+    ]
+
+
+@router.delete("/domains/{domain_id}/certificates/{cert_id}")
+async def delete_certificate(
+    domain_id: int,
+    cert_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """Удалить сертификат"""
+    result = await db.execute(select(Domain).where(Domain.id == domain_id))
+    domain = result.scalar_one_or_none()
+    
+    if not domain:
+        raise HTTPException(status_code=404, detail="Domain not found")
+    
+    if domain.organization_id != current_user.organization_id:
+        raise HTTPException(status_code=403, detail="Access denied")
+    
+    cert_result = await db.execute(
+        select(Certificate).where(
+            Certificate.id == cert_id,
+            Certificate.domain_id == domain_id
+        )
+    )
+    cert = cert_result.scalar_one_or_none()
+    
+    if not cert:
+        raise HTTPException(status_code=404, detail="Certificate not found")
+    
+    await db.delete(cert)
+    await db.commit()
+    
+    return {"status": "deleted", "certificate_id": cert_id}
+
+
+@router.get("/domains/{domain_id}/certificates/available")
+async def get_available_certificates(
+    domain_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_optional_current_user)
+):
+    """
+    Получить список доменов/поддоменов доступных к выдаче сертификата
+    (DNS записи с proxied=True, у которых нет активного сертификата)
+    """
+    # Получаем домен
+    result = await db.execute(select(Domain).where(Domain.id == domain_id))
+    domain = result.scalar_one_or_none()
+    
+    if not domain:
+        raise HTTPException(status_code=404, detail="Domain not found")
+    
+    # Получаем все проксируемые DNS записи типа A
+    dns_result = await db.execute(
+        select(DNSRecord).where(
+            DNSRecord.domain_id == domain_id,
+            DNSRecord.type == "A",
+            DNSRecord.proxied == True
+        )
+    )
+    dns_records = dns_result.scalars().all()
+    
+    # Получаем все активные сертификаты
+    certs_result = await db.execute(
+        select(Certificate).where(
+            Certificate.domain_id == domain_id,
+            Certificate.status == CertificateStatus.ISSUED
+        )
+    )
+    active_certs = certs_result.scalars().all()
+    
+    # Создаем множество доменов, для которых уже есть сертификаты
+    covered_domains = set()
+    for cert in active_certs:
+        if cert.common_name:
+            covered_domains.add(cert.common_name)
+    
+    # Формируем список доступных к выдаче
+    available = []
+    
+    # Проверяем основной домен
+    if domain.name not in covered_domains:
+        available.append({
+            "subdomain": "@",
+            "fqdn": domain.name,
+            "dns_record_id": None
+        })
+    
+    # Проверяем поддомены
+    for record in dns_records:
+        if record.name == "@":
+            continue  # Уже проверили выше
+        
+        fqdn = f"{record.name}.{domain.name}"
+        if fqdn not in covered_domains:
+            available.append({
+                "subdomain": record.name,
+                "fqdn": fqdn,
+                "dns_record_id": record.id
+            })
+    
+    return available
+
+
+@router.post("/domains/{domain_id}/certificates/issue")
+async def issue_certificate_for_subdomain(
+    domain_id: int,
+    subdomain: str,
+    email: Optional[str] = None,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_optional_current_user)
+):
+    """
+    Выпустить Let's Encrypt сертификат для домена или поддомена
+    
+    Args:
+        domain_id: ID домена
+        subdomain: @ для основного домена, или имя поддомена
+        email: Email для уведомлений ACME (опционально, по умолчанию из config)
+    """
+    from app.models.certificate_log import CertificateLog, CertificateLogLevel
+    
+    # Получаем домен
+    result = await db.execute(select(Domain).where(Domain.id == domain_id))
+    domain = result.scalar_one_or_none()
+    
+    if not domain:
+        raise HTTPException(status_code=404, detail="Domain not found")
+    
+    # Формируем полное имя домена
+    if subdomain == "@":
+        fqdn = domain.name
+    else:
+        # Проверяем существует ли такая A-запись
+        dns_result = await db.execute(
+            select(DNSRecord).where(
+                DNSRecord.domain_id == domain_id,
+                DNSRecord.name == subdomain,
+                DNSRecord.type == "A",
+                DNSRecord.proxied == True
+            )
+        )
+        dns_record = dns_result.scalar_one_or_none()
+        if not dns_record:
+            raise HTTPException(
+                status_code=404, 
+                detail=f"Proxied DNS A record '{subdomain}' not found"
+            )
+        
+        fqdn = f"{subdomain}.{domain.name}"
+    
+    # Проверяем нет ли уже активного или pending сертификата
+    existing_cert = await db.execute(
+        select(Certificate).where(
+            Certificate.domain_id == domain_id,
+            Certificate.common_name == fqdn,
+            Certificate.status.in_([CertificateStatus.ISSUED, CertificateStatus.PENDING])
+        )
+    )
+    if existing_cert.scalar_one_or_none():
+        raise HTTPException(
+            status_code=400, 
+            detail=f"Certificate for {fqdn} already exists or is being issued"
+        )
+    
+    # Создаем PENDING сертификат
+    from app.models.certificate import CertificateType
+    cert = Certificate(
+        domain_id=domain_id,
+        type=CertificateType.ACME,
+        status=CertificateStatus.PENDING,
+        common_name=fqdn,
+        issuer=None,
+        subject=None,
+        auto_renew=True,
+        acme_challenge_type="http-01"
+    )
+    db.add(cert)
+    await db.commit()
+    await db.refresh(cert)
+    
+    # Добавляем начальный лог
+    log_entry = CertificateLog(
+        certificate_id=cert.id,
+        level=CertificateLogLevel.INFO,
+        message=f"Certificate issuance started for {fqdn}",
+        details=f'{{"subdomain": "{subdomain}", "email": "{email or settings.ACME_EMAIL}"}}'
+    )
+    db.add(log_entry)
+    await db.commit()
+    
+    # Запускаем задачу выпуска в фоне через Celery
+    from app.tasks.certificate_tasks import issue_single_certificate
+    issue_single_certificate.delay(cert.id, email)
+    
+    return JSONResponse({
+        "status": "pending",
+        "message": f"Certificate issuance started for {fqdn}",
+        "certificate_id": cert.id,
+        "fqdn": fqdn
+    })
+
+
+@router.get("/domains/{domain_id}/certificates/{cert_id}/logs")
+async def get_certificate_logs(
+    domain_id: int,
+    cert_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_optional_current_user)
+):
+    """Получить логи выдачи сертификата"""
+    from app.models.certificate_log import CertificateLog
+    
+    # Проверяем что сертификат принадлежит домену
+    cert_result = await db.execute(
+        select(Certificate).where(
+            Certificate.id == cert_id,
+            Certificate.domain_id == domain_id
+        )
+    )
+    cert = cert_result.scalar_one_or_none()
+    
+    if not cert:
+        raise HTTPException(status_code=404, detail="Certificate not found")
+    
+    # Получаем логи
+    logs_result = await db.execute(
+        select(CertificateLog)
+        .where(CertificateLog.certificate_id == cert_id)
+        .order_by(CertificateLog.created_at.asc())
+    )
+    logs = logs_result.scalars().all()
+    
+    return [
+        {
+            "id": log.id,
+            "level": log.level.value,
+            "message": log.message,
+            "details": log.details,
+            "created_at": log.created_at.isoformat()
+        }
+        for log in logs
+    ]
