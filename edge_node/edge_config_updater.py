@@ -375,10 +375,16 @@ class EdgeConfigUpdater:
                     return None
                 response.raise_for_status()
                 
-                # Inject global settings into config for template access
+                # Get config from response
                 config = response.json()
-                config['global_settings'] = config.get('global_settings', {})
-                config['global_settings']['acme_url'] = self.control_plane_url
+                
+                # Ensure global_settings exists
+                if 'global_settings' not in config:
+                    config['global_settings'] = {}
+                
+                # Set control_plane_url if not provided by API
+                if 'control_plane_url' not in config['global_settings']:
+                    config['global_settings']['control_plane_url'] = self.control_plane_url
                 
                 return config
         except Exception as e:

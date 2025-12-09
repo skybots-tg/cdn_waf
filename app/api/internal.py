@@ -280,7 +280,7 @@ async def get_edge_config(
             "log_level": "info",
             "worker_connections": 4096,
             "keepalive_timeout": 65,
-            "acme_url": "https://flarecloud.ru"
+            "control_plane_url": "https://flarecloud.ru"
         }
     }
 
