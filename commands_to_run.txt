@@ -1,0 +1,27 @@
+# ПРОБЛЕМА: В базе данных отсутствует значение 'failed' в enum certificatestatus
+# РЕШЕНИЕ: Применить миграцию базы данных
+
+# На центральном сервере (v856861849)
+cd ~/cdn_waf
+source venv/bin/activate
+
+# 1. Подтянуть последние изменения
+git pull
+
+# 2. ВАЖНО: Применить миграции Alembic (добавляет 'failed' в enum)
+alembic upgrade head
+
+# 3. Перезапустить сервисы
+systemctl restart cdn_app.service cdn_celery.service cdn_celery_beat.service
+
+# 4. Проверить, что миграция применилась успешно
+# Проверим текущий статус миграций
+alembic current
+
+# Проверим что enum содержит 'failed'
+psql -U cdn_user -d cdn_db -c "SELECT unnest(enum_range(NULL::certificatestatus));"
+
+# 5. Попробовать выпустить сертификат снова
+# Проверим логи celery
+journalctl -u cdn_celery -f --since '1 minute ago'
+

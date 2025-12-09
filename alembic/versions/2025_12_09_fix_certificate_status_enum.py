@@ -19,18 +19,18 @@ def upgrade():
     # Add 'failed' value to certificatestatus enum if not exists
     # PostgreSQL requires special handling for enum types
     
-    # First, check if the enum value already exists
-    connection = op.get_bind()
-    
-    # Try to add the new enum value
-    try:
-        # For PostgreSQL, use ALTER TYPE to add new enum value
-        connection.execute(sa.text(
-            "ALTER TYPE certificatestatus ADD VALUE IF NOT EXISTS 'failed'"
-        ))
-    except Exception as e:
-        # If it fails, the value might already exist - that's OK
-        print(f"Note: Could not add 'failed' to enum (might already exist): {e}")
+    # Use execute with proper isolation level for ALTER TYPE
+    # This needs to be done outside of a transaction
+    with op.get_context().autocommit_block():
+        op.execute(
+            "DO $$ BEGIN "
+            "IF NOT EXISTS (SELECT 1 FROM pg_enum e "
+            "JOIN pg_type t ON e.enumtypid = t.oid "
+            "WHERE t.typname = 'certificatestatus' AND e.enumlabel = 'failed') THEN "
+            "ALTER TYPE certificatestatus ADD VALUE 'failed'; "
+            "END IF; "
+            "END $$;"
+        )
 
 
 def downgrade():
