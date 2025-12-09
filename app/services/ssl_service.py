@@ -305,18 +305,8 @@ class SSLService:
             # 6. Set Challenge Token/Response
             response, validation = http_challenge.response_and_validation(acc_key)
             
-            token_raw = http_challenge.chall.token
-            if isinstance(token_raw, bytes):
-                # ACME token уже пригоден для URL, просто декодируем
-                token_str = token_raw.decode("ascii")
-            else:
-                token_str = str(token_raw)
-            
-            # Validation might be bytes from josepy, decode it
-            if isinstance(validation, bytes):
-                validation_str = validation.decode('utf-8')
-            else:
-                validation_str = str(validation)
+            token_str = SSLService._http01_token_str(http_challenge)
+            validation_str = SSLService._http01_validation_str(validation)
             
             logger.info(f"Storing challenge token: {token_str[:30]}... for domain {authz.identifier.value}")
             logger.info(f"Full token: {token_str}")
@@ -502,6 +492,38 @@ class SSLService:
         
         result = await db.execute(query)
         return list(result.scalars().all())
+    
+    @staticmethod
+    def _http01_token_str(http_challenge) -> str:
+        """
+        Вернуть токен HTTP-01 в том виде, в каком его видит ACME-сервер:
+        base64url без '='. Совместимо с текущими версиями acme-python.
+        """
+        # нам может прийти ChallengeBody (authz.challenges[i]) или сам HTTP01
+        chall = getattr(http_challenge, "chall", http_challenge)
+
+        # Нормальный путь — использовать encode("token"), как в acme.standalone.HTTP01RequestHandler
+        try:
+            token = chall.encode("token")  # вернёт base64url-строку для поля token
+            if isinstance(token, bytes):
+                return token.decode("ascii")
+            return token
+        except Exception:
+            # Фолбэк на случай странной версии/реализации
+            token_raw = getattr(chall, "token", None)
+            if isinstance(token_raw, bytes):
+                # base64url без padding, как в ACME
+                return base64.urlsafe_b64encode(token_raw).decode("ascii").rstrip("=")
+            return str(token_raw)
+
+    @staticmethod
+    def _http01_validation_str(validation) -> str:
+        """
+        Привести validation (key-authorization) к str безопасно.
+        """
+        if isinstance(validation, bytes):
+            return validation.decode("utf-8", errors="ignore")
+        return str(validation)
     
     @staticmethod
     def _parse_certificate(cert_pem: str) -> dict:
@@ -840,17 +862,9 @@ class SSLService:
             # 6. Set Challenge Token/Response
             response, validation = http_challenge.response_and_validation(acc_key)
             
-            token_raw = http_challenge.chall.token
-            if isinstance(token_raw, bytes):
-                # ACME token уже пригоден для URL, просто декодируем
-                token_str = token_raw.decode("ascii")
-            else:
-                token_str = str(token_raw)
-            
-            if isinstance(validation, bytes):
-                validation_str = validation.decode('utf-8')
-            else:
-                validation_str = str(validation)
+            # Каноничный токен и validation с учётом байтов/строк
+            token_str = SSLService._http01_token_str(http_challenge)
+            validation_str = SSLService._http01_validation_str(validation)
             
             add_log(CertificateLogLevel.INFO, f"Storing HTTP-01 challenge token for domain {fqdn}")
             await db.commit()
