@@ -678,6 +678,20 @@ class SSLService:
                     )
                     add_log(CertificateLogLevel.INFO, "Using existing ACME account")
                     await db.commit()
+                except acme.errors.ConflictError as conflict_error:
+                    # Account already exists - this is fine, use the location from error
+                    logger.info(f"ACME account already exists (ConflictError): {conflict_error}")
+                    # ConflictError contains the account URL - use it to query the account
+                    account_uri = str(conflict_error).strip()
+                    regr = acme.messages.RegistrationResource(
+                        uri=account_uri,
+                        body=acme.messages.Registration.from_data(
+                            key=account_key.public_key(),
+                            contact=(f'mailto:{acme_email}',)
+                        )
+                    )
+                    add_log(CertificateLogLevel.INFO, "Using existing ACME account (resolved conflict)")
+                    await db.commit()
                 except Exception as account_error:
                     # If account doesn't exist, create a new one
                     if "accountDoesNotExist" in str(account_error):
@@ -698,14 +712,28 @@ class SSLService:
                         raise
             else:
                 # No existing key, create new account
-                regr = client.new_account(
-                    acme.messages.NewRegistration.from_data(
-                        email=acme_email,
-                        terms_of_service_agreed=True
+                try:
+                    regr = client.new_account(
+                        acme.messages.NewRegistration.from_data(
+                            email=acme_email,
+                            terms_of_service_agreed=True
+                        )
                     )
-                )
-                add_log(CertificateLogLevel.SUCCESS, f"ACME account registered with email: {acme_email}")
-                await db.commit()
+                    add_log(CertificateLogLevel.SUCCESS, f"ACME account registered with email: {acme_email}")
+                    await db.commit()
+                except acme.errors.ConflictError as conflict_error:
+                    # Account already exists - use the location from error
+                    logger.info(f"ACME account already exists (ConflictError): {conflict_error}")
+                    account_uri = str(conflict_error).strip()
+                    regr = acme.messages.RegistrationResource(
+                        uri=account_uri,
+                        body=acme.messages.Registration.from_data(
+                            key=account_key.public_key(),
+                            contact=(f'mailto:{acme_email}',)
+                        )
+                    )
+                    add_log(CertificateLogLevel.INFO, "Using existing ACME account (resolved conflict)")
+                    await db.commit()
         except Exception as e:
             # Final catch for any unexpected errors
             if regr is None:  # Only log if we couldn't create an account at all
