@@ -438,8 +438,8 @@ async def issue_subdomain_certificate(
     await db.refresh(cert)
     
     # Запускаем задачу выпуска в фоне через Celery
-    from app.tasks.certificate_tasks import issue_certificate
-    issue_certificate.delay(domain_id)
+    from app.tasks.certificate_tasks import issue_single_certificate
+    issue_single_certificate.delay(cert.id)
     
     return JSONResponse({
         "status": "pending",
