@@ -1,5 +1,5 @@
 """Main FastAPI application"""
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
@@ -78,14 +78,18 @@ async def health_check():
 
 
 @app.get("/.well-known/acme-challenge/{token}")
-async def acme_challenge(token: str):
+async def acme_challenge(token: str, request: Request):
     """Public ACME challenge endpoint for Let's Encrypt validation"""
     from fastapi.responses import PlainTextResponse
     from fastapi import HTTPException
     import logging
     
     logger = logging.getLogger(__name__)
-    logger.info(f"ACME challenge request for token: {token[:30]}...")
+    
+    # Log request details for debugging
+    forwarded_host = request.headers.get("x-forwarded-host", request.headers.get("host", "unknown"))
+    client_ip = request.headers.get("x-real-ip", request.client.host if request.client else "unknown")
+    logger.info(f"ACME challenge request for token: {token[:30]}... from {client_ip} for host: {forwarded_host}")
     
     validation = None
     if redis_client:
@@ -97,7 +101,13 @@ async def acme_challenge(token: str):
             logger.info(f"Returning validation response (length: {len(validation)})")
     
     if not validation:
-        logger.warning(f"Challenge token '{token}' not found in Redis")
+        # List available keys for debugging
+        if redis_client:
+            all_keys = await redis_client.keys("acme:challenge:*")
+            logger.warning(f"Challenge token '{token}' not found in Redis. Available keys: {len(all_keys)}")
+            if all_keys:
+                logger.warning(f"Sample keys: {[k.decode() if isinstance(k, bytes) else k for k in all_keys[:5]]}")
+        
         raise HTTPException(
             status_code=404,
             detail=f"Challenge token not found"

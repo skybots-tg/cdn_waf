@@ -1,7 +1,7 @@
 """Certificate issuance log models"""
 from datetime import datetime
 from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Text, Enum as SQLEnum
-from sqlalchemy.orm import relationship
+from sqlalchemy.orm import relationship, backref
 import enum
 
 from app.core.database import Base
@@ -29,5 +29,5 @@ class CertificateLog(Base):
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     
     # Relationships
-    certificate = relationship("Certificate", backref="logs")
+    certificate = relationship("Certificate", backref=backref("logs", cascade="all, delete-orphan"))
 

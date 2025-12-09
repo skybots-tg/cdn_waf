@@ -50,6 +50,31 @@ NGINX_TEMPLATE = Template("""
 # Version: {{ version|default('unknown') }}
 # Generated at: {{ timestamp|default('') }}
 
+# Default server for ACME challenges (handles requests for unconfigured domains)
+server {
+    listen 80 default_server;
+    listen 443 ssl default_server;
+    server_name _;
+    
+    # Dummy SSL certificate (required for default HTTPS server)
+    ssl_certificate /etc/ssl/certs/ssl-cert-snakeoil.pem;
+    ssl_certificate_key /etc/ssl/private/ssl-cert-snakeoil.key;
+    
+    # ACME Challenge support for any domain
+    location /.well-known/acme-challenge/ {
+        proxy_pass {{ global_settings.control_plane_url|default('https://flarecloud.ru') }}/.well-known/acme-challenge/;
+        proxy_set_header Host {{ global_settings.control_plane_url|default('https://flarecloud.ru')|replace('https://', '')|replace('http://', '') }};
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Host $host;
+    }
+    
+    # Return 404 for all other requests
+    location / {
+        return 404 "Domain not configured";
+    }
+}
+
 {% for domain in domains %}
 {% set safe_name = domain.name|replace('.', '_') %}
 {% set backend_protocol = 'https' if domain.tls_settings.mode in ['full', 'strict'] else 'http' %}
