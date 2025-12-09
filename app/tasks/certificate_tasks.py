@@ -63,10 +63,11 @@ def check_pending_certificates():
             try:
                 from app.models.certificate import Certificate, CertificateStatus
                 from app.models.certificate_log import CertificateLog, CertificateLogLevel
-                from datetime import datetime, timedelta, timezone
+                from datetime import datetime, timedelta
                 
                 # Find certificates that have been pending for more than 10 minutes
-                threshold_time = datetime.now(timezone.utc) - timedelta(minutes=10)
+                # Use naive datetime since database stores TIMESTAMP WITHOUT TIME ZONE
+                threshold_time = datetime.utcnow() - timedelta(minutes=10)
                 
                 result = await db.execute(
                     select(Certificate).where(
