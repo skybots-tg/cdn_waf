@@ -1,10 +1,12 @@
 """CDN settings API endpoints"""
 from typing import List
 from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.models.user import User
+from app.models.domain import Domain
 from app.schemas.cdn import (
     CacheRuleCreate,
     CacheRuleUpdate,
@@ -347,15 +349,51 @@ async def get_tls_settings(
     current_user: User = Depends(get_current_active_user)
 ):
     """Get TLS settings for domain"""
-    # TODO: Get from domain model
+    from app.models.domain import DomainTLSSettings, TLSMode
+    
+    # Get TLS settings from database
+    result = await db.execute(
+        select(DomainTLSSettings).where(DomainTLSSettings.domain_id == domain_id)
+    )
+    tls_settings = result.scalar_one_or_none()
+    
+    # If settings don't exist, create default ones
+    if not tls_settings:
+        # Verify domain exists
+        domain_result = await db.execute(
+            select(Domain).where(Domain.id == domain_id)
+        )
+        domain = domain_result.scalar_one_or_none()
+        if not domain:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Domain not found"
+            )
+        
+        # Create default TLS settings
+        tls_settings = DomainTLSSettings(
+            domain_id=domain_id,
+            mode=TLSMode.FLEXIBLE,
+            force_https=False,  # Important: disable by default to avoid redirect loop
+            hsts_enabled=False,
+            hsts_max_age=31536000,
+            hsts_include_subdomains=False,
+            hsts_preload=False,
+            min_tls_version="1.2",
+            auto_certificate=True
+        )
+        db.add(tls_settings)
+        await db.commit()
+        await db.refresh(tls_settings)
+    
     return TLSSettingsResponse(
-        mode="flexible",
-        force_https=True,
-        hsts_enabled=False,
-        hsts_max_age=31536000,
-        hsts_include_subdomains=False,
-        hsts_preload=False,
-        min_tls_version="1.2"
+        mode=tls_settings.mode.value,
+        force_https=tls_settings.force_https,
+        hsts_enabled=tls_settings.hsts_enabled,
+        hsts_max_age=tls_settings.hsts_max_age,
+        hsts_include_subdomains=tls_settings.hsts_include_subdomains,
+        hsts_preload=tls_settings.hsts_preload,
+        min_tls_version=tls_settings.min_tls_version
     )
 
 

@@ -574,18 +574,31 @@ class SSLService:
         settings: dict
     ) -> bool:
         """Update TLS settings for domain"""
-        domain = await db.execute(
-            select(Domain).where(Domain.id == domain_id)
+        from app.models.domain import DomainTLSSettings
+        
+        # Get or create TLS settings
+        result = await db.execute(
+            select(DomainTLSSettings).where(DomainTLSSettings.domain_id == domain_id)
         )
-        domain = domain.scalar_one_or_none()
+        tls_settings = result.scalar_one_or_none()
         
-        if not domain:
-            return False
+        if not tls_settings:
+            # Verify domain exists
+            domain_result = await db.execute(
+                select(Domain).where(Domain.id == domain_id)
+            )
+            domain = domain_result.scalar_one_or_none()
+            if not domain:
+                return False
+            
+            # Create TLS settings if they don't exist
+            tls_settings = DomainTLSSettings(domain_id=domain_id)
+            db.add(tls_settings)
         
-        # Update domain TLS settings
+        # Update TLS settings
         for key, value in settings.items():
-            if hasattr(domain, key):
-                setattr(domain, key, value)
+            if hasattr(tls_settings, key):
+                setattr(tls_settings, key, value)
         
         await db.commit()
         return True

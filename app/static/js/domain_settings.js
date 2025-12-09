@@ -339,7 +339,11 @@ async function saveTLSSettings() {
         if (!response.ok) throw new Error('Failed to save settings');
         
         showNotification('TLS settings saved', 'success');
+        
+        // Reload settings to show updated values from server
+        await loadTLSSettings();
     } catch (error) {
+        console.error('Error saving TLS settings:', error);
         showNotification('Failed to save TLS settings', 'error');
     }
 }
