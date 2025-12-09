@@ -535,12 +535,11 @@ async def get_available_certificates(
     if not domain:
         raise HTTPException(status_code=404, detail="Domain not found")
     
-    # Получаем все проксируемые DNS записи типа A
+    # Получаем все DNS записи типа A (и проксированные и нет)
     dns_result = await db.execute(
         select(DNSRecord).where(
             DNSRecord.domain_id == domain_id,
-            DNSRecord.type == "A",
-            DNSRecord.proxied == True
+            DNSRecord.type == "A"
         )
     )
     dns_records = dns_result.scalars().all()
@@ -560,24 +559,43 @@ async def get_available_certificates(
         if cert.common_name:
             covered_domains.add(cert.common_name)
     
-    # Формируем список доступных к выдаче на основе DNS записей
+    # Группируем DNS записи по subdomain (чтобы избежать дубликатов)
+    subdomains_map = {}
+    for record in dns_records:
+        if record.name not in subdomains_map:
+            subdomains_map[record.name] = {
+                "proxied": record.proxied,
+                "dns_record_id": record.id,
+                "count": 1
+            }
+        else:
+            # Если есть хотя бы одна проксированная запись - считаем что subdomain проксирован
+            if record.proxied:
+                subdomains_map[record.name]["proxied"] = True
+            subdomains_map[record.name]["count"] += 1
+    
+    # Формируем список доступных к выдаче
     available = []
     
-    for record in dns_records:
+    for subdomain, info in subdomains_map.items():
         # Формируем FQDN
-        if record.name == "@":
+        if subdomain == "@":
             fqdn = domain.name
         else:
-            fqdn = f"{record.name}.{domain.name}"
+            fqdn = f"{subdomain}.{domain.name}"
         
         # Проверяем что для этого FQDN нет сертификата
         if fqdn not in covered_domains:
             available.append({
-                "subdomain": record.name,
+                "subdomain": subdomain,
                 "fqdn": fqdn,
-                "dns_record_id": record.id,
-                "proxied": record.proxied
+                "dns_record_id": info["dns_record_id"],
+                "proxied": info["proxied"],
+                "records_count": info["count"]
             })
+    
+    # Сортируем: сначала @, потом остальные по алфавиту
+    available.sort(key=lambda x: (x["subdomain"] != "@", x["subdomain"]))
     
     return available
 
