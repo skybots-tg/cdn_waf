@@ -43,4 +43,8 @@ celery_app.conf.beat_schedule = {
         "task": "app.tasks.dns.sync_dns_nodes",
         "schedule": crontab(minute="*/10"),
     },
+    "check-pending-certificates-every-5-min": {
+        "task": "app.tasks.certificate.check_pending_certificates",
+        "schedule": crontab(minute="*/5"),
+    },
 }

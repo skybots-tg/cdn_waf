@@ -50,6 +50,61 @@ def check_expiring_certificates():
     return {"status": "success", "checked": 0}
 
 
+@celery_app.task(name="app.tasks.certificate.check_pending_certificates")
+def check_pending_certificates():
+    """Check for certificates stuck in pending status and mark them as failed"""
+    logger.info("Checking pending certificates")
+    
+    async def _check():
+        from app.core.redis import redis_client
+        await redis_client.connect()
+        
+        async with AsyncSessionLocal() as db:
+            try:
+                from app.models.certificate import Certificate, CertificateStatus
+                from app.models.certificate_log import CertificateLog, CertificateLogLevel
+                from datetime import datetime, timedelta, timezone
+                
+                # Find certificates that have been pending for more than 10 minutes
+                threshold_time = datetime.now(timezone.utc) - timedelta(minutes=10)
+                
+                result = await db.execute(
+                    select(Certificate).where(
+                        Certificate.status == CertificateStatus.PENDING,
+                        Certificate.created_at < threshold_time
+                    )
+                )
+                pending_certs = result.scalars().all()
+                
+                failed_count = 0
+                for cert in pending_certs:
+                    logger.warning(f"Certificate {cert.id} ({cert.common_name}) stuck in PENDING status, marking as FAILED")
+                    cert.status = CertificateStatus.FAILED
+                    
+                    # Add log entry
+                    log_entry = CertificateLog(
+                        certificate_id=cert.id,
+                        level=CertificateLogLevel.ERROR,
+                        message="Certificate issuance failed due to timeout",
+                        details="Certificate was stuck in PENDING status for more than 10 minutes"
+                    )
+                    db.add(log_entry)
+                    failed_count += 1
+                
+                await db.commit()
+                logger.info(f"Checked pending certificates: {len(pending_certs)} found, {failed_count} marked as failed")
+                return {"status": "success", "checked": len(pending_certs), "failed": failed_count}
+                
+            except Exception as e:
+                logger.error(f"Failed to check pending certificates: {e}", exc_info=True)
+                return {"status": "error", "error": str(e)}
+            finally:
+                await redis_client.disconnect()
+    
+    loop = asyncio.get_event_loop()
+    return loop.run_until_complete(_check())
+
+
 @celery_app.task(name="app.tasks.certificate.issue_single_certificate")
 def issue_single_certificate(certificate_id: int, email: str = None):
     """Issue SSL certificate for a specific subdomain using ACME"""

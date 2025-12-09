@@ -634,15 +634,14 @@ async def issue_certificate_for_subdomain(
             select(DNSRecord).where(
                 DNSRecord.domain_id == domain_id,
                 DNSRecord.name == subdomain,
-                DNSRecord.type == "A",
-                DNSRecord.proxied == True
+                DNSRecord.type == "A"
             )
         )
         dns_record = dns_result.scalar_one_or_none()
         if not dns_record:
             raise HTTPException(
                 status_code=404, 
-                detail=f"Proxied DNS A record '{subdomain}' not found"
+                detail=f"DNS A record '{subdomain}' not found"
             )
         
         fqdn = f"{subdomain}.{domain.name}"
