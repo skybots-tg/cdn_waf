@@ -104,10 +104,23 @@ async def issue_certificate(fqdn: str, email: str = None):
                 
                 response = input("Delete existing certificates? [y/N]: ")
                 if response.lower() == 'y':
+                    # First delete certificate logs (due to NOT NULL constraint)
                     for cert in existing_certs:
+                        await db.execute(
+                            select(CertificateLog).where(CertificateLog.certificate_id == cert.id)
+                        )
+                        # Delete logs
+                        logs_result = await db.execute(
+                            select(CertificateLog).where(CertificateLog.certificate_id == cert.id)
+                        )
+                        logs = logs_result.scalars().all()
+                        for log in logs:
+                            await db.delete(log)
+                        # Then delete certificate
                         await db.delete(cert)
+                    
                     await db.commit()
-                    logger.info("✓ Existing certificates deleted")
+                    logger.info("✓ Existing certificates and logs deleted")
                 else:
                     logger.error("Cannot proceed with existing certificates")
                     return
