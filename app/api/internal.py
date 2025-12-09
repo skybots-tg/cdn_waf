@@ -466,14 +466,14 @@ async def get_acme_challenge(
 
 @router.get("/download/edge_config_updater.py", response_class=PlainTextResponse)
 async def download_edge_config_updater(
-    x_edge_node_key: str = Header(...)
+    node: EdgeNode = Depends(verify_edge_node)
 ):
     """Download latest edge_config_updater.py for edge nodes"""
     import logging
     from pathlib import Path
     
     logger = logging.getLogger(__name__)
-    logger.info(f"Edge node requesting edge_config_updater.py download")
+    logger.info(f"Edge node {node.name} requesting edge_config_updater.py download")
     
     # Simple authentication via shared key (from config.yaml on edge node)
     # You could also use verify_edge_node dependency, but this is simpler

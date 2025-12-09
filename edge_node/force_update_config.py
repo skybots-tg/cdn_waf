@@ -45,7 +45,8 @@ async def update_code_and_config():
     download_url = f"{control_plane_url}/internal/edge/download/edge_config_updater.py"
     
     headers = {
-        "X-Edge-Node-Key": api_key
+        "X-Node-Id": str(node_id),
+        "X-Node-Token": api_key
     }
     
     try:
