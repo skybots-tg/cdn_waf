@@ -117,18 +117,11 @@ server {
 
     # ACME Challenge support (HTTP-01)
     location /.well-known/acme-challenge/ {
-        # Proxy to control plane or serve from shared dir
-        # For simplicity, assume we use a central acme server (control plane)
-        # You need to replace this IP/URL with your actual ACME handler location
-        # OR implement local handling.
-        
-        # OPTION 1: Proxy to Control Plane (easiest central management)
-        # We need the control plane URL from config, but here we are in Jinja template.
-        # We can pass it in context.
-        
-        # Hardcoded fallback if not provided
-        proxy_pass {{ global_settings.acme_url|default('http://127.0.0.1:8000') }}/internal/edge/acme-challenge/;
+        # Proxy to control plane public endpoint (no auth required)
+        proxy_pass {{ global_settings.control_plane_url|default('http://188.116.24.50:2000') }}/.well-known/acme-challenge/;
         proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
     }
 }
 # HTTP server for ACME challenges (always present when TLS enabled)
@@ -139,7 +132,8 @@ server {
     
     # ACME Challenge support (HTTP-01)
     location /.well-known/acme-challenge/ {
-        proxy_pass {{ global_settings.acme_url|default('http://127.0.0.1:8000') }}/internal/edge/acme-challenge/;
+        # Proxy to control plane public endpoint (no auth required)
+        proxy_pass {{ global_settings.control_plane_url|default('http://188.116.24.50:2000') }}/.well-known/acme-challenge/;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
@@ -203,7 +197,8 @@ server {
 
     # ACME Challenge support (HTTP-01)
     location /.well-known/acme-challenge/ {
-        proxy_pass {{ global_settings.acme_url|default('http://127.0.0.1:8000') }}/internal/edge/acme-challenge/;
+        # Proxy to control plane public endpoint (no auth required)
+        proxy_pass {{ global_settings.control_plane_url|default('http://188.116.24.50:2000') }}/.well-known/acme-challenge/;
         proxy_set_header Host $host;
     }
 }
