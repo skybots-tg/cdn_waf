@@ -188,44 +188,42 @@ async def issue_certificate(fqdn: str, email: str = None):
             # Register or query account
             logger.info("Registering/querying ACME account...")
             import acme.errors
-            regr = None
             
+            # Try to register account - if it exists, we'll get ConflictError with the account URI
             try:
-                # Try to query existing account first
-                if account_key_path.exists():
-                    logger.info("Querying existing ACME account...")
-                    try:
-                        regr = client.new_account(
-                            acme.messages.NewRegistration.from_data(
-                                email=acme_email,
-                                terms_of_service_agreed=True,
-                                only_return_existing=True
-                            )
-                        )
-                        logger.info(f"✓ Using existing ACME account: {regr.uri}")
-                    except acme.errors.ConflictError as conflict:
-                        # Account exists but we got conflict - this is fine, we can continue
-                        logger.info(f"✓ ACME account already registered (conflict resolved)")
-                        # We can still use the client, just don't have regr object
-                        regr = True  # Mark as successful
-                    except Exception as account_error:
-                        if "accountDoesNotExist" in str(account_error):
-                            logger.info("Account doesn't exist, will create new one...")
-                            regr = None
-                        else:
-                            raise
+                logger.info("Attempting to register ACME account...")
+                regr = client.new_account(
+                    acme.messages.NewRegistration.from_data(
+                        email=acme_email,
+                        terms_of_service_agreed=True
+                    )
+                )
+                logger.info(f"✓ New ACME account created: {regr.uri}")
+            except acme.errors.ConflictError as conflict:
+                # Account already exists - extract URI from conflict error
+                account_uri = str(conflict)
+                logger.info(f"Account already exists, using URI: {account_uri}")
                 
-                # If no existing account, create new one
-                if not regr:
-                    logger.info("Creating new ACME account...")
-                    regr = client.new_account(
-                        acme.messages.NewRegistration.from_data(
-                            email=acme_email,
-                            terms_of_service_agreed=True
+                # Query the existing account
+                try:
+                    regr = client.query_registration(
+                        acme.messages.RegistrationResource(
+                            uri=account_uri,
+                            body=acme.messages.Registration()
                         )
                     )
-                    logger.info(f"✓ New ACME account created: {regr.uri}")
-                    
+                    logger.info(f"✓ Using existing ACME account: {regr.uri}")
+                except Exception as query_error:
+                    logger.warning(f"Failed to query account: {query_error}")
+                    # Create a minimal registration resource with just the URI
+                    # The client will use this for the kid header
+                    regr = acme.messages.RegistrationResource(
+                        uri=account_uri,
+                        body=acme.messages.Registration()
+                    )
+                    # Update the client's network to use this registration
+                    client.net.account = regr
+                    logger.info(f"✓ Using account URI from conflict: {account_uri}")
             except Exception as e:
                 logger.error(f"Failed to setup ACME account: {e}")
                 raise
@@ -474,4 +472,5 @@ if __name__ == "__main__":
     email = sys.argv[2] if len(sys.argv) > 2 else None
     
     asyncio.run(issue_certificate(fqdn, email))
+
 
