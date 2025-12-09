@@ -311,8 +311,14 @@ function renderDNSRecords(records) {
                 ` : '<span class="text-secondary">-</span>'}
             </td>
             <td>
-                <button onclick="editRecord(${record.id})" class="btn btn-sm btn-secondary">Edit</button>
-                <button onclick="deleteRecord(${record.id})" class="btn btn-sm btn-secondary">Delete</button>
+                <div class="flex gap-1">
+                    <button onclick="editRecord(${record.id})" class="btn btn-icon btn-sm btn-secondary" title="Edit">
+                        <i class="fas fa-edit"></i>
+                    </button>
+                    <button onclick="deleteRecord(${record.id})" class="btn btn-icon btn-sm" style="background: var(--error); color: white;" title="Delete">
+                        <i class="fas fa-trash"></i>
+                    </button>
+                </div>
             </td>
         </tr>
     `).join('');

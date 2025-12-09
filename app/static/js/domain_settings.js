@@ -674,9 +674,12 @@ async function showCertificateLogs(certId) {
                         }
                     </div>
                     
-                    <div style="margin-top: 16px; text-align: center;">
+                    <div style="margin-top: 16px; display: flex; gap: 8px; justify-content: center;">
                         <button class="btn btn-secondary btn-sm" onclick="refreshCertificateLogs(${certId})">
-                            <i class="fas fa-sync"></i> Refresh Logs
+                            <i class="fas fa-sync"></i> Refresh
+                        </button>
+                        <button class="btn btn-secondary btn-sm" onclick="copyCertificateLogs(${certId})">
+                            <i class="fas fa-copy"></i> Copy Logs
                         </button>
                     </div>
                 </div>
@@ -707,6 +710,35 @@ async function showCertificateLogs(certId) {
 async function refreshCertificateLogs(certId) {
     closeModal();
     setTimeout(() => showCertificateLogs(certId), 100);
+}
+
+async function copyCertificateLogs(certId) {
+    try {
+        const response = await fetch(`/api/v1/domains/${DOMAIN_ID}/certificates/${certId}/logs`, {
+            headers: { 'Authorization': `Bearer ${getToken()}` }
+        });
+        
+        if (!response.ok) throw new Error('Failed to load logs');
+        
+        const logs = await response.json();
+        
+        // Format logs as text
+        const logsText = logs.map(log => {
+            const timestamp = new Date(log.created_at).toLocaleString();
+            let text = `[${timestamp}] ${log.level.toUpperCase()}: ${log.message}`;
+            if (log.details) {
+                text += `\n  Details: ${log.details}`;
+            }
+            return text;
+        }).join('\n\n');
+        
+        // Copy to clipboard
+        await navigator.clipboard.writeText(logsText);
+        showNotification('Logs copied to clipboard!', 'success');
+    } catch (error) {
+        showNotification('Failed to copy logs', 'error');
+        console.error(error);
+    }
 }
 
 function closeModal() {
