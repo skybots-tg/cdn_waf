@@ -234,6 +234,10 @@
         document.getElementById('modal-title').textContent = 'Add DNS Record';
         document.getElementById('btn-save-record').innerHTML = '<i class="fas fa-save"></i> Save Record';
         document.getElementById('record-id').value = '';
+        
+        // Set default values for new record
+        document.getElementById('record-proxied').checked = true;
+        updateProxyVisuals(true);
     }
     
     function closeAddRecordModal() {
@@ -273,10 +277,7 @@
             proxySwitch.checked = false;
             updateProxyVisuals(false);
         } else {
-            // Restore default or previous state if needed, for now default to checked for A/CNAME
-            if (!proxySwitch.checked && canProxy) {
-                proxySwitch.checked = true; 
-            }
+            // Just update visuals based on current checkbox state
             updateProxyVisuals(proxySwitch.checked);
         }
     }
@@ -329,11 +330,12 @@
                 document.getElementById('record-priority').value = record.priority;
             }
             
-            // Handle proxied
+            // Handle proxied - set BEFORE calling handleTypeChange()
             document.getElementById('record-proxied').checked = record.proxied;
             
-            // Update visuals
+            // Update visuals - this will now respect the checkbox value we just set
             handleTypeChange();
+            updateProxyVisuals(record.proxied);
             
             // Set modal to Edit mode
             document.getElementById('modal-title').textContent = 'Edit DNS Record';

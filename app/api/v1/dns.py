@@ -174,6 +174,9 @@ async def update_dns_record(
     # Update fields
     update_data = record_update.model_dump(exclude_unset=True)
     
+    # Filter out None values to prevent NULL constraint violations
+    update_data = {k: v for k, v in update_data.items() if v is not None}
+    
     # Normalize name if present
     if "name" in update_data:
         # We need domain to normalize
