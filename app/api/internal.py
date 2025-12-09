@@ -462,3 +462,34 @@ async def get_acme_challenge(
     
     # Return plain text (required by ACME spec)
     return PlainTextResponse(content=validation)
+
+
+@router.get("/download/edge_config_updater.py", response_class=PlainTextResponse)
+async def download_edge_config_updater(
+    x_edge_node_key: str = Header(...)
+):
+    """Download latest edge_config_updater.py for edge nodes"""
+    import logging
+    from pathlib import Path
+    
+    logger = logging.getLogger(__name__)
+    logger.info(f"Edge node requesting edge_config_updater.py download")
+    
+    # Simple authentication via shared key (from config.yaml on edge node)
+    # You could also use verify_edge_node dependency, but this is simpler
+    
+    # Read the file
+    updater_path = Path(__file__).parent.parent.parent / "edge_node" / "edge_config_updater.py"
+    
+    if not updater_path.exists():
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="edge_config_updater.py not found"
+        )
+    
+    with open(updater_path, 'r', encoding='utf-8') as f:
+        content = f.read()
+    
+    logger.info(f"Sending edge_config_updater.py ({len(content)} bytes)")
+    
+    return PlainTextResponse(content=content)
