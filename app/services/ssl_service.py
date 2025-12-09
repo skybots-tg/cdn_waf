@@ -824,11 +824,21 @@ class SSLService:
                 return
 
             # 7. Trigger Validation
-            add_log(CertificateLogLevel.INFO, f"Requesting ACME validation for {fqdn}")
+            challenge_url = f"http://{fqdn}/.well-known/acme-challenge/{token_str}"
+            add_log(
+                CertificateLogLevel.INFO, 
+                f"Requesting ACME validation for {fqdn}",
+                f"Let's Encrypt will check: {challenge_url}"
+            )
             await db.commit()
+            
+            logger.info(f"Let's Encrypt will validate: {challenge_url}")
+            logger.info(f"Expected validation response: {validation_str[:50]}...")
             
             try:
                 client.answer_challenge(http_challenge, response)
+                add_log(CertificateLogLevel.INFO, f"Challenge answer sent to ACME server")
+                await db.commit()
             except Exception as e:
                 logger.error(f"Failed to answer challenge: {e}", exc_info=True)
                 add_log(CertificateLogLevel.ERROR, f"Failed to answer challenge: {str(e)}")
@@ -843,8 +853,24 @@ class SSLService:
                 try:
                     response = client._post_as_get(authz_url)
                     authz_status = acme.messages.Authorization.from_json(response.json())
+                    
+                    logger.info(f"Validation attempt {attempt + 1}/10: status={authz_status.status}")
+                    
+                    # Log detailed error information if validation fails
+                    if authz_status.status == acme.messages.STATUS_INVALID:
+                        for chall in authz_status.challenges:
+                            if hasattr(chall, 'error') and chall.error:
+                                logger.error(f"Challenge error: {chall.error}")
+                                add_log(
+                                    CertificateLogLevel.ERROR,
+                                    f"ACME validation error: {chall.error.get('detail', str(chall.error))}",
+                                    str(chall.error)
+                                )
+                    
                 except Exception as e:
                     logger.error(f"Failed to check authorization status (attempt {attempt + 1}): {e}")
+                    add_log(CertificateLogLevel.WARNING, f"Failed to check status (attempt {attempt + 1}): {str(e)}")
+                    await db.commit()
                     continue
                 
                 if authz_status.status == acme.messages.STATUS_VALID:
@@ -855,17 +881,21 @@ class SSLService:
                 elif authz_status.status == acme.messages.STATUS_INVALID:
                     logger.error(f"Authorization failed for {fqdn}: {authz_status}")
                     cert.status = CertificateStatus.FAILED
-                    add_log(CertificateLogLevel.ERROR, f"Authorization failed for {fqdn}", str(authz_status))
+                    add_log(CertificateLogLevel.ERROR, f"Authorization INVALID for {fqdn}", str(authz_status))
                     await db.commit()
                     return
                 
                 if attempt < 9:
-                    add_log(CertificateLogLevel.INFO, f"Waiting for validation (attempt {attempt + 1}/10)...")
+                    add_log(CertificateLogLevel.INFO, f"Waiting for validation (attempt {attempt + 1}/10), current status: {authz_status.status}")
                     await db.commit()
             else:
-                logger.error(f"Authorization timeout for {fqdn}")
+                logger.error(f"Authorization timeout for {fqdn} after 10 attempts")
                 cert.status = CertificateStatus.FAILED
-                add_log(CertificateLogLevel.ERROR, f"Authorization timeout for {fqdn}")
+                add_log(
+                    CertificateLogLevel.ERROR, 
+                    f"Authorization timeout for {fqdn}",
+                    f"Let's Encrypt could not validate {challenge_url}. Please ensure the domain points to this server and port 80 is accessible."
+                )
                 await db.commit()
                 return
 

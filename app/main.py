@@ -76,3 +76,37 @@ async def health_check():
     """Health check endpoint"""
     return {"status": "ok"}
 
+
+@app.get("/.well-known/acme-challenge/{token}")
+async def acme_challenge(token: str):
+    """Public ACME challenge endpoint for Let's Encrypt validation"""
+    from fastapi.responses import PlainTextResponse
+    from fastapi import HTTPException
+    import logging
+    
+    logger = logging.getLogger(__name__)
+    logger.info(f"ACME challenge request for token: {token[:30]}...")
+    
+    validation = None
+    if redis_client:
+        key = f"acme:challenge:{token}"
+        validation = await redis_client.get(key)
+        logger.info(f"Redis lookup for key: {key}, found: {validation is not None}")
+        
+        if validation:
+            logger.info(f"Returning validation response (length: {len(validation)})")
+    
+    if not validation:
+        # List all keys for debugging
+        if redis_client:
+            all_keys = await redis_client.keys("acme:challenge:*")
+            logger.warning(f"Challenge token not found! Available keys: {all_keys}")
+        
+        raise HTTPException(
+            status_code=404,
+            detail=f"Challenge token not found"
+        )
+    
+    # Return plain text (required by ACME spec)
+    return PlainTextResponse(content=validation)
+
