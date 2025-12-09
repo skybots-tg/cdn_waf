@@ -187,18 +187,37 @@ async def issue_certificate(fqdn: str, email: str = None):
             
             # Register or query account
             logger.info("Registering/querying ACME account...")
+            import acme.errors
+            regr = None
+            
             try:
-                regr = client.new_account(
-                    acme.messages.NewRegistration.from_data(
-                        email=acme_email,
-                        terms_of_service_agreed=True,
-                        only_return_existing=account_key_path.exists()
-                    )
-                )
-                logger.info(f"✓ ACME account ready: {regr.uri}")
-            except Exception as e:
-                if "accountDoesNotExist" in str(e):
-                    logger.info("Account doesn't exist, creating new one...")
+                # Try to query existing account first
+                if account_key_path.exists():
+                    logger.info("Querying existing ACME account...")
+                    try:
+                        regr = client.new_account(
+                            acme.messages.NewRegistration.from_data(
+                                email=acme_email,
+                                terms_of_service_agreed=True,
+                                only_return_existing=True
+                            )
+                        )
+                        logger.info(f"✓ Using existing ACME account: {regr.uri}")
+                    except acme.errors.ConflictError as conflict:
+                        # Account exists but we got conflict - this is fine, we can continue
+                        logger.info(f"✓ ACME account already registered (conflict resolved)")
+                        # We can still use the client, just don't have regr object
+                        regr = True  # Mark as successful
+                    except Exception as account_error:
+                        if "accountDoesNotExist" in str(account_error):
+                            logger.info("Account doesn't exist, will create new one...")
+                            regr = None
+                        else:
+                            raise
+                
+                # If no existing account, create new one
+                if not regr:
+                    logger.info("Creating new ACME account...")
                     regr = client.new_account(
                         acme.messages.NewRegistration.from_data(
                             email=acme_email,
@@ -206,8 +225,10 @@ async def issue_certificate(fqdn: str, email: str = None):
                         )
                     )
                     logger.info(f"✓ New ACME account created: {regr.uri}")
-                else:
-                    raise
+                    
+            except Exception as e:
+                logger.error(f"Failed to setup ACME account: {e}")
+                raise
             
             # Generate certificate key and CSR
             logger.info("\n[8/12] Generating certificate key and CSR...")
