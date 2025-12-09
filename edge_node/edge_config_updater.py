@@ -118,7 +118,7 @@ server {
     # ACME Challenge support (HTTP-01)
     location /.well-known/acme-challenge/ {
         # Proxy to control plane public endpoint (no auth required)
-        proxy_pass {{ global_settings.control_plane_url|default('http://188.116.24.50:2000') }}/.well-known/acme-challenge/;
+        proxy_pass {{ global_settings.control_plane_url|default('https://flarecloud.ru') }}/.well-known/acme-challenge/;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
@@ -133,7 +133,7 @@ server {
     # ACME Challenge support (HTTP-01)
     location /.well-known/acme-challenge/ {
         # Proxy to control plane public endpoint (no auth required)
-        proxy_pass {{ global_settings.control_plane_url|default('http://188.116.24.50:2000') }}/.well-known/acme-challenge/;
+        proxy_pass {{ global_settings.control_plane_url|default('https://flarecloud.ru') }}/.well-known/acme-challenge/;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
@@ -198,7 +198,7 @@ server {
     # ACME Challenge support (HTTP-01)
     location /.well-known/acme-challenge/ {
         # Proxy to control plane public endpoint (no auth required)
-        proxy_pass {{ global_settings.control_plane_url|default('http://188.116.24.50:2000') }}/.well-known/acme-challenge/;
+        proxy_pass {{ global_settings.control_plane_url|default('https://flarecloud.ru') }}/.well-known/acme-challenge/;
         proxy_set_header Host $host;
     }
 }
