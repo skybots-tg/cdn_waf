@@ -47,4 +47,8 @@ celery_app.conf.beat_schedule = {
         "task": "app.tasks.certificate.check_pending_certificates",
         "schedule": crontab(minute="*/5"),
     },
+    "check-expiring-certificates-every-hour": {
+        "task": "app.tasks.certificate.check_expiring_certificates",
+        "schedule": crontab(minute=0),  # Every hour at :00
+    },
 }

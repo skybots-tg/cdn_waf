@@ -738,3 +738,135 @@ async def get_certificate_logs(
         }
         for log in logs
     ]
+
+
+@router.post("/{domain_id}/certificates/{cert_id}/renew")
+async def renew_certificate(
+    domain_id: int,
+    cert_id: int,
+    force: bool = True,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_optional_current_user)
+):
+    """
+    Принудительно перевыпустить сертификат
+    
+    Args:
+        domain_id: ID домена
+        cert_id: ID сертификата
+        force: Принудительный перевыпуск независимо от срока действия (по умолчанию True)
+    """
+    from app.models.certificate_log import CertificateLog, CertificateLogLevel
+    from app.models.certificate import CertificateType
+    
+    # Проверяем что сертификат принадлежит домену
+    cert_result = await db.execute(
+        select(Certificate).where(
+            Certificate.id == cert_id,
+            Certificate.domain_id == domain_id
+        )
+    )
+    cert = cert_result.scalar_one_or_none()
+    
+    if not cert:
+        raise HTTPException(status_code=404, detail="Certificate not found")
+    
+    # Проверяем тип сертификата
+    if cert.type != CertificateType.ACME:
+        raise HTTPException(
+            status_code=400, 
+            detail="Only ACME (Let's Encrypt) certificates can be renewed automatically"
+        )
+    
+    # Проверяем статус - должен быть ISSUED
+    if cert.status != CertificateStatus.ISSUED:
+        raise HTTPException(
+            status_code=400, 
+            detail=f"Cannot renew certificate with status '{cert.status.value}'. Only issued certificates can be renewed."
+        )
+    
+    # Проверяем нет ли уже pending перевыпуска
+    pending_result = await db.execute(
+        select(Certificate).where(
+            Certificate.domain_id == domain_id,
+            Certificate.common_name == cert.common_name,
+            Certificate.status == CertificateStatus.PENDING
+        )
+    )
+    pending_cert = pending_result.scalar_one_or_none()
+    if pending_cert:
+        raise HTTPException(
+            status_code=400,
+            detail="Certificate renewal already in progress"
+        )
+    
+    # Создаем новый сертификат для перевыпуска
+    new_cert = Certificate(
+        domain_id=cert.domain_id,
+        type=CertificateType.ACME,
+        status=CertificateStatus.PENDING,
+        common_name=cert.common_name,
+        auto_renew=cert.auto_renew,
+        renew_before_days=cert.renew_before_days,
+        acme_challenge_type="http-01"
+    )
+    db.add(new_cert)
+    await db.commit()
+    await db.refresh(new_cert)
+    
+    # Добавляем лог
+    log_entry = CertificateLog(
+        certificate_id=new_cert.id,
+        level=CertificateLogLevel.INFO,
+        message=f"Manual certificate renewal triggered for {cert.common_name}",
+        details=f'{{"old_certificate_id": {cert.id}, "force": {str(force).lower()}}}'
+    )
+    db.add(log_entry)
+    await db.commit()
+    
+    # Запускаем задачу перевыпуска в фоне
+    from app.tasks.certificate_tasks import issue_single_certificate
+    issue_single_certificate.delay(new_cert.id)
+    
+    return JSONResponse({
+        "status": "pending",
+        "message": f"Certificate renewal started for {cert.common_name}",
+        "old_certificate_id": cert.id,
+        "new_certificate_id": new_cert.id,
+        "common_name": cert.common_name
+    })
+
+
+@router.get("/{domain_id}/certificates/{cert_id}")
+async def get_certificate(
+    domain_id: int,
+    cert_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_optional_current_user)
+):
+    """Получить информацию о сертификате"""
+    cert_result = await db.execute(
+        select(Certificate).where(
+            Certificate.id == cert_id,
+            Certificate.domain_id == domain_id
+        )
+    )
+    cert = cert_result.scalar_one_or_none()
+    
+    if not cert:
+        raise HTTPException(status_code=404, detail="Certificate not found")
+    
+    return {
+        "id": cert.id,
+        "common_name": cert.common_name,
+        "status": cert.status.value,
+        "type": cert.type.value,
+        "issuer": cert.issuer,
+        "subject": cert.subject,
+        "not_before": cert.not_before.isoformat() if cert.not_before else None,
+        "not_after": cert.not_after.isoformat() if cert.not_after else None,
+        "auto_renew": cert.auto_renew,
+        "renew_before_days": cert.renew_before_days,
+        "last_renewed_at": cert.last_renewed_at.isoformat() if cert.last_renewed_at else None,
+        "created_at": cert.created_at.isoformat()
+    }

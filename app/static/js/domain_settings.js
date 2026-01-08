@@ -433,6 +433,7 @@ function renderCertificates(certs, available = []) {
             
             const expiryDate = cert.not_after ? new Date(cert.not_after).toLocaleDateString() : 'N/A';
             const isExpiringSoon = cert.not_after && new Date(cert.not_after) < new Date(Date.now() + 30*24*60*60*1000);
+            const daysUntilExpiry = cert.not_after ? Math.ceil((new Date(cert.not_after) - Date.now()) / (1000 * 60 * 60 * 24)) : null;
             
             html += `
             <div class="glass-card glass-card-sm mb-2">
@@ -441,9 +442,9 @@ function renderCertificates(certs, available = []) {
                         <div class="flex gap-2" style="align-items: center; margin-bottom: 8px;">
                             ${statusBadge}
                             <strong>${escapeHtml(cert.common_name || 'Unknown')}</strong>
-                            ${cert.status === 'issued' ? `
+                            ${cert.status === 'issued' && daysUntilExpiry !== null ? `
                                 <span style="font-size: 12px; color: ${isExpiringSoon ? 'var(--error)' : 'var(--text-secondary)'};">
-                                    ${isExpiringSoon ? '⚠️ ' : ''}Expires: ${expiryDate}
+                                    ${isExpiringSoon ? '⚠️ ' : ''}${daysUntilExpiry} days left (${expiryDate})
                                 </span>
                             ` : ''}
                         </div>
@@ -452,13 +453,24 @@ function renderCertificates(certs, available = []) {
                         </div>
                     </div>
                     <div class="flex gap-1">
-                        ${cert.status !== 'issued' ? `
+                        ${cert.status === 'issued' ? `
+                            <button class="btn btn-icon btn-sm btn-secondary" 
+                                    onclick="showCertificateDetails(${cert.id})" 
+                                    title="View Details">
+                                <i class="fas fa-info-circle"></i>
+                            </button>
+                            <button class="btn btn-icon btn-sm" style="background: var(--accent-secondary); color: white;" 
+                                    onclick="renewCertificate(${cert.id}, '${escapeHtml(cert.common_name)}')" 
+                                    title="Force Renewal">
+                                <i class="fas fa-sync"></i>
+                            </button>
+                        ` : `
                             <button class="btn btn-icon btn-sm btn-secondary" 
                                     onclick="showCertificateLogs(${cert.id})" 
                                     title="View Logs">
                                 <i class="fas fa-file-alt"></i>
                             </button>
-                        ` : ''}
+                        `}
                         <button class="btn btn-icon btn-sm" style="background: var(--error); color: white;" 
                                 onclick="deleteCertificate(${cert.id})" title="Delete">
                             <i class="fas fa-trash"></i>
@@ -528,6 +540,256 @@ async function deleteCertificate(certId) {
         loadCertificates();
     } catch (error) {
         showNotification('Failed to delete certificate', 'error');
+    }
+}
+
+async function renewCertificate(certId, commonName) {
+    const modal = document.createElement('div');
+    modal.className = 'modal-overlay';
+    modal.innerHTML = `
+        <div class="modal-content" style="max-width: 500px;">
+            <div class="modal-header">
+                <h3><i class="fas fa-sync"></i> Renew Certificate</h3>
+                <button class="modal-close" onclick="closeModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label class="form-label">Domain</label>
+                    <input type="text" class="form-input" value="${escapeHtml(commonName)}" readonly>
+                </div>
+                
+                <div style="background: var(--bg-tertiary); padding: 12px; border-radius: 8px; margin-bottom: 16px;">
+                    <p style="font-size: 13px; color: var(--text-secondary); margin: 0;">
+                        <i class="fas fa-info-circle"></i> This will request a new certificate from Let's Encrypt. 
+                        The current certificate will remain active until the new one is issued successfully.
+                    </p>
+                </div>
+                
+                <div style="background: var(--warning-bg, rgba(234, 179, 8, 0.1)); padding: 12px; border-radius: 8px; border: 1px solid var(--warning);">
+                    <p style="font-size: 13px; color: var(--warning); margin: 0;">
+                        <i class="fas fa-exclamation-triangle"></i> <strong>Note:</strong> Let's Encrypt has rate limits. 
+                        Avoid renewing certificates too frequently. Use this only when necessary.
+                    </p>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+                <button class="btn btn-primary" onclick="confirmRenewCertificate(${certId})">
+                    <i class="fas fa-sync"></i> Renew Now
+                </button>
+            </div>
+        </div>
+    `;
+    
+    document.body.appendChild(modal);
+    
+    modal.addEventListener('click', (e) => {
+        if (e.target === modal) closeModal();
+    });
+}
+
+async function confirmRenewCertificate(certId) {
+    closeModal();
+    showNotification('Starting certificate renewal...', 'info');
+    
+    try {
+        const response = await fetch(`/api/v1/domains/${DOMAIN_ID}/certificates/${certId}/renew?force=true`, {
+            method: 'POST',
+            headers: { 
+                'Authorization': `Bearer ${getToken()}`,
+                'Content-Type': 'application/json'
+            }
+        });
+        
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.detail || 'Failed to renew certificate');
+        }
+        
+        const result = await response.json();
+        showNotification('Certificate renewal started! Check logs for progress.', 'success');
+        
+        // Reload certificates after a delay
+        setTimeout(loadCertificates, 2000);
+        
+        // Show logs modal automatically for the new certificate
+        if (result.new_certificate_id) {
+            setTimeout(() => showCertificateLogs(result.new_certificate_id), 3000);
+        }
+    } catch (error) {
+        showNotification(error.message || 'Failed to renew certificate', 'error');
+        console.error(error);
+    }
+}
+
+async function showCertificateDetails(certId) {
+    try {
+        const [certResponse, logsResponse] = await Promise.all([
+            fetch(`/api/v1/domains/${DOMAIN_ID}/certificates/${certId}`, {
+                headers: { 'Authorization': `Bearer ${getToken()}` }
+            }),
+            fetch(`/api/v1/domains/${DOMAIN_ID}/certificates/${certId}/logs`, {
+                headers: { 'Authorization': `Bearer ${getToken()}` }
+            })
+        ]);
+        
+        if (!certResponse.ok) throw new Error('Failed to load certificate details');
+        
+        const cert = await certResponse.json();
+        const logs = logsResponse.ok ? await logsResponse.json() : [];
+        
+        const expiryDate = cert.not_after ? new Date(cert.not_after) : null;
+        const issuedDate = cert.not_before ? new Date(cert.not_before) : null;
+        const daysUntilExpiry = expiryDate ? Math.ceil((expiryDate - Date.now()) / (1000 * 60 * 60 * 24)) : null;
+        const isExpiringSoon = daysUntilExpiry !== null && daysUntilExpiry <= 30;
+        
+        const modal = document.createElement('div');
+        modal.className = 'modal-overlay';
+        modal.innerHTML = `
+            <div class="modal-content" style="max-width: 700px;">
+                <div class="modal-header">
+                    <h3><i class="fas fa-certificate"></i> Certificate Details</h3>
+                    <button class="modal-close" onclick="closeModal()">&times;</button>
+                </div>
+                <div class="modal-body">
+                    <!-- Certificate Info -->
+                    <div class="glass-card glass-card-sm mb-3" style="background: var(--bg-tertiary);">
+                        <h4 style="font-size: 14px; font-weight: 600; margin-bottom: 12px; color: var(--text-secondary);">
+                            <i class="fas fa-info-circle"></i> Certificate Information
+                        </h4>
+                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+                            <div>
+                                <label style="font-size: 11px; color: var(--text-muted); text-transform: uppercase;">Common Name</label>
+                                <div style="font-size: 14px; color: var(--text-primary);">${escapeHtml(cert.common_name)}</div>
+                            </div>
+                            <div>
+                                <label style="font-size: 11px; color: var(--text-muted); text-transform: uppercase;">Type</label>
+                                <div style="font-size: 14px; color: var(--text-primary);">${cert.type === 'acme' ? 'Let\'s Encrypt (ACME)' : 'Manual'}</div>
+                            </div>
+                            <div>
+                                <label style="font-size: 11px; color: var(--text-muted); text-transform: uppercase;">Status</label>
+                                <div>
+                                    <span class="badge ${cert.status === 'issued' ? 'badge-success' : cert.status === 'pending' ? 'badge-orange' : 'badge-error'}">
+                                        ${cert.status.toUpperCase()}
+                                    </span>
+                                </div>
+                            </div>
+                            <div>
+                                <label style="font-size: 11px; color: var(--text-muted); text-transform: uppercase;">Auto Renew</label>
+                                <div style="font-size: 14px; color: var(--text-primary);">
+                                    ${cert.auto_renew ? '<i class="fas fa-check-circle" style="color: var(--success);"></i> Enabled' : '<i class="fas fa-times-circle" style="color: var(--error);"></i> Disabled'}
+                                    ${cert.auto_renew ? `(${cert.renew_before_days} days before expiry)` : ''}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Validity Info -->
+                    <div class="glass-card glass-card-sm mb-3" style="background: var(--bg-tertiary);">
+                        <h4 style="font-size: 14px; font-weight: 600; margin-bottom: 12px; color: var(--text-secondary);">
+                            <i class="fas fa-calendar"></i> Validity Period
+                        </h4>
+                        <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px;">
+                            <div>
+                                <label style="font-size: 11px; color: var(--text-muted); text-transform: uppercase;">Issued</label>
+                                <div style="font-size: 14px; color: var(--text-primary);">
+                                    ${issuedDate ? issuedDate.toLocaleDateString() : 'N/A'}
+                                </div>
+                            </div>
+                            <div>
+                                <label style="font-size: 11px; color: var(--text-muted); text-transform: uppercase;">Expires</label>
+                                <div style="font-size: 14px; color: ${isExpiringSoon ? 'var(--error)' : 'var(--text-primary)'};">
+                                    ${expiryDate ? expiryDate.toLocaleDateString() : 'N/A'}
+                                    ${isExpiringSoon ? ' ⚠️' : ''}
+                                </div>
+                            </div>
+                            <div>
+                                <label style="font-size: 11px; color: var(--text-muted); text-transform: uppercase;">Days Remaining</label>
+                                <div style="font-size: 14px; font-weight: 600; color: ${isExpiringSoon ? 'var(--error)' : 'var(--success)'};">
+                                    ${daysUntilExpiry !== null ? daysUntilExpiry + ' days' : 'N/A'}
+                                </div>
+                            </div>
+                        </div>
+                        
+                        ${daysUntilExpiry !== null ? `
+                        <div style="margin-top: 12px;">
+                            <div style="background: var(--bg-primary); border-radius: 4px; height: 8px; overflow: hidden;">
+                                <div style="background: ${isExpiringSoon ? 'var(--error)' : 'var(--success)'}; height: 100%; width: ${Math.min(100, Math.max(0, (daysUntilExpiry / 90) * 100))}%; transition: width 0.3s;"></div>
+                            </div>
+                        </div>
+                        ` : ''}
+                    </div>
+                    
+                    <!-- Issuer Info -->
+                    ${cert.issuer ? `
+                    <div class="glass-card glass-card-sm mb-3" style="background: var(--bg-tertiary);">
+                        <h4 style="font-size: 14px; font-weight: 600; margin-bottom: 12px; color: var(--text-secondary);">
+                            <i class="fas fa-building"></i> Issuer
+                        </h4>
+                        <div style="font-size: 13px; color: var(--text-primary); font-family: monospace; word-break: break-all;">
+                            ${escapeHtml(cert.issuer)}
+                        </div>
+                    </div>
+                    ` : ''}
+                    
+                    <!-- Issuance Logs -->
+                    ${logs.length > 0 ? `
+                    <div class="glass-card glass-card-sm" style="background: var(--bg-tertiary);">
+                        <h4 style="font-size: 14px; font-weight: 600; margin-bottom: 12px; color: var(--text-secondary);">
+                            <i class="fas fa-file-alt"></i> Issuance Logs
+                        </h4>
+                        <div style="max-height: 200px; overflow-y: auto;">
+                            ${logs.slice(-5).map(log => {
+                                const levelColors = {
+                                    'info': 'var(--text-secondary)',
+                                    'success': 'var(--success)',
+                                    'warning': 'var(--warning)',
+                                    'error': 'var(--error)'
+                                };
+                                const levelIcons = {
+                                    'info': 'fa-info-circle',
+                                    'success': 'fa-check-circle',
+                                    'warning': 'fa-exclamation-triangle',
+                                    'error': 'fa-times-circle'
+                                };
+                                return `
+                                <div style="display: flex; gap: 8px; margin-bottom: 8px; font-size: 12px;">
+                                    <i class="fas ${levelIcons[log.level]}" style="color: ${levelColors[log.level]}; margin-top: 2px;"></i>
+                                    <div>
+                                        <span style="color: var(--text-primary);">${escapeHtml(log.message)}</span>
+                                        <span style="color: var(--text-muted); margin-left: 8px;">${new Date(log.created_at).toLocaleString()}</span>
+                                    </div>
+                                </div>
+                                `;
+                            }).join('')}
+                        </div>
+                        ${logs.length > 5 ? `
+                        <button class="btn btn-secondary btn-sm mt-2" onclick="closeModal(); showCertificateLogs(${certId});">
+                            View All Logs (${logs.length})
+                        </button>
+                        ` : ''}
+                    </div>
+                    ` : ''}
+                </div>
+                <div class="modal-footer">
+                    ${cert.status === 'issued' && cert.type === 'acme' ? `
+                    <button class="btn btn-secondary" onclick="closeModal(); renewCertificate(${certId}, '${escapeHtml(cert.common_name)}');">
+                        <i class="fas fa-sync"></i> Renew Certificate
+                    </button>
+                    ` : ''}
+                    <button class="btn btn-primary" onclick="closeModal()">Close</button>
+                </div>
+            </div>
+        `;
+        
+        document.body.appendChild(modal);
+        
+        modal.addEventListener('click', (e) => {
+            if (e.target === modal) closeModal();
+        });
+    } catch (error) {
+        showNotification('Failed to load certificate details', 'error');
+        console.error(error);
     }
 }
 
