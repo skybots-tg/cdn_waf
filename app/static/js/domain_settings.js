@@ -425,28 +425,35 @@ function renderCertificates(certs, available = []) {
         `;
         
         certs.forEach(cert => {
-            const statusBadge = cert.status === 'issued' 
-                ? '<span class="badge badge-success"><i class="fas fa-check-circle"></i> Active</span>'
-                : cert.status === 'pending'
-                ? '<span class="badge badge-orange"><i class="fas fa-clock"></i> Pending</span>'
-                : '<span class="badge badge-error"><i class="fas fa-times-circle"></i> Failed</span>';
+            let statusBadge;
+            if (cert.status === 'issued') {
+                statusBadge = '<span class="badge badge-success"><i class="fas fa-check-circle"></i> Active</span>';
+            } else if (cert.status === 'pending') {
+                statusBadge = '<span class="badge badge-orange"><i class="fas fa-clock"></i> Pending</span>';
+            } else if (cert.status === 'expired') {
+                statusBadge = '<span class="badge" style="background: var(--bg-tertiary); color: var(--text-muted);"><i class="fas fa-history"></i> Expired</span>';
+            } else {
+                statusBadge = '<span class="badge badge-error"><i class="fas fa-times-circle"></i> Failed</span>';
+            }
             
             const expiryDate = cert.not_after ? new Date(cert.not_after).toLocaleDateString() : 'N/A';
             const isExpiringSoon = cert.not_after && new Date(cert.not_after) < new Date(Date.now() + 30*24*60*60*1000);
             const daysUntilExpiry = cert.not_after ? Math.ceil((new Date(cert.not_after) - Date.now()) / (1000 * 60 * 60 * 24)) : null;
+            const isExpired = cert.status === 'expired';
             
             html += `
-            <div class="glass-card glass-card-sm mb-2">
+            <div class="glass-card glass-card-sm mb-2" ${isExpired ? 'style="opacity: 0.6;"' : ''}>
                 <div class="flex-between">
                     <div style="flex: 1;">
                         <div class="flex gap-2" style="align-items: center; margin-bottom: 8px;">
                             ${statusBadge}
-                            <strong>${escapeHtml(cert.common_name || 'Unknown')}</strong>
+                            <strong ${isExpired ? 'style="text-decoration: line-through;"' : ''}>${escapeHtml(cert.common_name || 'Unknown')}</strong>
                             ${cert.status === 'issued' && daysUntilExpiry !== null ? `
                                 <span style="font-size: 12px; color: ${isExpiringSoon ? 'var(--error)' : 'var(--text-secondary)'};">
                                     ${isExpiringSoon ? '⚠️ ' : ''}${daysUntilExpiry} days left (${expiryDate})
                                 </span>
                             ` : ''}
+                            ${isExpired ? `<span style="font-size: 12px; color: var(--text-muted);">Replaced by newer certificate</span>` : ''}
                         </div>
                         <div style="font-size: 13px; color: var(--text-secondary);">
                             ${cert.issuer ? `Issuer: ${escapeHtml(cert.issuer)}` : 'Processing...'}
@@ -463,6 +470,12 @@ function renderCertificates(certs, available = []) {
                                     onclick="renewCertificate(${cert.id}, '${escapeHtml(cert.common_name)}')" 
                                     title="Force Renewal">
                                 <i class="fas fa-sync"></i>
+                            </button>
+                        ` : cert.status === 'expired' ? `
+                            <button class="btn btn-icon btn-sm btn-secondary" 
+                                    onclick="showCertificateLogs(${cert.id})" 
+                                    title="View Logs">
+                                <i class="fas fa-file-alt"></i>
                             </button>
                         ` : `
                             <button class="btn btn-icon btn-sm btn-secondary" 

@@ -1050,6 +1050,20 @@ class SSLService:
         cert.issuer = cert_info["issuer"]
         cert.subject = cert_info["subject"]
         
+        # Mark old certificates with same common_name as EXPIRED
+        old_certs_result = await db.execute(
+            select(Certificate).where(
+                Certificate.domain_id == cert.domain_id,
+                Certificate.common_name == fqdn,
+                Certificate.status == CertificateStatus.ISSUED,
+                Certificate.id != cert.id
+            )
+        )
+        old_certs = old_certs_result.scalars().all()
+        for old_cert in old_certs:
+            old_cert.status = CertificateStatus.EXPIRED
+            logger.info(f"Marked old certificate {old_cert.id} as EXPIRED")
+        
         add_log(
             CertificateLogLevel.SUCCESS, 
             f"Certificate issued successfully for {fqdn}",
