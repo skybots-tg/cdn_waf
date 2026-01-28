@@ -25,7 +25,7 @@ from app.schemas.cdn import (
 from app.services.cache_service import CacheService
 from app.services.origin_service import OriginService
 from app.services.ssl_service import SSLService
-from app.api.deps import get_current_active_user
+from app.core.security import get_current_active_user
 
 router = APIRouter()
 
@@ -250,92 +250,25 @@ async def check_origin_health(
     return health
 
 
-# ==================== SSL/TLS ====================
+# ==================== SSL/TLS Settings ====================
 
-@router.get("/{domain_id}/ssl/certificates", response_model=List[CertificateResponse])
-async def get_certificates(
-    domain_id: int,
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
-):
-    """Get certificates for domain"""
-    certs = await SSLService.get_certificates(db, domain_id)
-    return certs
-
-
-@router.post("/{domain_id}/ssl/certificates", response_model=CertificateResponse)
+@router.post("/{domain_id}/ssl/upload", response_model=CertificateResponse)
 async def upload_certificate(
     domain_id: int,
     cert_data: CertificateCreate,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
-    """Upload SSL certificate"""
+    """
+    # Загрузить собственный SSL сертификат
+    
+    Используйте этот эндпоинт для загрузки собственного сертификата (не Let's Encrypt).
+    Для автоматического выпуска Let's Encrypt используйте `/certificates/issue`.
+    """
     try:
         cert = await SSLService.create_certificate(db, domain_id, cert_data)
         return cert
     except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(e)
-        )
-
-
-@router.post("/{domain_id}/ssl/acme", response_model=CertificateResponse)
-async def request_acme_certificate(
-    domain_id: int,
-    wildcard: bool = False,
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
-):
-    """Request Let's Encrypt certificate"""
-    try:
-        cert = await SSLService.request_acme_certificate(db, domain_id, wildcard)
-        return cert
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(e)
-        )
-
-
-@router.post("/ssl/certificates/{cert_id}/renew", response_model=CertificateResponse)
-async def renew_certificate(
-    cert_id: int,
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
-):
-    """Renew certificate"""
-    try:
-        cert = await SSLService.renew_certificate(db, cert_id)
-        if not cert:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Certificate not found"
-            )
-        return cert
-    except ValueError as e:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(e)
-        )
-
-
-@router.delete("/ssl/certificates/{cert_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_certificate(
-    cert_id: int,
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
-):
-    """Delete certificate"""
-    try:
-        success = await SSLService.delete_certificate(db, cert_id)
-        if not success:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Certificate not found"
-            )
-    except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(e)

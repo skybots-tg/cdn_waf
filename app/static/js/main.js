@@ -324,6 +324,250 @@ function renderDNSRecords(records) {
     `).join('');
 }
 
+// API Key Management
+function showCreateAPIKeyModal() {
+    const modal = document.createElement('div');
+    modal.className = 'modal';
+    modal.innerHTML = `
+        <div class="modal-content glass-card" style="max-width: 500px;">
+            <div class="flex-between mb-3">
+                <h2 style="font-size: 20px; font-weight: 600; margin: 0;">Create API Key</h2>
+                <button onclick="closeModal()" class="btn-icon" style="color: var(--text-secondary);">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <form id="create-api-key-form">
+                <div class="form-group">
+                    <label class="form-label">API Key Name</label>
+                    <input type="text" class="form-input" id="api-key-name" placeholder="e.g., Production Server" required>
+                    <p style="font-size: 12px; color: var(--text-muted); margin-top: 4px;">
+                        Give your API key a descriptive name to remember its purpose
+                    </p>
+                </div>
+                <div class="flex gap-2" style="justify-content: flex-end;">
+                    <button type="button" onclick="closeModal()" class="btn btn-secondary">Cancel</button>
+                    <button type="submit" class="btn btn-primary">
+                        <i class="fas fa-plus"></i> Create Key
+                    </button>
+                </div>
+            </form>
+        </div>
+    `;
+    
+    document.body.appendChild(modal);
+    
+    // Add modal styles if not exists
+    if (!document.getElementById('modal-styles')) {
+        const style = document.createElement('style');
+        style.id = 'modal-styles';
+        style.textContent = `
+            .modal {
+                position: fixed;
+                top: 0;
+                left: 0;
+                right: 0;
+                bottom: 0;
+                background: rgba(0, 0, 0, 0.7);
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                z-index: 1000;
+                animation: fadeIn 0.2s ease;
+            }
+            .modal-content {
+                animation: slideUp 0.3s ease;
+            }
+            @keyframes slideUp {
+                from {
+                    opacity: 0;
+                    transform: translateY(20px);
+                }
+                to {
+                    opacity: 1;
+                    transform: translateY(0);
+                }
+            }
+        `;
+        document.head.appendChild(style);
+    }
+    
+    // Handle form submission
+    document.getElementById('create-api-key-form').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        await createAPIKey();
+    });
+    
+    // Focus input
+    setTimeout(() => document.getElementById('api-key-name').focus(), 100);
+}
+
+function closeModal() {
+    const modal = document.querySelector('.modal');
+    if (modal) {
+        modal.remove();
+    }
+}
+
+async function createAPIKey() {
+    const name = document.getElementById('api-key-name').value;
+    
+    try {
+        const response = await api.post('/auth/api-keys', { 
+            name: name,
+            scopes: null,
+            allowed_ips: null,
+            expires_at: null
+        });
+        
+        closeModal();
+        showNotification('API key created successfully', 'success');
+        
+        // Show the API key to user (one time only)
+        showAPIKeyResult(response);
+        
+        // Reload API keys list
+        if (typeof loadAPIKeys === 'function') {
+            loadAPIKeys();
+        }
+    } catch (error) {
+        showNotification(error.message, 'error');
+    }
+}
+
+function showAPIKeyResult(data) {
+    const modal = document.createElement('div');
+    modal.className = 'modal';
+    modal.innerHTML = `
+        <div class="modal-content glass-card" style="max-width: 600px;">
+            <div class="mb-3">
+                <h2 style="font-size: 20px; font-weight: 600; margin-bottom: 8px;">
+                    <i class="fas fa-check-circle" style="color: var(--success);"></i> API Key Created
+                </h2>
+                <p style="color: var(--warning); background: rgba(255, 193, 7, 0.1); padding: 12px; border-radius: 8px; border-left: 3px solid var(--warning);">
+                    <i class="fas fa-exclamation-triangle"></i>
+                    <strong>Important:</strong> Save this key now! You won't be able to see it again.
+                </p>
+            </div>
+            <div class="form-group">
+                <label class="form-label">API Key</label>
+                <div style="display: flex; gap: 8px;">
+                    <input type="text" class="form-input" id="api-key-value" value="${data.token || data.key || 'key_xxxxxxxxxxxxxx'}" readonly style="font-family: monospace; font-size: 13px;">
+                    <button onclick="copyAPIKey()" class="btn btn-secondary">
+                        <i class="fas fa-copy"></i> Copy
+                    </button>
+                </div>
+            </div>
+            <div class="form-group">
+                <label class="form-label">Usage Example</label>
+                <pre style="background: var(--bg-tertiary); padding: 12px; border-radius: 8px; overflow-x: auto; font-size: 12px;">curl -H "Authorization: Bearer ${data.token || data.key || 'YOUR_API_KEY'}" \\
+  https://api.flarecloud.ru/api/v1/domains</pre>
+            </div>
+            <div style="text-align: right;">
+                <button onclick="closeModal(); if(typeof loadAPIKeys === 'function') loadAPIKeys();" class="btn btn-primary">Got it</button>
+            </div>
+        </div>
+    `;
+    
+    document.body.appendChild(modal);
+    
+    // Select the key text
+    setTimeout(() => {
+        const input = document.getElementById('api-key-value');
+        if (input) input.select();
+    }, 100);
+}
+
+function copyAPIKey() {
+    const input = document.getElementById('api-key-value');
+    input.select();
+    document.execCommand('copy');
+    showNotification('API key copied to clipboard', 'success');
+}
+
+async function deleteAPIKey(keyId) {
+    if (!confirm('Are you sure you want to delete this API key? This action cannot be undone.')) {
+        return;
+    }
+    
+    try {
+        await api.delete(`/auth/api-keys/${keyId}`);
+        showNotification('API key deleted', 'success');
+        loadAPIKeys();
+    } catch (error) {
+        showNotification(error.message, 'error');
+    }
+}
+
+// Team member management
+function showInviteMemberModal() {
+    const modal = document.createElement('div');
+    modal.className = 'modal';
+    modal.innerHTML = `
+        <div class="modal-content glass-card" style="max-width: 500px;">
+            <div class="flex-between mb-3">
+                <h2 style="font-size: 20px; font-weight: 600; margin: 0;">Invite Team Member</h2>
+                <button onclick="closeModal()" class="btn-icon" style="color: var(--text-secondary);">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <form id="invite-member-form">
+                <div class="form-group">
+                    <label class="form-label">Email Address</label>
+                    <input type="email" class="form-input" id="member-email" placeholder="colleague@example.com" required>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Role</label>
+                    <select class="form-input" id="member-role" required>
+                        <option value="member">Member</option>
+                        <option value="admin">Admin</option>
+                    </select>
+                </div>
+                <div class="flex gap-2" style="justify-content: flex-end;">
+                    <button type="button" onclick="closeModal()" class="btn btn-secondary">Cancel</button>
+                    <button type="submit" class="btn btn-primary">
+                        <i class="fas fa-user-plus"></i> Send Invite
+                    </button>
+                </div>
+            </form>
+        </div>
+    `;
+    
+    document.body.appendChild(modal);
+    
+    // Handle form submission
+    document.getElementById('invite-member-form').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const email = document.getElementById('member-email').value;
+        const role = document.getElementById('member-role').value;
+        
+        try {
+            await api.post('/organization/invite', { email, role });
+            closeModal();
+            showNotification('Invitation sent successfully', 'success');
+            loadTeamMembers();
+        } catch (error) {
+            showNotification(error.message, 'error');
+        }
+    });
+    
+    // Focus input
+    setTimeout(() => document.getElementById('member-email').focus(), 100);
+}
+
+async function removeMember(memberId) {
+    if (!confirm('Are you sure you want to remove this team member?')) {
+        return;
+    }
+    
+    try {
+        await api.delete(`/organization/members/${memberId}`);
+        showNotification('Team member removed', 'success');
+        loadTeamMembers();
+    } catch (error) {
+        showNotification(error.message, 'error');
+    }
+}
+
 // Initialize
 document.addEventListener('DOMContentLoaded', () => {
     initThemeToggle();

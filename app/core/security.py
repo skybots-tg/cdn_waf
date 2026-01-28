@@ -6,6 +6,9 @@ from jose import JWTError, jwt
 from fastapi import HTTPException, Security, Depends
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
+import hashlib
+import json
 
 from app.core.config import settings
 from app.core.database import get_db
@@ -13,8 +16,8 @@ from app.core.database import get_db
 # Password hashing
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
-# HTTP Bearer token security
-security = HTTPBearer()
+# HTTP Bearer token security - auto_error=False allows optional auth
+security = HTTPBearer(auto_error=False)
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
@@ -59,11 +62,42 @@ def decode_token(token: str) -> Dict[str, Any]:
 
 
 async def get_current_user(
-    credentials: HTTPAuthorizationCredentials = Security(security),
+    credentials: Optional[HTTPAuthorizationCredentials] = Security(security),
     db: AsyncSession = Depends(get_db)
 ):
-    """Get current authenticated user from JWT token"""
+    """
+    Get current authenticated user from JWT token or API key
+    
+    Supports two authentication methods:
+    1. JWT tokens (standard user login)
+    2. API keys (for programmatic access, starts with 'fck_')
+    
+    In DEBUG mode, falls back to admin user if no credentials provided.
+    """
+    # Import here to avoid circular dependency
+    from app.services.user_service import UserService
+    
+    if not credentials:
+        # In DEBUG mode, allow access as default admin if no token provided
+        if settings.DEBUG:
+            user_service = UserService(db)
+            user = await user_service.get_by_id(1)
+            if user:
+                return user
+        
+        raise HTTPException(
+            status_code=401,
+            detail="Not authenticated",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    
     token = credentials.credentials
+    
+    # Check if this is an API key (starts with 'fck_')
+    if token.startswith('fck_'):
+        return await authenticate_api_key(token, db)
+    
+    # Otherwise treat as JWT token
     payload = decode_token(token)
     
     if payload.get("type") != "access":
@@ -77,9 +111,6 @@ async def get_current_user(
     if user_id is None:
         raise HTTPException(status_code=401, detail="Could not validate credentials")
     
-    # Import here to avoid circular dependency
-    from app.services.user_service import UserService
-    
     user_service = UserService(db)
     user = await user_service.get_by_id(user_id)
     
@@ -88,6 +119,49 @@ async def get_current_user(
     
     if not user.is_active:
         raise HTTPException(status_code=403, detail="Inactive user")
+    
+    return user
+
+
+async def authenticate_api_key(token: str, db: AsyncSession):
+    """Authenticate user using API key"""
+    from app.models.user import APIToken, User
+    
+    # Hash the provided token
+    token_hash = hashlib.sha256(token.encode()).hexdigest()
+    
+    # Find token in database
+    result = await db.execute(
+        select(APIToken).where(APIToken.token_hash == token_hash)
+    )
+    api_token = result.scalar_one_or_none()
+    
+    if not api_token:
+        raise HTTPException(status_code=401, detail="Invalid API key")
+    
+    # Check if token is active
+    if not api_token.is_active:
+        raise HTTPException(status_code=401, detail="API key is inactive")
+    
+    # Check expiration
+    if api_token.expires_at and api_token.expires_at < datetime.utcnow():
+        raise HTTPException(status_code=401, detail="API key has expired")
+    
+    # Update last used timestamp
+    api_token.last_used_at = datetime.utcnow()
+    await db.commit()
+    
+    # Get user
+    result = await db.execute(
+        select(User).where(User.id == api_token.user_id)
+    )
+    user = result.scalar_one_or_none()
+    
+    if not user:
+        raise HTTPException(status_code=401, detail="User not found")
+    
+    if not user.is_active:
+        raise HTTPException(status_code=403, detail="User account is inactive")
     
     return user
 
@@ -105,13 +179,44 @@ async def get_current_superuser(current_user = Depends(get_current_user)):
 
 
 async def get_optional_current_user(
+    credentials: Optional[HTTPAuthorizationCredentials] = Security(security),
     db: AsyncSession = Depends(get_db)
 ):
     """Get current user if authenticated, None otherwise (for optional auth endpoints)
     
     This function is used for endpoints that work both with and without authentication.
-    For development purposes, this always returns None to allow unauthenticated access.
+    In DEBUG mode, returns admin user for convenience.
+    In production, returns None if no valid credentials provided.
     """
-    # TODO: For production, implement proper optional authentication
-    # For now, return None to allow all requests during development
-    return None
+    from app.services.user_service import UserService
+    
+    if not credentials:
+        # In DEBUG mode, return admin user for convenience
+        if settings.DEBUG:
+            user_service = UserService(db)
+            user = await user_service.get_by_id(1)
+            return user
+        return None
+    
+    try:
+        token = credentials.credentials
+        
+        # Check if this is an API key
+        if token.startswith('fck_'):
+            return await authenticate_api_key(token, db)
+        
+        # JWT token
+        payload = decode_token(token)
+        
+        if payload.get("type") != "access":
+            return None
+        
+        user_id = int(payload.get("sub"))
+        user_service = UserService(db)
+        user = await user_service.get_by_id(user_id)
+        
+        if user and user.is_active:
+            return user
+        return None
+    except Exception:
+        return None

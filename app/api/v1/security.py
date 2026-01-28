@@ -17,7 +17,7 @@ from app.schemas.waf import (
     IPAccessRuleResponse
 )
 from app.services.waf_service import WAFService
-from app.api.deps import get_current_active_user
+from app.core.security import get_current_active_user
 
 router = APIRouter()
 

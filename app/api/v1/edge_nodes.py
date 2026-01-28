@@ -16,7 +16,7 @@ from app.schemas.edge_node import (
     EdgeComponentStatus
 )
 from app.services.edge_service import EdgeNodeService
-from app.api.deps import get_current_superuser
+from app.core.security import get_current_superuser
 
 router = APIRouter()
 

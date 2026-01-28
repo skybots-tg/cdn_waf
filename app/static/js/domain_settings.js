@@ -505,33 +505,10 @@ function renderCertificates(certs, available = []) {
 }
 
 async function requestACME() {
-    if (!confirm('Request Let\'s Encrypt certificate for this domain? This may take a few minutes.')) return;
-    
-    showNotification('Requesting Let\'s Encrypt certificate...', 'info');
-    
-    try {
-        const response = await fetch(`/api/v1/domains/${DOMAIN_ID}/ssl/certificates/acme`, {
-            method: 'POST',
-            headers: { 
-                'Authorization': `Bearer ${getToken()}`,
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-                wildcard: false // Default to non-wildcard for now
-            })
-        });
-        
-        if (!response.ok) throw new Error('Failed to request certificate');
-        
-        const result = await response.json();
-        showNotification('Certificate request submitted. It will be issued in background.', 'success');
-        
-        // Reload certificates list after delay
-        setTimeout(loadCertificates, 5000);
-    } catch (error) {
-        showNotification('Failed to request certificate', 'error');
-        console.error(error);
-    }
+    // Redirect to use the proper issue flow via modal
+    // Show available certificates first, then let user choose
+    showNotification('Use "Available to Issue" section to issue certificates for specific subdomains', 'info');
+    loadCertificates();
 }
 
 function showUploadCertModal() {

@@ -82,5 +82,8 @@ class DomainService:
         domain.status = DomainStatus.ACTIVE
         await self.db.flush()
         return True
-
-
+    
+    async def delete(self, domain: Domain) -> None:
+        """Delete domain and all related records (cascades)"""
+        await self.db.delete(domain)
+        await self.db.flush()

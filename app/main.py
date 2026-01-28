@@ -23,8 +23,47 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title=settings.APP_NAME,
+    version="1.0.0",
+    description="""
+# FlareCloud CDN Control Panel API
+
+Мощный API для управления CDN, DNS, SSL сертификатами и WAF правилами.
+
+## Возможности
+
+* 🌐 **Управление доменами** - добавление, верификация, настройка доменов
+* 📝 **DNS записи** - полное управление DNS records (A, AAAA, CNAME, MX, TXT, NS)
+* 🔒 **SSL/TLS сертификаты** - автоматический выпуск Let's Encrypt сертификатов
+* 🛡️ **WAF** - настройка правил безопасности и rate limiting
+* 📊 **Аналитика** - статистика трафика и производительности
+* 🔑 **API ключи** - управление токенами доступа
+
+## Аутентификация
+
+Большинство эндпоинтов требуют аутентификации. Используйте Bearer токен:
+
+```
+Authorization: Bearer YOUR_ACCESS_TOKEN
+```
+
+Получить токен: `POST /api/v1/auth/login`
+    """,
     debug=settings.DEBUG,
     lifespan=lifespan,
+    docs_url="/docs",
+    redoc_url="/redoc",
+    openapi_tags=[
+        {"name": "auth", "description": "Аутентификация и управление пользователями"},
+        {"name": "domains", "description": "Управление доменами"},
+        {"name": "dns", "description": "Управление DNS записями"},
+        {"name": "certificates", "description": "SSL/TLS сертификаты"},
+        {"name": "edge-nodes", "description": "Управление edge нодами (CDN серверы)"},
+        {"name": "dns-nodes", "description": "Управление DNS серверами"},
+        {"name": "cdn", "description": "CDN настройки"},
+        {"name": "security", "description": "WAF и безопасность"},
+        {"name": "analytics", "description": "Аналитика и статистика"},
+        {"name": "organization", "description": "Управление организацией и командой"},
+    ]
 )
 
 # CORS middleware
@@ -40,12 +79,13 @@ app.add_middleware(
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
 
 # Import and include routers
-from app.api.v1 import auth, domains, dns, edge_nodes, dns_nodes, cdn, security, analytics, organization
+from app.api.v1 import auth, domains, dns, edge_nodes, dns_nodes, cdn, security, analytics, organization, certificates
 from app.api import web, internal
 
 # API routes
 app.include_router(auth.router, prefix="/api/v1/auth", tags=["auth"])
 app.include_router(domains.router, prefix="/api/v1/domains", tags=["domains"])
+app.include_router(certificates.router, prefix="/api/v1/domains", tags=["certificates"])
 app.include_router(dns.router, prefix="/api/v1/dns", tags=["dns"])
 app.include_router(edge_nodes.router, prefix="/api/v1/edge-nodes", tags=["edge-nodes"])
 app.include_router(dns_nodes.router, prefix="/api/v1/dns-nodes", tags=["dns-nodes"])

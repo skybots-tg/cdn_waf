@@ -46,27 +46,3 @@ class TokenResponse(BaseModel):
     refresh_token: str
     token_type: str = "bearer"
 
-
-class APITokenCreate(BaseModel):
-    """Schema for API token creation"""
-    name: str = Field(..., min_length=1, max_length=255)
-    scopes: list[str] = Field(default_factory=list)
-    allowed_ips: Optional[list[str]] = None
-    expires_days: Optional[int] = None
-
-
-class APITokenResponse(BaseModel):
-    """Schema for API token response"""
-    id: int
-    name: str
-    token: Optional[str] = None  # Only returned on creation
-    scopes: list[str]
-    is_active: bool
-    created_at: datetime
-    expires_at: Optional[datetime] = None
-    last_used_at: Optional[datetime] = None
-    
-    class Config:
-        from_attributes = True
-
-
