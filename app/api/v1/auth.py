@@ -137,15 +137,23 @@ async def get_user_domains(
     
     user_org_ids = set(owned_org_ids + member_org_ids)
     
-    if not user_org_ids:
-        return []
+    # Include default organization (ID=1) for legacy compatibility
+    # TODO: Remove this when proper organization assignment is implemented
+    user_org_ids.add(1)
     
-    # Get all domains from user's organizations
-    domains_result = await db.execute(
-        select(Domain)
-        .where(Domain.organization_id.in_(user_org_ids))
-        .order_by(Domain.name)
-    )
+    # For superusers, grant access to all domains
+    if current_user.is_superuser:
+        domains_result = await db.execute(
+            select(Domain).order_by(Domain.name)
+        )
+    else:
+        # Get all domains from user's organizations
+        domains_result = await db.execute(
+            select(Domain)
+            .where(Domain.organization_id.in_(user_org_ids))
+            .order_by(Domain.name)
+        )
+    
     domains = domains_result.scalars().all()
     
     return [DomainBrief(id=d.id, name=d.name) for d in domains]
@@ -241,15 +249,22 @@ async def create_api_key(
         member_org_ids = [row[0] for row in member_org_ids_result.fetchall()]
         
         user_org_ids = set(owned_org_ids + member_org_ids)
+        # Include default organization for legacy compatibility
+        user_org_ids.add(1)
         
-        # Get domains that belong to user's organizations
-        domains_result = await db.execute(
-            select(Domain)
-            .where(
-                Domain.id.in_(token_create.domain_ids),
-                Domain.organization_id.in_(user_org_ids)
+        # Get domains that belong to user's organizations (or all for superusers)
+        if current_user.is_superuser:
+            domains_result = await db.execute(
+                select(Domain).where(Domain.id.in_(token_create.domain_ids))
             )
-        )
+        else:
+            domains_result = await db.execute(
+                select(Domain)
+                .where(
+                    Domain.id.in_(token_create.domain_ids),
+                    Domain.organization_id.in_(user_org_ids)
+                )
+            )
         allowed_domains = domains_result.scalars().all()
         
         # Check if all requested domains were found and belong to user
@@ -388,15 +403,22 @@ async def update_api_key(
             member_org_ids = [row[0] for row in member_org_ids_result.fetchall()]
             
             user_org_ids = set(owned_org_ids + member_org_ids)
+            # Include default organization for legacy compatibility
+            user_org_ids.add(1)
             
-            # Get domains that belong to user's organizations
-            domains_result = await db.execute(
-                select(Domain)
-                .where(
-                    Domain.id.in_(token_update.domain_ids),
-                    Domain.organization_id.in_(user_org_ids)
+            # Get domains that belong to user's organizations (or all for superusers)
+            if current_user.is_superuser:
+                domains_result = await db.execute(
+                    select(Domain).where(Domain.id.in_(token_update.domain_ids))
                 )
-            )
+            else:
+                domains_result = await db.execute(
+                    select(Domain)
+                    .where(
+                        Domain.id.in_(token_update.domain_ids),
+                        Domain.organization_id.in_(user_org_ids)
+                    )
+                )
             allowed_domains = domains_result.scalars().all()
             
             # Check if all requested domains were found and belong to user
