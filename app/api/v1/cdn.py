@@ -25,7 +25,7 @@ from app.schemas.cdn import (
 from app.services.cache_service import CacheService
 from app.services.origin_service import OriginService
 from app.services.ssl_service import SSLService
-from app.core.security import get_current_active_user
+from app.core.security import get_current_active_user, require_domain_access
 
 router = APIRouter()
 
@@ -39,6 +39,7 @@ async def get_cache_rules(
     current_user: User = Depends(get_current_active_user)
 ):
     """Get cache rules for domain"""
+    require_domain_access(current_user, domain_id)
     rules = await CacheService.get_rules(db, domain_id)
     return rules
 
@@ -51,6 +52,7 @@ async def create_cache_rule(
     current_user: User = Depends(get_current_active_user)
 ):
     """Create cache rule"""
+    require_domain_access(current_user, domain_id)
     rule = await CacheService.create_rule(db, domain_id, rule_data)
     return rule
 
@@ -97,6 +99,7 @@ async def purge_cache(
     current_user: User = Depends(get_current_active_user)
 ):
     """Purge cache for domain"""
+    require_domain_access(current_user, domain_id)
     if purge_data.purge_type == "all":
         purge = await CacheService.purge_all(db, domain_id, current_user.id)
     elif purge_data.purge_type == "url":
@@ -134,6 +137,7 @@ async def get_purge_history(
     current_user: User = Depends(get_current_active_user)
 ):
     """Get cache purge history"""
+    require_domain_access(current_user, domain_id)
     history = await CacheService.get_purge_history(db, domain_id, limit)
     return history
 
@@ -148,6 +152,7 @@ async def enable_dev_mode(
     current_user: User = Depends(get_current_active_user)
 ):
     """Enable dev mode (bypass cache)"""
+    require_domain_access(current_user, domain_id)
     expires_at = await CacheService.enable_dev_mode(db, domain_id, duration_minutes)
     return DevModeResponse(
         enabled=True,
@@ -162,6 +167,7 @@ async def disable_dev_mode(
     current_user: User = Depends(get_current_active_user)
 ):
     """Disable dev mode"""
+    require_domain_access(current_user, domain_id)
     await CacheService.disable_dev_mode(db, domain_id)
     return {"status": "disabled"}
 
@@ -173,6 +179,7 @@ async def get_dev_mode_status(
     current_user: User = Depends(get_current_active_user)
 ):
     """Get dev mode status"""
+    require_domain_access(current_user, domain_id)
     is_active = await CacheService.is_dev_mode_active(db, domain_id)
     expires_at = await CacheService.get_dev_mode_expires(db, domain_id) if is_active else None
     
@@ -191,6 +198,7 @@ async def get_origins(
     current_user: User = Depends(get_current_active_user)
 ):
     """Get origin servers for domain"""
+    require_domain_access(current_user, domain_id)
     origins = await OriginService.get_origins(db, domain_id)
     return origins
 
@@ -203,6 +211,7 @@ async def create_origin(
     current_user: User = Depends(get_current_active_user)
 ):
     """Create origin server"""
+    require_domain_access(current_user, domain_id)
     origin = await OriginService.create_origin(db, domain_id, origin_data)
     return origin
 
@@ -265,6 +274,7 @@ async def upload_certificate(
     Используйте этот эндпоинт для загрузки собственного сертификата (не Let's Encrypt).
     Для автоматического выпуска Let's Encrypt используйте `/certificates/issue`.
     """
+    require_domain_access(current_user, domain_id)
     try:
         cert = await SSLService.create_certificate(db, domain_id, cert_data)
         return cert
@@ -282,6 +292,7 @@ async def get_tls_settings(
     current_user: User = Depends(get_current_active_user)
 ):
     """Get TLS settings for domain"""
+    require_domain_access(current_user, domain_id)
     from app.models.domain import DomainTLSSettings, TLSMode
     
     # Get TLS settings from database
@@ -338,6 +349,7 @@ async def update_tls_settings(
     current_user: User = Depends(get_current_active_user)
 ):
     """Update TLS settings for domain"""
+    require_domain_access(current_user, domain_id)
     settings_dict = settings.model_dump(exclude_unset=True)
     success = await SSLService.update_tls_settings(db, domain_id, settings_dict)
     

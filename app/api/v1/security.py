@@ -17,7 +17,7 @@ from app.schemas.waf import (
     IPAccessRuleResponse
 )
 from app.services.waf_service import WAFService
-from app.core.security import get_current_active_user
+from app.core.security import get_current_active_user, require_domain_access
 
 router = APIRouter()
 
@@ -31,6 +31,7 @@ async def get_waf_rules(
     current_user: User = Depends(get_current_active_user)
 ):
     """Get WAF rules for domain"""
+    require_domain_access(current_user, domain_id)
     rules = await WAFService.get_rules(db, domain_id)
     return rules
 
@@ -43,6 +44,7 @@ async def create_waf_rule(
     current_user: User = Depends(get_current_active_user)
 ):
     """Create WAF rule"""
+    require_domain_access(current_user, domain_id)
     rule = await WAFService.create_rule(db, domain_id, rule_data)
     return rule
 
@@ -88,6 +90,7 @@ async def get_rate_limits(
     current_user: User = Depends(get_current_active_user)
 ):
     """Get rate limits for domain"""
+    require_domain_access(current_user, domain_id)
     limits = await WAFService.get_rate_limits(db, domain_id)
     return limits
 
@@ -100,6 +103,7 @@ async def create_rate_limit(
     current_user: User = Depends(get_current_active_user)
 ):
     """Create rate limit"""
+    require_domain_access(current_user, domain_id)
     limit = await WAFService.create_rate_limit(db, domain_id, limit_data)
     return limit
 
@@ -145,6 +149,7 @@ async def get_ip_rules(
     current_user: User = Depends(get_current_active_user)
 ):
     """Get IP access rules for domain"""
+    require_domain_access(current_user, domain_id)
     rules = await WAFService.get_ip_rules(db, domain_id)
     return rules
 
@@ -157,6 +162,7 @@ async def create_ip_rule(
     current_user: User = Depends(get_current_active_user)
 ):
     """Create IP access rule"""
+    require_domain_access(current_user, domain_id)
     rule = await WAFService.create_ip_rule(db, domain_id, rule_data)
     return rule
 
@@ -202,6 +208,7 @@ async def enable_under_attack_mode(
     current_user: User = Depends(get_current_active_user)
 ):
     """Enable under attack mode for domain"""
+    require_domain_access(current_user, domain_id)
     await WAFService.enable_under_attack_mode(db, domain_id)
     return {"status": "enabled", "message": "Under attack mode enabled"}
 
@@ -213,5 +220,6 @@ async def disable_under_attack_mode(
     current_user: User = Depends(get_current_active_user)
 ):
     """Disable under attack mode for domain"""
+    require_domain_access(current_user, domain_id)
     await WAFService.disable_under_attack_mode(db, domain_id)
     return {"status": "disabled", "message": "Under attack mode disabled"}

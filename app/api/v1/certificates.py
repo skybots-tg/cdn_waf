@@ -7,7 +7,7 @@ from sqlalchemy import select
 
 from app.core.database import get_db
 from app.core.config import settings
-from app.core.security import get_optional_current_user
+from app.core.security import get_optional_current_user, require_domain_access
 from app.models.user import User
 from app.models.domain import Domain
 from app.models.dns import DNSRecord
@@ -35,6 +35,10 @@ async def list_domain_certificates(
     - `revoked` - отозван
     - `failed` - ошибка при выпуске
     """
+    # Check if user has access to this domain
+    if current_user:
+        require_domain_access(current_user, domain_id)
+    
     result = await db.execute(select(Domain).where(Domain.id == domain_id))
     domain = result.scalar_one_or_none()
     
@@ -72,6 +76,10 @@ async def get_available_certificates(
     
     Возвращает все DNS A-записи домена, для которых еще не выпущен SSL сертификат.
     """
+    # Check if user has access to this domain
+    if current_user:
+        require_domain_access(current_user, domain_id)
+    
     result = await db.execute(select(Domain).where(Domain.id == domain_id))
     domain = result.scalar_one_or_none()
     
@@ -146,6 +154,10 @@ async def issue_certificate_for_subdomain(
     - `subdomain`: `@` для основного домена, или имя поддомена (www, api, etc.)
     - `email`: Email для уведомлений от Let's Encrypt (опционально)
     """
+    # Check if user has access to this domain
+    if current_user:
+        require_domain_access(current_user, domain_id)
+    
     result = await db.execute(select(Domain).where(Domain.id == domain_id))
     domain = result.scalar_one_or_none()
     
@@ -231,6 +243,10 @@ async def get_certificate(
     """
     # Получить детальную информацию о сертификате
     """
+    # Check if user has access to this domain
+    if current_user:
+        require_domain_access(current_user, domain_id)
+    
     cert_result = await db.execute(
         select(Certificate).where(
             Certificate.id == cert_id,
@@ -268,6 +284,10 @@ async def get_certificate_logs(
     """
     # Получить логи выпуска/обновления сертификата
     """
+    # Check if user has access to this domain
+    if current_user:
+        require_domain_access(current_user, domain_id)
+    
     cert_result = await db.execute(
         select(Certificate).where(
             Certificate.id == cert_id,
@@ -312,6 +332,10 @@ async def renew_certificate(
     ## Параметры:
     - `force`: При `true` перевыпускает независимо от срока действия
     """
+    # Check if user has access to this domain
+    if current_user:
+        require_domain_access(current_user, domain_id)
+    
     cert_result = await db.execute(
         select(Certificate).where(
             Certificate.id == cert_id,
@@ -399,6 +423,10 @@ async def delete_certificate(
     **Важно:** Если это единственный активный сертификат для домена,
     HTTPS перестанет работать.
     """
+    # Check if user has access to this domain
+    if current_user:
+        require_domain_access(current_user, domain_id)
+    
     result = await db.execute(select(Domain).where(Domain.id == domain_id))
     domain = result.scalar_one_or_none()
     

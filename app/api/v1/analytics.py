@@ -6,7 +6,7 @@ from typing import Optional, List, Dict, Any
 from datetime import datetime, timedelta
 
 from app.core.database import get_db
-from app.core.security import get_optional_current_user
+from app.core.security import get_optional_current_user, get_allowed_domain_ids, require_domain_access
 from app.models.user import User
 from app.models.domain import Domain
 from app.models.edge_node import EdgeNode
@@ -141,7 +141,13 @@ async def get_domains_stats(
     """Get statistics for all domains from database"""
     # Get all domains
     domains_result = await db.execute(select(Domain))
-    domains = domains_result.scalars().all()
+    domains = list(domains_result.scalars().all())
+    
+    # Filter domains by API token restrictions if applicable
+    if current_user:
+        allowed_domain_ids = get_allowed_domain_ids(current_user)
+        if allowed_domain_ids is not None:
+            domains = [d for d in domains if d.id in allowed_domain_ids]
     
     # Calculate stats for each domain (could be optimized with group by query)
     # Using group by query is better
@@ -260,6 +266,10 @@ async def get_domain_basic_stats(
     db: AsyncSession = Depends(get_db)
 ):
     """Get basic statistics for a specific domain"""
+    # Check if user has access to this domain
+    if current_user:
+        require_domain_access(current_user, domain_id)
+    
     # Verify domain exists
     result = await db.execute(select(Domain).where(Domain.id == domain_id))
     domain = result.scalar_one_or_none()
@@ -316,6 +326,10 @@ async def get_domain_timeseries(
     db: AsyncSession = Depends(get_db)
 ):
     """Get domain statistics timeseries"""
+    # Check if user has access to this domain
+    if current_user:
+        require_domain_access(current_user, domain_id)
+    
     # Verify domain exists
     result = await db.execute(select(Domain).where(Domain.id == domain_id))
     domain = result.scalar_one_or_none()
@@ -381,6 +395,10 @@ async def get_domain_top_paths(
     db: AsyncSession = Depends(get_db)
 ):
     """Get top paths for a specific domain"""
+    # Check if user has access to this domain
+    if current_user:
+        require_domain_access(current_user, domain_id)
+    
     # Verify domain exists
     result = await db.execute(select(Domain).where(Domain.id == domain_id))
     domain = result.scalar_one_or_none()
@@ -420,6 +438,10 @@ async def get_domain_geo_stats(
     db: AsyncSession = Depends(get_db)
 ):
     """Get geographic distribution for a specific domain"""
+    # Check if user has access to this domain
+    if current_user:
+        require_domain_access(current_user, domain_id)
+    
     # Verify domain exists
     result = await db.execute(select(Domain).where(Domain.id == domain_id))
     domain = result.scalar_one_or_none()
@@ -472,6 +494,10 @@ async def get_domain_logs(
     db: AsyncSession = Depends(get_db)
 ):
     """Get request logs for a specific domain"""
+    # Check if user has access to this domain
+    if current_user:
+        require_domain_access(current_user, domain_id)
+    
     # Verify domain exists
     result = await db.execute(select(Domain).where(Domain.id == domain_id))
     domain = result.scalar_one_or_none()
