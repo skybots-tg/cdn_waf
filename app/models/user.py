@@ -1,9 +1,18 @@
 """User and authentication models"""
 from datetime import datetime
-from sqlalchemy import Column, Integer, String, Boolean, DateTime, Text, ForeignKey
+from sqlalchemy import Column, Integer, String, Boolean, DateTime, Text, ForeignKey, Table
 from sqlalchemy.orm import relationship
 
 from app.core.database import Base
+
+
+# Many-to-many relationship table for API tokens and domains
+api_token_domains = Table(
+    'api_token_domains',
+    Base.metadata,
+    Column('api_token_id', Integer, ForeignKey('api_tokens.id', ondelete='CASCADE'), primary_key=True),
+    Column('domain_id', Integer, ForeignKey('domains.id', ondelete='CASCADE'), primary_key=True)
+)
 
 
 class User(Base):
@@ -51,6 +60,15 @@ class APIToken(Base):
     last_used_at = Column(DateTime, nullable=True)
     
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    
+    # Domain restrictions (None = all domains accessible)
+    # If domains relationship is empty/None, token has access to all user's domains
+    # If domains are specified, token only has access to those domains
+    allowed_domains = relationship(
+        "Domain",
+        secondary=api_token_domains,
+        lazy="selectin"
+    )
     
     # Relationships
     user = relationship("User", back_populates="api_tokens")

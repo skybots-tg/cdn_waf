@@ -458,24 +458,60 @@ async function loadAPIKeys() {
             return;
         }
         
-        container.innerHTML = data.map(key => `
-            <div class="glass-card-sm mb-2">
-                <div class="flex-between">
-                    <div style="flex: 1;">
-                        <div style="font-weight: 600; margin-bottom: 4px;">${key.name}</div>
-                        <div style="font-size: 13px; color: var(--text-secondary); font-family: monospace;">
-                            ${key.key_preview}...
+        container.innerHTML = data.map(key => {
+            // Domain access info
+            let domainAccessHtml = '';
+            if (key.all_domains_access) {
+                domainAccessHtml = `
+                    <span class="badge badge-primary" style="font-size: 11px;">
+                        <i class="fas fa-globe"></i> All domains
+                    </span>
+                `;
+            } else if (key.allowed_domains && key.allowed_domains.length > 0) {
+                const domainNames = key.allowed_domains.map(d => d.name).join(', ');
+                const truncated = domainNames.length > 50 ? domainNames.substring(0, 50) + '...' : domainNames;
+                domainAccessHtml = `
+                    <span class="badge badge-secondary" style="font-size: 11px;" title="${domainNames}">
+                        <i class="fas fa-lock"></i> ${key.allowed_domains.length} domain${key.allowed_domains.length > 1 ? 's' : ''}
+                    </span>
+                `;
+            }
+            
+            // Status badge
+            const statusBadge = key.is_active 
+                ? '<span class="badge badge-success" style="font-size: 11px;">Active</span>'
+                : '<span class="badge badge-error" style="font-size: 11px;">Inactive</span>';
+            
+            return `
+                <div class="glass-card-sm mb-2">
+                    <div class="flex-between">
+                        <div style="flex: 1;">
+                            <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 4px;">
+                                <span style="font-weight: 600;">${key.name}</span>
+                                ${statusBadge}
+                            </div>
+                            <div style="font-size: 13px; color: var(--text-secondary); font-family: monospace;">
+                                ${key.key_preview}...
+                            </div>
+                            <div style="display: flex; align-items: center; gap: 8px; margin-top: 8px; flex-wrap: wrap;">
+                                ${domainAccessHtml}
+                                <span style="font-size: 12px; color: var(--text-muted);">
+                                    Created: ${new Date(key.created_at).toLocaleDateString()}
+                                </span>
+                                ${key.last_used_at ? `
+                                    <span style="font-size: 12px; color: var(--text-muted);">
+                                        Last used: ${new Date(key.last_used_at).toLocaleDateString()}
+                                    </span>
+                                ` : ''}
+                            </div>
                         </div>
-                        <div style="font-size: 12px; color: var(--text-muted); margin-top: 8px;">
-                            Created: ${new Date(key.created_at).toLocaleDateString()}
-                        </div>
+                        <button class="btn btn-error btn-sm" onclick="deleteAPIKey('${key.id}')">
+                            <i class="fas fa-trash"></i>
+                        </button>
                     </div>
-                    <button class="btn btn-error btn-sm" onclick="deleteAPIKey('${key.id}')">
-                        <i class="fas fa-trash"></i>
-                    </button>
                 </div>
-            </div>
-        `).join('');
+            `;
+        }).join('');
     } catch (error) {
         console.error('Error loading API keys:', error);
     }
@@ -520,7 +556,43 @@ function enable2FA() {
 
 // ==================== API Keys ====================
 
-function showCreateAPIKeyModal() {
+async function showCreateAPIKeyModal() {
+    // Fetch user's domains first
+    let domains = [];
+    try {
+        const response = await fetch('/api/v1/auth/my-domains', {
+            headers: { 'Authorization': `Bearer ${getToken()}` }
+        });
+        if (response.ok) {
+            domains = await response.json();
+        }
+    } catch (error) {
+        console.error('Error fetching domains:', error);
+    }
+    
+    const domainsHtml = domains.length > 0 ? `
+        <div class="form-group">
+            <label class="form-label">Domain Access</label>
+            <div style="margin-bottom: 8px;">
+                <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                    <input type="checkbox" id="api-key-all-domains" checked onchange="toggleDomainSelection()">
+                    <span>Access to all domains</span>
+                </label>
+            </div>
+            <div id="domain-selection" style="display: none; max-height: 200px; overflow-y: auto; border: 1px solid var(--glass-border); border-radius: 8px; padding: 12px;">
+                ${domains.map(d => `
+                    <label style="display: flex; align-items: center; gap: 8px; padding: 6px 0; cursor: pointer; border-bottom: 1px solid var(--glass-border);">
+                        <input type="checkbox" class="domain-checkbox" value="${d.id}" data-name="${d.name}">
+                        <span style="font-family: monospace; font-size: 13px;">${d.name}</span>
+                    </label>
+                `).join('')}
+            </div>
+            <p style="font-size: 12px; color: var(--text-muted); margin-top: 4px;">
+                Restrict this key to specific domains for better security
+            </p>
+        </div>
+    ` : '';
+    
     const modal = document.createElement('div');
     modal.className = 'modal-overlay';
     modal.innerHTML = `
@@ -549,6 +621,8 @@ function showCreateAPIKeyModal() {
                     </select>
                 </div>
                 
+                ${domainsHtml}
+                
                 <div style="background: var(--bg-tertiary); padding: 12px; border-radius: 8px;">
                     <p style="font-size: 13px; color: var(--text-secondary); margin: 0;">
                         <i class="fas fa-info-circle"></i> The API key will only be shown once after creation.
@@ -574,9 +648,24 @@ function showCreateAPIKeyModal() {
     setTimeout(() => document.getElementById('api-key-name').focus(), 100);
 }
 
+function toggleDomainSelection() {
+    const allDomainsCheckbox = document.getElementById('api-key-all-domains');
+    const domainSelection = document.getElementById('domain-selection');
+    
+    if (allDomainsCheckbox && domainSelection) {
+        domainSelection.style.display = allDomainsCheckbox.checked ? 'none' : 'block';
+        
+        // Uncheck all domain checkboxes when "all domains" is selected
+        if (allDomainsCheckbox.checked) {
+            document.querySelectorAll('.domain-checkbox').forEach(cb => cb.checked = false);
+        }
+    }
+}
+
 async function createAPIKey() {
     const name = document.getElementById('api-key-name').value.trim();
     const expiresDays = document.getElementById('api-key-expires').value;
+    const allDomainsCheckbox = document.getElementById('api-key-all-domains');
     
     if (!name) {
         showNotification('Please enter a key name', 'warning');
@@ -589,6 +678,21 @@ async function createAPIKey() {
             const expiresAt = new Date();
             expiresAt.setDate(expiresAt.getDate() + parseInt(expiresDays));
             body.expires_at = expiresAt.toISOString();
+        }
+        
+        // Get selected domain IDs if not "all domains"
+        if (allDomainsCheckbox && !allDomainsCheckbox.checked) {
+            const selectedDomains = [];
+            document.querySelectorAll('.domain-checkbox:checked').forEach(cb => {
+                selectedDomains.push(parseInt(cb.value));
+            });
+            
+            if (selectedDomains.length === 0) {
+                showNotification('Please select at least one domain or choose "Access to all domains"', 'warning');
+                return;
+            }
+            
+            body.domain_ids = selectedDomains;
         }
         
         const response = await fetch('/api/v1/auth/api-keys', {

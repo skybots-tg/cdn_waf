@@ -126,13 +126,16 @@ async def get_current_user(
 async def authenticate_api_key(token: str, db: AsyncSession):
     """Authenticate user using API key"""
     from app.models.user import APIToken, User
+    from sqlalchemy.orm import selectinload
     
     # Hash the provided token
     token_hash = hashlib.sha256(token.encode()).hexdigest()
     
-    # Find token in database
+    # Find token in database with allowed domains
     result = await db.execute(
-        select(APIToken).where(APIToken.token_hash == token_hash)
+        select(APIToken)
+        .options(selectinload(APIToken.allowed_domains))
+        .where(APIToken.token_hash == token_hash)
     )
     api_token = result.scalar_one_or_none()
     
@@ -163,7 +166,48 @@ async def authenticate_api_key(token: str, db: AsyncSession):
     if not user.is_active:
         raise HTTPException(status_code=403, detail="User account is inactive")
     
+    # Store allowed domain IDs on user object for later access checks
+    # None/empty means all domains allowed
+    user._api_token_allowed_domain_ids = (
+        {d.id for d in api_token.allowed_domains} 
+        if api_token.allowed_domains else None
+    )
+    
     return user
+
+
+def check_domain_access(user, domain_id: int) -> bool:
+    """
+    Check if user (via API token) has access to a specific domain.
+    
+    Returns True if:
+    - User is authenticated via JWT (not API token) - full access
+    - API token has no domain restrictions (all domains allowed)
+    - Domain ID is in the token's allowed domains list
+    
+    Returns False if:
+    - API token has domain restrictions and domain_id is not in the list
+    """
+    # If no _api_token_allowed_domain_ids attribute, user is authenticated via JWT
+    allowed_domain_ids = getattr(user, '_api_token_allowed_domain_ids', None)
+    
+    if allowed_domain_ids is None:
+        # No restrictions - either JWT auth or API token with all domains access
+        return True
+    
+    # Check if domain is in allowed list
+    return domain_id in allowed_domain_ids
+
+
+def require_domain_access(user, domain_id: int):
+    """
+    Require access to a specific domain, raise HTTPException if not allowed.
+    """
+    if not check_domain_access(user, domain_id):
+        raise HTTPException(
+            status_code=403,
+            detail="API key does not have access to this domain"
+        )
 
 
 async def get_current_active_user(current_user = Depends(get_current_user)):

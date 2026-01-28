@@ -12,7 +12,7 @@ import dns.resolver
 import dns.exception
 
 from app.core.database import get_db
-from app.core.security import get_current_active_user, get_optional_current_user
+from app.core.security import get_current_active_user, get_optional_current_user, require_domain_access
 from app.schemas.domain import (
     DomainCreate,
     DomainUpdate,
@@ -225,6 +225,9 @@ async def get_domain(
     db: AsyncSession = Depends(get_db),
 ):
     """Get domain by ID"""
+    # Check if user has access to this domain
+    require_domain_access(current_user, domain_id)
+    
     domain_service = DomainService(db)
     domain = await domain_service.get_by_id(domain_id)
 
@@ -248,6 +251,10 @@ async def get_domain_info(
     
     Возвращает домен, DNS записи, сертификаты и статистику.
     """
+    # Check if user has access to this domain
+    if current_user:
+        require_domain_access(current_user, domain_id)
+    
     domain_service = DomainService(db)
     domain = await domain_service.get_by_id(domain_id)
     
@@ -337,6 +344,9 @@ async def update_domain(
     db: AsyncSession = Depends(get_db),
 ):
     """Update domain"""
+    # Check if user has access to this domain
+    require_domain_access(current_user, domain_id)
+    
     domain_service = DomainService(db)
     domain = await domain_service.get_by_id(domain_id)
 
@@ -360,6 +370,9 @@ async def verify_ns(
     db: AsyncSession = Depends(get_db),
 ):
     """Verify NS records for domain"""
+    # Check if user has access to this domain
+    require_domain_access(current_user, domain_id)
+    
     domain_service = DomainService(db)
     domain = await domain_service.get_by_id(domain_id)
 
@@ -382,6 +395,9 @@ async def delete_domain(
     db: AsyncSession = Depends(get_db),
 ):
     """Delete domain"""
+    # Check if user has access to this domain
+    require_domain_access(current_user, domain_id)
+    
     domain_service = DomainService(db)
     domain = await domain_service.get_by_id(domain_id)
 

@@ -3,6 +3,7 @@ from typing import List
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
+from sqlalchemy.orm import selectinload
 import secrets
 import hashlib
 import json
@@ -25,9 +26,12 @@ from app.schemas.api_token import (
     APITokenCreate,
     APITokenResponse,
     APITokenCreated,
+    DomainBrief,
 )
 from app.services.user_service import UserService
 from app.models.user import User, APIToken
+from app.models.domain import Domain
+from app.models.organization import Organization, OrganizationMember
 
 router = APIRouter()
 
@@ -107,6 +111,45 @@ async def get_current_user_info(
     return current_user
 
 
+@router.get("/my-domains", response_model=List[DomainBrief])
+async def get_user_domains(
+    current_user: User = Depends(get_current_active_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    # Получить список доменов пользователя
+    
+    Возвращает все домены, доступные текущему пользователю через его организации.
+    Используется для выбора доменов при создании API ключа.
+    """
+    # Get user's organizations (owned + member)
+    org_ids_result = await db.execute(
+        select(Organization.id).where(Organization.owner_id == current_user.id)
+    )
+    owned_org_ids = [row[0] for row in org_ids_result.fetchall()]
+    
+    member_org_ids_result = await db.execute(
+        select(OrganizationMember.organization_id)
+        .where(OrganizationMember.user_id == current_user.id)
+    )
+    member_org_ids = [row[0] for row in member_org_ids_result.fetchall()]
+    
+    user_org_ids = set(owned_org_ids + member_org_ids)
+    
+    if not user_org_ids:
+        return []
+    
+    # Get all domains from user's organizations
+    domains_result = await db.execute(
+        select(Domain)
+        .where(Domain.organization_id.in_(user_org_ids))
+        .order_by(Domain.name)
+    )
+    domains = domains_result.scalars().all()
+    
+    return [DomainBrief(id=d.id, name=d.name) for d in domains]
+
+
 @router.get("/api-keys", response_model=List[APITokenResponse])
 async def get_api_keys(
     current_user: User = Depends(get_current_active_user),
@@ -121,6 +164,7 @@ async def get_api_keys(
     """
     result = await db.execute(
         select(APIToken)
+        .options(selectinload(APIToken.allowed_domains))
         .where(APIToken.user_id == current_user.id)
         .order_by(APIToken.created_at.desc())
     )
@@ -139,6 +183,8 @@ async def get_api_keys(
             expires_at=token.expires_at,
             last_used_at=token.last_used_at,
             created_at=token.created_at,
+            allowed_domains=[DomainBrief(id=d.id, name=d.name) for d in token.allowed_domains],
+            all_domains_access=len(token.allowed_domains) == 0,
         )
         for token in tokens
     ]
@@ -170,12 +216,49 @@ async def create_api_key(
     - `scopes`: Разрешения (опционально)
     - `allowed_ips`: Ограничение по IP (опционально)
     - `expires_at`: Дата истечения (опционально)
+    - `domain_ids`: Список ID доменов (опционально, пусто = доступ ко всем доменам)
     """
     # Generate secure random token
     token = f"fck_{secrets.token_urlsafe(32)}"  # FlareCloud Key
     
     # Hash token for storage
     token_hash = hashlib.sha256(token.encode()).hexdigest()
+    
+    # Validate domain_ids if provided - ensure user has access to these domains
+    allowed_domains = []
+    if token_create.domain_ids:
+        # Get user's organizations
+        org_ids_result = await db.execute(
+            select(Organization.id).where(Organization.owner_id == current_user.id)
+        )
+        owned_org_ids = [row[0] for row in org_ids_result.fetchall()]
+        
+        member_org_ids_result = await db.execute(
+            select(OrganizationMember.organization_id)
+            .where(OrganizationMember.user_id == current_user.id)
+        )
+        member_org_ids = [row[0] for row in member_org_ids_result.fetchall()]
+        
+        user_org_ids = set(owned_org_ids + member_org_ids)
+        
+        # Get domains that belong to user's organizations
+        domains_result = await db.execute(
+            select(Domain)
+            .where(
+                Domain.id.in_(token_create.domain_ids),
+                Domain.organization_id.in_(user_org_ids)
+            )
+        )
+        allowed_domains = domains_result.scalars().all()
+        
+        # Check if all requested domains were found and belong to user
+        found_domain_ids = {d.id for d in allowed_domains}
+        missing_ids = set(token_create.domain_ids) - found_domain_ids
+        if missing_ids:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Domains not found or access denied: {missing_ids}"
+            )
     
     # Create token record
     api_token = APIToken(
@@ -188,6 +271,10 @@ async def create_api_key(
         is_active=True,
     )
     
+    # Add allowed domains
+    if allowed_domains:
+        api_token.allowed_domains = allowed_domains
+    
     db.add(api_token)
     await db.commit()
     await db.refresh(api_token)
@@ -199,6 +286,8 @@ async def create_api_key(
         token=token,  # Full token - shown only once!
         key_preview=f"fck_{token_hash[:8]}",
         created_at=api_token.created_at,
+        allowed_domains=[DomainBrief(id=d.id, name=d.name) for d in allowed_domains],
+        all_domains_access=len(allowed_domains) == 0,
     )
 
 

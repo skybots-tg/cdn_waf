@@ -5,7 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
 from app.core.database import get_db
-from app.core.security import get_current_active_user
+from app.core.security import get_current_active_user, require_domain_access
 from app.schemas.dns import DNSRecordCreate, DNSRecordUpdate, DNSRecordResponse, DNSRecordImport
 from app.models.user import User
 from app.models.dns import DNSRecord
@@ -22,7 +22,8 @@ async def list_dns_records(
     db: AsyncSession = Depends(get_db)
 ):
     """List all DNS records for domain"""
-    # TODO: Check if user has access to this domain
+    # Check if user has access to this domain
+    require_domain_access(current_user, domain_id)
     
     result = await db.execute(
         select(DNSRecord)
@@ -41,7 +42,8 @@ async def create_dns_record(
     db: AsyncSession = Depends(get_db)
 ):
     """Create DNS record"""
-    # TODO: Check if user has access to this domain
+    # Check if user has access to this domain
+    require_domain_access(current_user, domain_id)
     
     # Verify domain exists
     result = await db.execute(select(Domain).where(Domain.id == domain_id))
@@ -88,6 +90,9 @@ async def import_dns_records(
     db: AsyncSession = Depends(get_db)
 ):
     """Import DNS records"""
+    # Check if user has access to this domain
+    require_domain_access(current_user, domain_id)
+    
     # Verify domain exists
     result = await db.execute(select(Domain).where(Domain.id == domain_id))
     domain = result.scalar_one_or_none()
@@ -145,7 +150,8 @@ async def get_dns_record(
             detail="DNS record not found"
         )
     
-    # TODO: Check if user has access to this record's domain
+    # Check if user has access to this record's domain
+    require_domain_access(current_user, record.domain_id)
     
     return record
 
@@ -169,7 +175,8 @@ async def update_dns_record(
             detail="DNS record not found"
         )
     
-    # TODO: Check if user has access to this record's domain
+    # Check if user has access to this record's domain
+    require_domain_access(current_user, record.domain_id)
     
     # Update fields
     update_data = record_update.model_dump(exclude_unset=True)
@@ -223,7 +230,8 @@ async def delete_dns_record(
             detail="DNS record not found"
         )
     
-    # TODO: Check if user has access to this record's domain
+    # Check if user has access to this record's domain
+    require_domain_access(current_user, record.domain_id)
     
     await db.delete(record)
     await db.commit()
