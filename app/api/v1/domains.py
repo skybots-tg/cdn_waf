@@ -12,7 +12,7 @@ import dns.resolver
 import dns.exception
 
 from app.core.database import get_db
-from app.core.security import get_current_active_user, get_optional_current_user, require_domain_access
+from app.core.security import get_current_active_user, get_optional_current_user, require_domain_access, get_allowed_domain_ids
 from app.schemas.domain import (
     DomainCreate,
     DomainUpdate,
@@ -190,6 +190,14 @@ async def list_domains(
 
     domain_service = DomainService(db)
     domains = await domain_service.list_by_organization(organization_id)
+    
+    # Filter domains by API token restrictions if applicable
+    if current_user:
+        allowed_domain_ids = get_allowed_domain_ids(current_user)
+        if allowed_domain_ids is not None:
+            # API token has domain restrictions - filter the list
+            domains = [d for d in domains if d.id in allowed_domain_ids]
+    
     return domains
 
 

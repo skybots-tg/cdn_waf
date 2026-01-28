@@ -210,6 +210,17 @@ def require_domain_access(user, domain_id: int):
         )
 
 
+def get_allowed_domain_ids(user) -> Optional[set]:
+    """
+    Get the set of allowed domain IDs for the current user.
+    
+    Returns:
+    - None if user has access to all domains (JWT auth or API token with no restrictions)
+    - Set of domain IDs if API token has domain restrictions
+    """
+    return getattr(user, '_api_token_allowed_domain_ids', None)
+
+
 async def get_current_active_user(current_user = Depends(get_current_user)):
     """Get current active user"""
     return current_user
