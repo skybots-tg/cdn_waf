@@ -24,6 +24,7 @@ from app.schemas.user import (
 )
 from app.schemas.api_token import (
     APITokenCreate,
+    APITokenUpdate,
     APITokenResponse,
     APITokenCreated,
     DomainBrief,
@@ -322,20 +323,28 @@ async def delete_api_key(
     await db.commit()
 
 
-@router.patch("/api-keys/{key_id}", response_model=APITokenResponse)
+@router.put("/api-keys/{key_id}", response_model=APITokenResponse)
 async def update_api_key(
     key_id: int,
-    is_active: bool,
+    token_update: APITokenUpdate,
     current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db)
 ):
     """
-    # Активировать/деактивировать API ключ
+    # Обновить API ключ
     
-    Позволяет временно отключить токен без удаления.
+    Позволяет обновить название, статус и доступ к доменам для API ключа.
+    
+    ## Параметры:
+    - `name`: Новое название токена (опционально)
+    - `is_active`: Активировать/деактивировать токен (опционально)
+    - `domain_ids`: Список ID доменов для ограничения доступа (опционально)
+    - `all_domains_access`: Если true, даёт доступ ко всем доменам (опционально)
     """
     result = await db.execute(
-        select(APIToken).where(
+        select(APIToken)
+        .options(selectinload(APIToken.allowed_domains))
+        .where(
             APIToken.id == key_id,
             APIToken.user_id == current_user.id
         )
@@ -348,9 +357,69 @@ async def update_api_key(
             detail="API key not found"
         )
     
-    token.is_active = is_active
+    # Update name if provided
+    if token_update.name is not None:
+        token.name = token_update.name
+    
+    # Update is_active if provided
+    if token_update.is_active is not None:
+        token.is_active = token_update.is_active
+    
+    # Handle domain access updates
+    if token_update.all_domains_access is True:
+        # Clear all domain restrictions - give access to all domains
+        token.allowed_domains = []
+    elif token_update.domain_ids is not None:
+        # Validate and set specific domains
+        if len(token_update.domain_ids) == 0:
+            # Empty list = all domains access
+            token.allowed_domains = []
+        else:
+            # Get user's organizations
+            org_ids_result = await db.execute(
+                select(Organization.id).where(Organization.owner_id == current_user.id)
+            )
+            owned_org_ids = [row[0] for row in org_ids_result.fetchall()]
+            
+            member_org_ids_result = await db.execute(
+                select(OrganizationMember.organization_id)
+                .where(OrganizationMember.user_id == current_user.id)
+            )
+            member_org_ids = [row[0] for row in member_org_ids_result.fetchall()]
+            
+            user_org_ids = set(owned_org_ids + member_org_ids)
+            
+            # Get domains that belong to user's organizations
+            domains_result = await db.execute(
+                select(Domain)
+                .where(
+                    Domain.id.in_(token_update.domain_ids),
+                    Domain.organization_id.in_(user_org_ids)
+                )
+            )
+            allowed_domains = domains_result.scalars().all()
+            
+            # Check if all requested domains were found and belong to user
+            found_domain_ids = {d.id for d in allowed_domains}
+            missing_ids = set(token_update.domain_ids) - found_domain_ids
+            if missing_ids:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Domains not found or access denied: {missing_ids}"
+                )
+            
+            token.allowed_domains = list(allowed_domains)
+    
     await db.commit()
     await db.refresh(token)
+    
+    # Reload allowed_domains relationship
+    result = await db.execute(
+        select(APIToken)
+        .options(selectinload(APIToken.allowed_domains))
+        .where(APIToken.id == token.id)
+    )
+    token = result.scalar_one()
     
     return APITokenResponse(
         id=token.id,
@@ -363,6 +432,8 @@ async def update_api_key(
         expires_at=token.expires_at,
         last_used_at=token.last_used_at,
         created_at=token.created_at,
+        allowed_domains=[DomainBrief(id=d.id, name=d.name) for d in token.allowed_domains],
+        all_domains_access=len(token.allowed_domains) == 0,
     )
 
 

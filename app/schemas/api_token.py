@@ -25,6 +25,20 @@ class APITokenCreate(BaseModel):
     )
 
 
+class APITokenUpdate(BaseModel):
+    """Schema for updating API token"""
+    name: Optional[str] = Field(default=None, min_length=1, max_length=255, description="Token name")
+    is_active: Optional[bool] = Field(default=None, description="Token active status")
+    domain_ids: Optional[List[int]] = Field(
+        default=None,
+        description="List of domain IDs accessible via this token. Empty list = all domains"
+    )
+    all_domains_access: Optional[bool] = Field(
+        default=None,
+        description="If true, token has access to all domains (clears domain_ids)"
+    )
+
+
 class APITokenResponse(BaseModel):
     """Schema for API token response (without actual token)"""
     id: int

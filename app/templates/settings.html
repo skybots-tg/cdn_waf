@@ -443,8 +443,13 @@ async function loadTeamMembers() {
 
 async function loadAPIKeys() {
     try {
-        const response = await fetch('/api/v1/auth/api-keys');
+        const response = await fetch('/api/v1/auth/api-keys', {
+            headers: { 'Authorization': `Bearer ${getToken()}` }
+        });
         const data = await response.json();
+        
+        // Cache the API keys data for editing
+        cachedAPIKeys = data;
         
         const container = document.getElementById('api-keys-list');
         
@@ -505,9 +510,14 @@ async function loadAPIKeys() {
                                 ` : ''}
                             </div>
                         </div>
-                        <button class="btn btn-error btn-sm" onclick="deleteAPIKey('${key.id}')">
-                            <i class="fas fa-trash"></i>
-                        </button>
+                        <div style="display: flex; gap: 8px;">
+                            <button class="btn btn-secondary btn-sm" onclick="showEditAPIKeyModal(${key.id})" title="Edit">
+                                <i class="fas fa-edit"></i>
+                            </button>
+                            <button class="btn btn-error btn-sm" onclick="deleteAPIKey('${key.id}')" title="Delete">
+                                <i class="fas fa-trash"></i>
+                            </button>
+                        </div>
                     </div>
                 </div>
             `;
@@ -573,23 +583,34 @@ async function showCreateAPIKeyModal() {
     const domainsHtml = domains.length > 0 ? `
         <div class="form-group">
             <label class="form-label">Domain Access</label>
-            <div style="margin-bottom: 8px;">
-                <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+            <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; padding: 12px; background: var(--bg-tertiary); border-radius: 8px;">
+                <div>
+                    <div style="font-weight: 500;">Access to all domains</div>
+                    <div style="font-size: 12px; color: var(--text-secondary);">Enable to allow access to all your domains</div>
+                </div>
+                <label class="toggle-switch">
                     <input type="checkbox" id="api-key-all-domains" checked onchange="toggleDomainSelection()">
-                    <span>Access to all domains</span>
+                    <span class="toggle-slider"></span>
                 </label>
             </div>
-            <div id="domain-selection" style="display: none; max-height: 200px; overflow-y: auto; border: 1px solid var(--glass-border); border-radius: 8px; padding: 12px;">
-                ${domains.map(d => `
-                    <label style="display: flex; align-items: center; gap: 8px; padding: 6px 0; cursor: pointer; border-bottom: 1px solid var(--glass-border);">
-                        <input type="checkbox" class="domain-checkbox" value="${d.id}" data-name="${d.name}">
-                        <span style="font-family: monospace; font-size: 13px;">${d.name}</span>
-                    </label>
-                `).join('')}
+            <div id="domain-selection" style="opacity: 0.5; pointer-events: none;">
+                <div style="max-height: 250px; overflow-y: auto; border: 1px solid var(--glass-border); border-radius: 8px;">
+                    ${domains.map(d => `
+                        <div class="domain-switch-item" style="display: flex; align-items: center; justify-content: space-between; padding: 12px 16px; border-bottom: 1px solid var(--glass-border);">
+                            <div>
+                                <div style="font-family: monospace; font-size: 14px; font-weight: 500;">${d.name}</div>
+                            </div>
+                            <label class="toggle-switch">
+                                <input type="checkbox" class="domain-checkbox" value="${d.id}" data-name="${d.name}">
+                                <span class="toggle-slider"></span>
+                            </label>
+                        </div>
+                    `).join('')}
+                </div>
+                <p style="font-size: 12px; color: var(--text-muted); margin-top: 8px;">
+                    <i class="fas fa-info-circle"></i> Toggle domains to grant API key access
+                </p>
             </div>
-            <p style="font-size: 12px; color: var(--text-muted); margin-top: 4px;">
-                Restrict this key to specific domains for better security
-            </p>
         </div>
     ` : '';
     
@@ -653,11 +674,14 @@ function toggleDomainSelection() {
     const domainSelection = document.getElementById('domain-selection');
     
     if (allDomainsCheckbox && domainSelection) {
-        domainSelection.style.display = allDomainsCheckbox.checked ? 'none' : 'block';
-        
-        // Uncheck all domain checkboxes when "all domains" is selected
         if (allDomainsCheckbox.checked) {
+            domainSelection.style.opacity = '0.5';
+            domainSelection.style.pointerEvents = 'none';
+            // Uncheck all domain checkboxes when "all domains" is selected
             document.querySelectorAll('.domain-checkbox').forEach(cb => cb.checked = false);
+        } else {
+            domainSelection.style.opacity = '1';
+            domainSelection.style.pointerEvents = 'auto';
         }
     }
 }
@@ -804,6 +828,219 @@ async function deleteAPIKey(keyId) {
         loadAPIKeys();
     } catch (error) {
         showNotification('Failed to delete API key', 'error');
+        console.error(error);
+    }
+}
+
+// Store API keys data for editing
+let cachedAPIKeys = [];
+
+async function showEditAPIKeyModal(keyId) {
+    // Find the API key in cached data or fetch fresh data
+    let keyData = cachedAPIKeys.find(k => k.id === keyId);
+    
+    if (!keyData) {
+        // Refetch if not found
+        try {
+            const response = await fetch('/api/v1/auth/api-keys', {
+                headers: { 'Authorization': `Bearer ${getToken()}` }
+            });
+            if (response.ok) {
+                cachedAPIKeys = await response.json();
+                keyData = cachedAPIKeys.find(k => k.id === keyId);
+            }
+        } catch (error) {
+            console.error('Error fetching API key:', error);
+        }
+    }
+    
+    if (!keyData) {
+        showNotification('API key not found', 'error');
+        return;
+    }
+    
+    // Fetch user's domains
+    let domains = [];
+    try {
+        const response = await fetch('/api/v1/auth/my-domains', {
+            headers: { 'Authorization': `Bearer ${getToken()}` }
+        });
+        if (response.ok) {
+            domains = await response.json();
+        }
+    } catch (error) {
+        console.error('Error fetching domains:', error);
+    }
+    
+    // Get currently allowed domain IDs
+    const allowedDomainIds = new Set((keyData.allowed_domains || []).map(d => d.id));
+    const hasAllDomainsAccess = keyData.all_domains_access;
+    
+    // Generate domain switches HTML
+    const domainsHtml = domains.length > 0 ? `
+        <div class="form-group">
+            <label class="form-label">Domain Access</label>
+            <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; padding: 12px; background: var(--bg-tertiary); border-radius: 8px;">
+                <div>
+                    <div style="font-weight: 500;">Access to all domains</div>
+                    <div style="font-size: 12px; color: var(--text-secondary);">Enable to allow access to all your domains</div>
+                </div>
+                <label class="toggle-switch">
+                    <input type="checkbox" id="edit-api-key-all-domains" ${hasAllDomainsAccess ? 'checked' : ''} onchange="toggleEditDomainSelection()">
+                    <span class="toggle-slider"></span>
+                </label>
+            </div>
+            <div id="edit-domain-selection" style="${hasAllDomainsAccess ? 'opacity: 0.5; pointer-events: none;' : ''}">
+                <div style="max-height: 300px; overflow-y: auto; border: 1px solid var(--glass-border); border-radius: 8px;">
+                    ${domains.map(d => `
+                        <div class="domain-switch-item" style="display: flex; align-items: center; justify-content: space-between; padding: 12px 16px; border-bottom: 1px solid var(--glass-border);">
+                            <div>
+                                <div style="font-family: monospace; font-size: 14px; font-weight: 500;">${d.name}</div>
+                            </div>
+                            <label class="toggle-switch">
+                                <input type="checkbox" class="edit-domain-switch" value="${d.id}" data-name="${d.name}" ${hasAllDomainsAccess || allowedDomainIds.has(d.id) ? 'checked' : ''}>
+                                <span class="toggle-slider"></span>
+                            </label>
+                        </div>
+                    `).join('')}
+                </div>
+                <p style="font-size: 12px; color: var(--text-muted); margin-top: 8px;">
+                    <i class="fas fa-info-circle"></i> Toggle domains to grant or revoke API key access
+                </p>
+            </div>
+        </div>
+    ` : '<p style="color: var(--text-muted);">No domains available</p>';
+    
+    const modal = document.createElement('div');
+    modal.className = 'modal-overlay';
+    modal.innerHTML = `
+        <div class="modal-content" style="max-width: 550px;">
+            <div class="modal-header">
+                <h3><i class="fas fa-edit"></i> Edit API Key</h3>
+                <button class="modal-close" onclick="closeModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label class="form-label">Key Name</label>
+                    <input type="text" class="form-input" id="edit-api-key-name" value="${keyData.name}" required>
+                </div>
+                
+                <div class="form-group">
+                    <label class="form-label">Status</label>
+                    <div style="display: flex; align-items: center; justify-content: space-between; padding: 12px; background: var(--bg-tertiary); border-radius: 8px;">
+                        <div>
+                            <div style="font-weight: 500;">Active</div>
+                            <div style="font-size: 12px; color: var(--text-secondary);">Enable or disable this API key</div>
+                        </div>
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="edit-api-key-active" ${keyData.is_active ? 'checked' : ''}>
+                            <span class="toggle-slider"></span>
+                        </label>
+                    </div>
+                </div>
+                
+                ${domainsHtml}
+                
+                <div style="background: var(--bg-tertiary); padding: 12px; border-radius: 8px; margin-top: 16px;">
+                    <p style="font-size: 13px; color: var(--text-secondary); margin: 0;">
+                        <i class="fas fa-key"></i> Key preview: <code style="font-family: monospace;">${keyData.key_preview}...</code>
+                    </p>
+                    <p style="font-size: 12px; color: var(--text-muted); margin: 4px 0 0 0;">
+                        Created: ${new Date(keyData.created_at).toLocaleDateString()}
+                    </p>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+                <button class="btn btn-primary" onclick="updateAPIKey(${keyId})">
+                    <i class="fas fa-save"></i> Save Changes
+                </button>
+            </div>
+        </div>
+    `;
+    
+    document.body.appendChild(modal);
+    modal.addEventListener('click', (e) => {
+        if (e.target === modal) closeModal();
+    });
+    
+    // Focus name input
+    setTimeout(() => document.getElementById('edit-api-key-name').focus(), 100);
+}
+
+function toggleEditDomainSelection() {
+    const allDomainsCheckbox = document.getElementById('edit-api-key-all-domains');
+    const domainSelection = document.getElementById('edit-domain-selection');
+    
+    if (allDomainsCheckbox && domainSelection) {
+        if (allDomainsCheckbox.checked) {
+            domainSelection.style.opacity = '0.5';
+            domainSelection.style.pointerEvents = 'none';
+            // Check all domain switches when "all domains" is enabled
+            document.querySelectorAll('.edit-domain-switch').forEach(sw => sw.checked = true);
+        } else {
+            domainSelection.style.opacity = '1';
+            domainSelection.style.pointerEvents = 'auto';
+        }
+    }
+}
+
+async function updateAPIKey(keyId) {
+    const name = document.getElementById('edit-api-key-name').value.trim();
+    const isActive = document.getElementById('edit-api-key-active').checked;
+    const allDomainsCheckbox = document.getElementById('edit-api-key-all-domains');
+    
+    if (!name) {
+        showNotification('Please enter a key name', 'warning');
+        return;
+    }
+    
+    try {
+        const body = { 
+            name,
+            is_active: isActive
+        };
+        
+        // Handle domain access
+        if (allDomainsCheckbox) {
+            if (allDomainsCheckbox.checked) {
+                body.all_domains_access = true;
+            } else {
+                // Get selected domain IDs
+                const selectedDomains = [];
+                document.querySelectorAll('.edit-domain-switch:checked').forEach(sw => {
+                    selectedDomains.push(parseInt(sw.value));
+                });
+                
+                if (selectedDomains.length === 0) {
+                    showNotification('Please select at least one domain or enable "Access to all domains"', 'warning');
+                    return;
+                }
+                
+                body.domain_ids = selectedDomains;
+            }
+        }
+        
+        const response = await fetch(`/api/v1/auth/api-keys/${keyId}`, {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${getToken()}`
+            },
+            body: JSON.stringify(body)
+        });
+        
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.detail || 'Failed to update API key');
+        }
+        
+        closeModal();
+        showNotification('API key updated successfully', 'success');
+        loadAPIKeys();
+        
+    } catch (error) {
+        showNotification(error.message || 'Failed to update API key', 'error');
         console.error(error);
     }
 }
