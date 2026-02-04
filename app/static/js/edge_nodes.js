@@ -1,6 +1,8 @@
 // Edge Nodes Management JavaScript
 
 let currentNodeId = null;
+let resetPasswordFlag = false;
+let resetSshKeyFlag = false;
 
 // Load edge nodes
 async function loadNodes() {
@@ -118,11 +120,30 @@ function getStatusBadge(status) {
 // Show add node modal
 function showAddNodeModal() {
     currentNodeId = null;
+    resetPasswordFlag = false;
+    resetSshKeyFlag = false;
+    
     document.getElementById('modal-title').textContent = 'Add Edge Node';
     document.getElementById('node-form').reset();
     document.getElementById('node-id').value = '';
     document.getElementById('node-ssh-port').value = '22';
     document.getElementById('node-enabled').checked = true;
+    
+    // Reset auth method to password and toggle
+    document.querySelector('input[name="auth_method"][value="password"]').checked = true;
+    toggleAuthMethod();
+    
+    // Hide credential status and reset buttons for new nodes
+    const passwordStatus = document.getElementById('password-status');
+    const keyStatus = document.getElementById('key-status');
+    const resetPasswordBtn = document.getElementById('reset-password-btn');
+    const resetKeyBtn = document.getElementById('reset-key-btn');
+    
+    if (passwordStatus) passwordStatus.innerHTML = '';
+    if (keyStatus) keyStatus.innerHTML = '';
+    if (resetPasswordBtn) resetPasswordBtn.style.display = 'none';
+    if (resetKeyBtn) resetKeyBtn.style.display = 'none';
+    
     document.getElementById('node-modal').style.display = 'flex';
 }
 
@@ -140,6 +161,10 @@ async function editNode(nodeId) {
         const node = await response.json();
         currentNodeId = nodeId;
         
+        // Reset flags for credential reset
+        resetPasswordFlag = false;
+        resetSshKeyFlag = false;
+        
         document.getElementById('modal-title').textContent = 'Edit Edge Node';
         document.getElementById('node-id').value = node.id;
         document.getElementById('node-name').value = node.name;
@@ -153,13 +178,23 @@ async function editNode(nodeId) {
         document.getElementById('node-ssh-user').value = node.ssh_user || '';
         document.getElementById('node-enabled').checked = node.enabled;
         
-        // Handle auth method
+        // Clear password and key fields (we don't show stored credentials)
+        document.getElementById('node-ssh-password').value = '';
+        document.getElementById('node-ssh-key').value = '';
+        
+        // Handle auth method and show credential status
         if (node.has_ssh_key) {
             document.querySelector('input[name="auth_method"][value="key"]').checked = true;
             toggleAuthMethod();
+            updateCredentialStatus('key', true);
+        } else if (node.has_ssh_password) {
+            document.querySelector('input[name="auth_method"][value="password"]').checked = true;
+            toggleAuthMethod();
+            updateCredentialStatus('password', true);
         } else {
             document.querySelector('input[name="auth_method"][value="password"]').checked = true;
             toggleAuthMethod();
+            updateCredentialStatus('password', false);
         }
         
         document.getElementById('node-modal').style.display = 'flex';
@@ -169,15 +204,73 @@ async function editNode(nodeId) {
     }
 }
 
+// Update credential status display
+function updateCredentialStatus(type, hasCredential) {
+    const passwordStatus = document.getElementById('password-status');
+    const keyStatus = document.getElementById('key-status');
+    const resetPasswordBtn = document.getElementById('reset-password-btn');
+    const resetKeyBtn = document.getElementById('reset-key-btn');
+    
+    if (type === 'password' && passwordStatus) {
+        if (hasCredential && !resetPasswordFlag) {
+            passwordStatus.innerHTML = '<span style="color: var(--success);"><i class="fas fa-check-circle"></i> Password is set</span>';
+            if (resetPasswordBtn) resetPasswordBtn.style.display = 'inline-flex';
+        } else if (resetPasswordFlag) {
+            passwordStatus.innerHTML = '<span style="color: var(--warning);"><i class="fas fa-exclamation-circle"></i> Will be cleared on save</span>';
+            if (resetPasswordBtn) resetPasswordBtn.style.display = 'none';
+        } else {
+            passwordStatus.innerHTML = '<span style="color: var(--text-muted);"><i class="fas fa-minus-circle"></i> Not set</span>';
+            if (resetPasswordBtn) resetPasswordBtn.style.display = 'none';
+        }
+    }
+    
+    if (type === 'key' && keyStatus) {
+        if (hasCredential && !resetSshKeyFlag) {
+            keyStatus.innerHTML = '<span style="color: var(--success);"><i class="fas fa-check-circle"></i> SSH Key is set</span>';
+            if (resetKeyBtn) resetKeyBtn.style.display = 'inline-flex';
+        } else if (resetSshKeyFlag) {
+            keyStatus.innerHTML = '<span style="color: var(--warning);"><i class="fas fa-exclamation-circle"></i> Will be cleared on save</span>';
+            if (resetKeyBtn) resetKeyBtn.style.display = 'none';
+        } else {
+            keyStatus.innerHTML = '<span style="color: var(--text-muted);"><i class="fas fa-minus-circle"></i> Not set</span>';
+            if (resetKeyBtn) resetKeyBtn.style.display = 'none';
+        }
+    }
+}
+
+// Reset password function
+function resetPassword() {
+    if (confirm('Are you sure you want to clear the SSH password? The password will be removed when you save.')) {
+        resetPasswordFlag = true;
+        document.getElementById('node-ssh-password').value = '';
+        updateCredentialStatus('password', true);
+    }
+}
+
+// Reset SSH key function
+function resetSshKey() {
+    if (confirm('Are you sure you want to clear the SSH key? The key will be removed when you save.')) {
+        resetSshKeyFlag = true;
+        document.getElementById('node-ssh-key').value = '';
+        updateCredentialStatus('key', true);
+    }
+}
+
 // Close node modal
 function closeNodeModal() {
     document.getElementById('node-modal').style.display = 'none';
     currentNodeId = null;
+    resetPasswordFlag = false;
+    resetSshKeyFlag = false;
 }
 
 // Save node
 async function saveNode(event) {
     event.preventDefault();
+    
+    const authMethod = document.querySelector('input[name="auth_method"]:checked').value;
+    const sshPassword = document.getElementById('node-ssh-password').value;
+    const sshKey = document.getElementById('node-ssh-key').value;
     
     const nodeData = {
         name: document.getElementById('node-name').value,
@@ -189,14 +282,34 @@ async function saveNode(event) {
         ssh_host: document.getElementById('node-ssh-host').value || null,
         ssh_port: parseInt(document.getElementById('node-ssh-port').value) || 22,
         ssh_user: document.getElementById('node-ssh-user').value || null,
-        ssh_key: document.querySelector('input[name="auth_method"]:checked').value === 'key' 
-            ? document.getElementById('node-ssh-key').value 
-            : null,
-        ssh_password: document.querySelector('input[name="auth_method"]:checked').value === 'password'
-            ? document.getElementById('node-ssh-password').value
-            : null,
         enabled: document.getElementById('node-enabled').checked
     };
+    
+    // Handle credentials based on mode (create vs update)
+    if (currentNodeId) {
+        // UPDATE mode: only send credentials if they're explicitly set or being reset
+        if (authMethod === 'password') {
+            // If password is filled in, send it. If reset flag is set, send empty string to clear it.
+            if (sshPassword) {
+                nodeData.ssh_password = sshPassword;
+            } else if (resetPasswordFlag) {
+                nodeData.ssh_password = '';  // Explicitly clear
+            }
+            // Don't include ssh_password at all if empty and not resetting (keeps existing)
+        } else if (authMethod === 'key') {
+            // If key is filled in, send it. If reset flag is set, send empty string to clear it.
+            if (sshKey) {
+                nodeData.ssh_key = sshKey;
+            } else if (resetSshKeyFlag) {
+                nodeData.ssh_key = '';  // Explicitly clear
+            }
+            // Don't include ssh_key at all if empty and not resetting (keeps existing)
+        }
+    } else {
+        // CREATE mode: always send credentials as entered
+        nodeData.ssh_key = authMethod === 'key' ? sshKey : null;
+        nodeData.ssh_password = authMethod === 'password' ? sshPassword : null;
+    }
     
     try {
         const url = currentNodeId 

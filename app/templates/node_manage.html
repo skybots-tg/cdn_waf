@@ -154,15 +154,50 @@
                         <input type="text" class="form-input" name="ssh_user" value="{{ node.ssh_user or 'root' }}">
                     </div>
                     <div class="form-group">
-                        <label class="form-label">SSH Private Key (оставьте пустым для входа по паролю)</label>
-                        <textarea class="form-textarea" name="ssh_key" style="font-family: monospace; font-size: 12px; height: 100px;" placeholder="-----BEGIN OPENSSH PRIVATE KEY-----...">{{ node.ssh_key or '' }}</textarea>
+                        <label class="form-label">SSH Private Key</label>
+                        <div class="credential-field">
+                            <div class="credential-status" id="ssh-key-status">
+                                {% if node.has_ssh_key %}
+                                <span class="credential-badge credential-set">
+                                    <i class="fas fa-check-circle"></i> Ключ установлен
+                                </span>
+                                <button type="button" class="btn btn-sm btn-warning" onclick="clearSshKey()" id="clear-key-btn">
+                                    <i class="fas fa-times"></i> Сбросить
+                                </button>
+                                {% else %}
+                                <span class="credential-badge credential-empty">
+                                    <i class="fas fa-minus-circle"></i> Не установлен
+                                </span>
+                                {% endif %}
+                            </div>
+                            <textarea class="form-textarea" name="ssh_key" id="ssh-key-input" style="font-family: monospace; font-size: 12px; height: 100px;" placeholder="-----BEGIN OPENSSH PRIVATE KEY-----..."></textarea>
+                            <p style="font-size: 12px; color: var(--text-secondary); margin-top: 4px;">
+                                Оставьте пустым, чтобы сохранить текущий ключ. Заполните для установки нового.
+                            </p>
+                        </div>
                     </div>
                     <div class="form-group">
-                        <label class="form-label">SSH Пароль (если не используется ключ)</label>
-                        <input type="password" class="form-input" name="ssh_password" placeholder="••••••••" value="">
-                        <p style="font-size: 12px; color: var(--text-secondary); margin-top: 4px;">
-                            Оставьте пустым, чтобы не менять.
-                        </p>
+                        <label class="form-label">SSH Пароль</label>
+                        <div class="credential-field">
+                            <div class="credential-status" id="ssh-password-status">
+                                {% if node.has_ssh_password %}
+                                <span class="credential-badge credential-set">
+                                    <i class="fas fa-check-circle"></i> Пароль установлен
+                                </span>
+                                <button type="button" class="btn btn-sm btn-warning" onclick="clearSshPassword()" id="clear-password-btn">
+                                    <i class="fas fa-times"></i> Сбросить
+                                </button>
+                                {% else %}
+                                <span class="credential-badge credential-empty">
+                                    <i class="fas fa-minus-circle"></i> Не установлен
+                                </span>
+                                {% endif %}
+                            </div>
+                            <input type="password" class="form-input" name="ssh_password" id="ssh-password-input" placeholder="Введите новый пароль">
+                            <p style="font-size: 12px; color: var(--text-secondary); margin-top: 4px;">
+                                Оставьте пустым, чтобы сохранить текущий пароль. Заполните для установки нового.
+                            </p>
+                        </div>
                     </div>
                 </form>
             </div>
@@ -911,6 +946,84 @@
         grid-template-columns: 1fr;
     }
 }
+
+/* Credential field styles */
+.credential-field {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.credential-status {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 4px;
+}
+
+.credential-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 10px;
+    border-radius: 4px;
+    font-size: 12px;
+    font-weight: 500;
+}
+
+.credential-set {
+    background: rgba(81, 207, 102, 0.15);
+    color: var(--success);
+}
+
+.credential-empty {
+    background: var(--bg-tertiary);
+    color: var(--text-muted);
+}
+
+.credential-warning {
+    background: rgba(255, 212, 59, 0.15);
+    color: var(--warning);
+}
+
+/* Nginx Loading Overlay */
+.nginx-loading-overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(20, 21, 25, 0.7);
+    backdrop-filter: blur(8px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 100;
+    border-radius: var(--border-radius);
+    opacity: 0;
+    visibility: hidden;
+    transition: opacity 0.3s ease, visibility 0.3s ease;
+}
+
+.nginx-loading-overlay.visible {
+    opacity: 1;
+    visibility: visible;
+}
+
+.nginx-loading-spinner {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 16px;
+    color: var(--text-primary);
+    font-size: 16px;
+    font-weight: 500;
+}
+
+.nginx-loading-spinner i {
+    font-size: 32px;
+    color: var(--accent-primary);
+}
 </style>
 
 <script>
@@ -965,14 +1078,43 @@ function switchTab(tabName) {
     if (btn) btn.classList.add('active');
 }
 
+// Flags for credential reset
+let resetSshKeyFlag = false;
+let resetSshPasswordFlag = false;
+
 async function saveSettings() {
     const form = document.getElementById('node-settings-form');
     const sshForm = document.getElementById('ssh-settings-form');
     
+    const formData = new FormData(form);
+    const sshFormData = new FormData(sshForm);
+    
     const data = {
-        ...Object.fromEntries(new FormData(form)),
-        ...Object.fromEntries(new FormData(sshForm))
+        ...Object.fromEntries(formData),
     };
+    
+    // Add SSH settings except credentials
+    data.ssh_host = sshFormData.get('ssh_host');
+    data.ssh_port = parseInt(sshFormData.get('ssh_port')) || 22;
+    data.ssh_user = sshFormData.get('ssh_user');
+    
+    // Handle SSH key: only send if new value entered or explicitly reset
+    const sshKey = sshFormData.get('ssh_key');
+    if (sshKey && sshKey.trim()) {
+        data.ssh_key = sshKey;
+    } else if (resetSshKeyFlag) {
+        data.ssh_key = '';  // Explicitly clear
+    }
+    // Otherwise don't include ssh_key to keep existing
+    
+    // Handle SSH password: only send if new value entered or explicitly reset
+    const sshPassword = sshFormData.get('ssh_password');
+    if (sshPassword && sshPassword.trim()) {
+        data.ssh_password = sshPassword;
+    } else if (resetSshPasswordFlag) {
+        data.ssh_password = '';  // Explicitly clear
+    }
+    // Otherwise don't include ssh_password to keep existing
     
     // Convert checkbox
     data.enabled = form.querySelector('[name="enabled"]').checked;
@@ -982,8 +1124,39 @@ async function saveSettings() {
     try {
         await api.patch(`/edge-nodes/${NODE_ID}`, data);
         showNotification('Настройки сохранены', 'success');
+        
+        // Reset flags after successful save
+        resetSshKeyFlag = false;
+        resetSshPasswordFlag = false;
+        
+        // Reload page to show updated status
+        setTimeout(() => location.reload(), 1000);
     } catch (error) {
         showNotification(error.message, 'error');
+    }
+}
+
+function clearSshKey() {
+    if (confirm('Вы уверены, что хотите сбросить SSH ключ? Ключ будет удален при сохранении.')) {
+        resetSshKeyFlag = true;
+        document.getElementById('ssh-key-input').value = '';
+        document.getElementById('ssh-key-status').innerHTML = `
+            <span class="credential-badge credential-warning">
+                <i class="fas fa-exclamation-circle"></i> Будет удалён при сохранении
+            </span>
+        `;
+    }
+}
+
+function clearSshPassword() {
+    if (confirm('Вы уверены, что хотите сбросить SSH пароль? Пароль будет удален при сохранении.')) {
+        resetSshPasswordFlag = true;
+        document.getElementById('ssh-password-input').value = '';
+        document.getElementById('ssh-password-status').innerHTML = `
+            <span class="credential-badge credential-warning">
+                <i class="fas fa-exclamation-circle"></i> Будет удалён при сохранении
+            </span>
+        `;
     }
 }
 
@@ -1320,6 +1493,8 @@ window.switchTab = function(tabName) {
     if (tabName === 'components') {
         checkAllComponents();
     } else if (tabName === 'nginx') {
+        // Always reload nginx rules from the node when switching to nginx tab
+        // The loading overlay will be shown automatically by loadNginxRules()
         loadNginxRules();
     }
 }

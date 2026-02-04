@@ -7,18 +7,66 @@
 // Nginx Rules Data Management
 // ============================================
 
+// Track loading state
+let nginxRulesLoaded = false;
+
+/**
+ * Show loading overlay on nginx tab
+ */
+function showNginxLoading() {
+    const nginxTab = document.getElementById('tab-nginx');
+    if (!nginxTab) return;
+    
+    // Create loading overlay if it doesn't exist
+    let overlay = document.getElementById('nginx-loading-overlay');
+    if (!overlay) {
+        overlay = document.createElement('div');
+        overlay.id = 'nginx-loading-overlay';
+        overlay.className = 'nginx-loading-overlay';
+        overlay.innerHTML = `
+            <div class="nginx-loading-spinner">
+                <i class="fas fa-spinner fa-spin"></i>
+                <span>Загрузка настроек с ноды...</span>
+            </div>
+        `;
+        nginxTab.style.position = 'relative';
+        nginxTab.appendChild(overlay);
+    }
+    
+    overlay.classList.add('visible');
+}
+
+/**
+ * Hide loading overlay on nginx tab
+ */
+function hideNginxLoading() {
+    const overlay = document.getElementById('nginx-loading-overlay');
+    if (overlay) {
+        overlay.classList.remove('visible');
+    }
+}
+
 /**
  * Load current Nginx rules from the server
  */
 async function loadNginxRules() {
+    // Show loading overlay
+    showNginxLoading();
+    
     try {
         const response = await api.get(`/edge-nodes/${NODE_ID}/nginx-rules`);
         if (response && response.config) {
             populateNginxForm(response.config);
+            nginxRulesLoaded = true;
         }
     } catch (error) {
         console.error('Failed to load nginx rules:', error);
         // Use defaults if can't load
+    } finally {
+        // Hide loading overlay after a small delay for smooth transition
+        setTimeout(() => {
+            hideNginxLoading();
+        }, 300);
     }
 }
 

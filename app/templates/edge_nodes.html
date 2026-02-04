@@ -200,12 +200,30 @@
 
             <div id="auth-password" class="form-group">
                 <label class="form-label">SSH Password</label>
-                <input type="password" class="form-input" id="node-ssh-password" placeholder="Root password">
+                <div class="input-with-action">
+                    <input type="password" class="form-input" id="node-ssh-password" placeholder="Enter new password or leave empty to keep current">
+                    <button type="button" class="btn btn-sm btn-warning" id="reset-password-btn" style="display: none;" onclick="resetPassword()" title="Clear password">
+                        <i class="fas fa-times"></i> Clear
+                    </button>
+                </div>
+                <div id="password-status" style="margin-top: 4px; font-size: 12px;"></div>
+                <p style="font-size: 12px; color: var(--text-secondary); margin-top: 4px;">
+                    Leave empty to keep existing password. Fill in to set a new one.
+                </p>
             </div>
             
             <div id="auth-key" class="form-group" style="display: none;">
                 <label class="form-label">SSH Private Key</label>
-                <textarea class="form-textarea" id="node-ssh-key" placeholder="-----BEGIN RSA PRIVATE KEY-----"></textarea>
+                <div class="textarea-with-action">
+                    <textarea class="form-textarea" id="node-ssh-key" placeholder="-----BEGIN RSA PRIVATE KEY-----"></textarea>
+                    <button type="button" class="btn btn-sm btn-warning" id="reset-key-btn" style="display: none;" onclick="resetSshKey()" title="Clear SSH key">
+                        <i class="fas fa-times"></i> Clear
+                    </button>
+                </div>
+                <div id="key-status" style="margin-top: 4px; font-size: 12px;"></div>
+                <p style="font-size: 12px; color: var(--text-secondary); margin-top: 4px;">
+                    Leave empty to keep existing key. Paste to set a new one.
+                </p>
             </div>
             
             <div class="flex-between" style="margin-top: 24px;">
@@ -289,6 +307,30 @@
     gap: 8px;
     flex-wrap: wrap;
     margin-top: 12px;
+}
+
+.input-with-action {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+}
+
+.input-with-action .form-input {
+    flex: 1;
+}
+
+.textarea-with-action {
+    position: relative;
+}
+
+.textarea-with-action .form-textarea {
+    width: 100%;
+}
+
+.textarea-with-action .btn {
+    position: absolute;
+    top: 8px;
+    right: 8px;
 }
 </style>
 
