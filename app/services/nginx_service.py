@@ -13,6 +13,7 @@ from app.schemas.nginx_rules import (
     NginxApplyResult
 )
 from app.services.edge_service import EdgeNodeService
+from app.services.nginx_parser import NginxConfigParser
 
 logger = logging.getLogger(__name__)
 
@@ -28,21 +29,36 @@ class NginxRulesService:
     @staticmethod
     async def get_rules(node: EdgeNode) -> NginxRulesConfig:
         """Get current Nginx rules from edge node"""
-        # Try to read config from remote
+        # Try to read our saved config first
         result = await EdgeNodeService.execute_command(
             node,
-            f"cat {NGINX_RULES_CONFIG_PATH} 2>/dev/null || echo '{{}}'"
+            f"cat {NGINX_RULES_CONFIG_PATH} 2>/dev/null || echo ''"
         )
         
         if result.success and result.stdout.strip():
             try:
                 data = json.loads(result.stdout.strip())
-                return NginxRulesConfig(**data)
+                if data:  # If we have saved config, use it
+                    return NginxRulesConfig(**data)
             except (json.JSONDecodeError, Exception) as e:
-                logger.warning(f"Failed to parse nginx rules config: {e}")
+                logger.warning(f"Failed to parse saved nginx rules config: {e}")
         
-        # Return defaults if no config exists
-        return NginxRulesConfig()
+        # No saved config - parse real nginx configuration
+        return await NginxRulesService.parse_nginx_config(node)
+    
+    @staticmethod
+    async def parse_nginx_config(node: EdgeNode) -> NginxRulesConfig:
+        """Parse real nginx configuration from the edge node"""
+        # Get nginx full config dump
+        cmd = "nginx -T 2>/dev/null || cat /etc/nginx/nginx.conf /etc/nginx/conf.d/*.conf 2>/dev/null || echo ''"
+        result = await EdgeNodeService.execute_command(node, cmd, timeout=30)
+        
+        if not result.success or not result.stdout.strip():
+            logger.warning(f"Could not read nginx config from {node.name}")
+            return NginxRulesConfig()
+        
+        # Use parser to extract settings
+        return NginxConfigParser.parse_config(result.stdout)
     
     @staticmethod
     def generate_nginx_config(config: NginxRulesConfig) -> str:
