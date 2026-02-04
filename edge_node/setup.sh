@@ -131,9 +131,27 @@ install_deps() {
 
     if [[ "${DIST_FAMILY}" == "debian" ]]; then
         run_apt update -y
+        
+        # Определяем версию Python для установки правильного пакета venv
+        PYTHON_VERSION=$(python3 --version 2>/dev/null | grep -oP '\d+\.\d+' | head -1)
+        if [[ -z "$PYTHON_VERSION" ]]; then
+            PYTHON_VERSION="3"
+        fi
+        log "Detected Python version: ${PYTHON_VERSION}"
+        
+        # Устанавливаем базовые пакеты
         run_apt install -y \
-            curl git build-essential python3-dev python3-venv python3-pip \
+            curl git build-essential python3-dev python3-pip \
             ca-certificates lsb-release software-properties-common gnupg
+        
+        # Устанавливаем venv: сначала пробуем версионный пакет, потом generic
+        if apt-cache show "python${PYTHON_VERSION}-venv" &>/dev/null; then
+            log "Installing python${PYTHON_VERSION}-venv..."
+            run_apt install -y "python${PYTHON_VERSION}-venv"
+        else
+            log "Installing python3-venv (generic)..."
+            run_apt install -y python3-venv
+        fi
     elif [[ "${DIST_FAMILY}" == "rhel" ]]; then
         run_yum update -y
         run_yum install -y curl git gcc python3-devel python3-pip

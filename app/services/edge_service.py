@@ -632,7 +632,7 @@ class EdgeNodeService:
                 "status": "certbot --version"
             },
             "system": {
-                "install": "apt-get update && apt-get install -y curl git build-essential python3-dev python3-venv"
+                "install": "apt-get update && apt-get install -y curl git build-essential python3-dev python3-pip ca-certificates && PYVER=$(python3 -c 'import sys; print(f\"{sys.version_info.major}.{sys.version_info.minor}\")' 2>/dev/null || echo '3') && apt-get install -y python${PYVER}-venv || apt-get install -y python3-venv"
             },
             "python": {
                 # Note: 'install' is handled above in the if-elif block with file upload
