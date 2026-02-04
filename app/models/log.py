@@ -14,7 +14,7 @@ class RequestLog(Base):
     domain_id = Column(Integer, ForeignKey("domains.id"), nullable=True, index=True)
     domain = relationship("Domain", backref="logs")
     
-    edge_node_id = Column(Integer, ForeignKey("edge_nodes.id"), nullable=True)
+    edge_node_id = Column(Integer, ForeignKey("edge_nodes.id", ondelete="SET NULL"), nullable=True)
     edge_node = relationship("EdgeNode", backref="logs")
     
     # Request details

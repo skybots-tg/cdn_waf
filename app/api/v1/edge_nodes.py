@@ -109,11 +109,19 @@ async def delete_edge_node(
     current_user: User = Depends(get_current_superuser)
 ):
     """Delete edge node (superuser only)"""
-    success = await EdgeNodeService.delete_node(db, node_id)
-    if not success:
+    try:
+        success = await EdgeNodeService.delete_node(db, node_id)
+        if not success:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Edge node not found"
+            )
+    except HTTPException:
+        raise
+    except Exception as e:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Edge node not found"
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to delete edge node: {str(e)}"
         )
 
 

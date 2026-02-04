@@ -7,7 +7,7 @@ import tempfile
 import secrets
 from typing import List, Optional, Dict, Any
 from datetime import datetime, timedelta
-from sqlalchemy import select, func, or_
+from sqlalchemy import select, func, or_, update
 from sqlalchemy.ext.asyncio import AsyncSession
 import asyncssh
 
@@ -122,9 +122,19 @@ class EdgeNodeService:
     @staticmethod
     async def delete_node(db: AsyncSession, node_id: int) -> bool:
         """Delete edge node"""
+        from app.models.log import RequestLog
+        
         node = await EdgeNodeService.get_node(db, node_id)
         if not node:
             return False
+        
+        # First, clear the edge_node_id from related logs to avoid FK constraint issues
+        # This handles databases where the ondelete="SET NULL" constraint wasn't applied
+        await db.execute(
+            update(RequestLog)
+            .where(RequestLog.edge_node_id == node_id)
+            .values(edge_node_id=None)
+        )
         
         await db.delete(node)
         await db.commit()
