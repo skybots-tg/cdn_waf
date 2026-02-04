@@ -557,11 +557,13 @@ async function runAction(action) {
         if (response.success) {
             log(`Command executed successfully`, 'success');
             if (response.stdout) log(response.stdout);
+            showNotification('Операция выполнена', 'success');
         } else {
-            log(`Command failed: ${response.stderr}`, 'error');
+            log(`Command failed (exit code: ${response.exit_code || 'unknown'})`, 'error');
+            if (response.stdout) log(response.stdout, 'warn');
+            if (response.stderr) log(response.stderr, 'error');
+            showNotification('Ошибка выполнения команды', 'error');
         }
-        
-        showNotification('Операция выполнена', 'success');
         
     } catch (error) {
         log(`Error: ${error.message}`, 'error');
