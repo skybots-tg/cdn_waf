@@ -238,6 +238,30 @@ class NginxRulesService:
             location_snippet = NginxRulesService.generate_location_snippet(config)
             config_json = config.model_dump_json(indent=2)
             
+            # Comment out conflicting directives in nginx.conf to avoid duplicates
+            # These directives will be managed by our 00-cdn-rules.conf
+            conflict_directives = [
+                'gzip', 'gzip_comp_level', 'gzip_min_length', 'gzip_types', 
+                'gzip_vary', 'gzip_proxied', 'gzip_disable',
+                'client_max_body_size', 'client_body_timeout', 'client_header_timeout',
+                'client_body_buffer_size', 'large_client_header_buffers',
+                'keepalive_timeout', 'keepalive_requests',
+                'server_tokens'
+            ]
+            
+            # Build sed command to comment out conflicting directives
+            sed_patterns = ' '.join([
+                f"-e 's/^[[:space:]]*{d}[[:space:]]/#cdn_waf_managed# &/'"
+                for d in conflict_directives
+            ])
+            
+            # Backup and modify nginx.conf
+            backup_cmd = (
+                f"cp -n /etc/nginx/nginx.conf /etc/nginx/nginx.conf.cdn_waf_backup 2>/dev/null || true; "
+                f"sed -i {sed_patterns} /etc/nginx/nginx.conf"
+            )
+            await EdgeNodeService.execute_command(node, backup_cmd, timeout=30)
+            
             # Create temporary files
             with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.conf') as f:
                 f.write(nginx_config)
