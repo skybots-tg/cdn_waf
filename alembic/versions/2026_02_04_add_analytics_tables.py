@@ -1,7 +1,7 @@
 """Add analytics aggregation tables
 
 Revision ID: add_analytics_tables
-Revises: 2026_02_04_fix_edge_node_fk
+Revises: 2026_02_04_fix_edge_fk
 Create Date: 2026-02-04 12:00:00.000000
 
 """
@@ -11,7 +11,7 @@ import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
 revision = 'add_analytics_tables'
-down_revision = '2026_02_04_fix_edge_node_fk'
+down_revision = '2026_02_04_fix_edge_fk'
 branch_labels = None
 depends_on = None
 
