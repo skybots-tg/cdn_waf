@@ -351,6 +351,31 @@ class EdgeNodeService:
                 version=version,
                 status_text="Ready" if installed else "Not installed"
             )
+        
+        if component == "geoip":
+             # Check GeoIP database and geoipupdate
+             db_check = await EdgeNodeService.execute_command(node, "ls /usr/share/GeoIP/GeoLite2-Country.mmdb 2>/dev/null")
+             version_check = await EdgeNodeService.execute_command(node, "geoipupdate --version 2>/dev/null | head -1")
+             
+             installed = db_check.success
+             version = None
+             if version_check.success and version_check.stdout:
+                 # Output format: geoipupdate 6.0.0
+                 parts = version_check.stdout.strip().split()
+                 if len(parts) >= 2:
+                     version = parts[1]
+             
+             status_text = "Ready" if installed else "Database not found"
+             if not version_check.success:
+                 status_text = "geoipupdate not installed"
+             
+             return EdgeComponentStatus(
+                component=component,
+                installed=installed or version_check.success,
+                running=installed,  # "running" means database is available
+                version=version,
+                status_text=status_text
+            )
             
         service_name = component
         if component == "agent":
@@ -517,6 +542,13 @@ class EdgeNodeService:
                 return await EdgeNodeService.run_setup_script(node, "install_nginx")
             elif component == "certbot":
                 return await EdgeNodeService.run_setup_script(node, "install_certbot")
+            elif component == "geoip":
+                # Install GeoIP and configure with MaxMind credentials from settings
+                result = await EdgeNodeService.run_setup_script(node, "install_geoip")
+                if result.success:
+                    # Configure GeoIP.conf with credentials if available
+                    await EdgeNodeService.configure_geoip(node)
+                return result
             elif component == "python":
                 # Upload requirements.txt before installing/updating python env
                 await EdgeNodeService.execute_command(node, "mkdir -p /opt/cdn_waf")
@@ -599,6 +631,11 @@ class EdgeNodeService:
                     if not configure_result.success:
                         logger.warning(f"Failed to configure nginx: {configure_result.stderr}")
                 
+                # Configure GeoIP if credentials are available
+                if settings.MAXMIND_ACCOUNT_ID and settings.MAXMIND_LICENSE_KEY:
+                    logger.info(f"Configuring GeoIP on node {node.name}")
+                    await EdgeNodeService.configure_geoip(node)
+                
                 return await EdgeNodeService.run_setup_script(node, "install_agent_service")
 
         # Handle python update separately (also upload requirements.txt first)
@@ -631,6 +668,10 @@ class EdgeNodeService:
                 "install": "apt-get update && apt-get install -y certbot python3-certbot-nginx",
                 "status": "certbot --version"
             },
+            "geoip": {
+                "status": "ls -la /usr/share/GeoIP/*.mmdb 2>/dev/null && geoipupdate --version 2>/dev/null || echo 'GeoIP not installed'",
+                "update": "geoipupdate -v"
+            },
             "system": {
                 "install": "apt-get update && apt-get install -y curl git build-essential python3-dev python3-pip ca-certificates && PYVER=$(python3 -c 'import sys; print(f\"{sys.version_info.major}.{sys.version_info.minor}\")' 2>/dev/null || echo '3') && apt-get install -y python${PYVER}-venv || apt-get install -y python3-venv"
             },
@@ -659,6 +700,58 @@ class EdgeNodeService:
         
         command = command_map[component][action]
         return await EdgeNodeService.execute_command(node, command)
+    
+    @staticmethod
+    async def configure_geoip(node: EdgeNode) -> bool:
+        """Configure GeoIP on edge node with MaxMind credentials"""
+        account_id = settings.MAXMIND_ACCOUNT_ID
+        license_key = settings.MAXMIND_LICENSE_KEY
+        
+        if not account_id or not license_key:
+            logger.warning(f"MaxMind credentials not configured, skipping GeoIP setup on {node.name}")
+            return False
+        
+        # Create GeoIP.conf content
+        geoip_conf = f"""# GeoIP.conf - Auto-configured by FlareCloud
+# MaxMind GeoLite2 configuration
+
+AccountID {account_id}
+LicenseKey {license_key}
+EditionIDs GeoLite2-Country
+DatabaseDirectory /usr/share/GeoIP
+"""
+        
+        try:
+            # Write config via SSH
+            # Escape for shell
+            escaped_conf = geoip_conf.replace("'", "'\\''")
+            cmd = f"echo '{escaped_conf}' | sudo tee /etc/GeoIP.conf > /dev/null && sudo chmod 600 /etc/GeoIP.conf"
+            result = await EdgeNodeService.execute_command(node, cmd)
+            
+            if not result.success:
+                logger.error(f"Failed to write GeoIP.conf on {node.name}: {result.stderr}")
+                return False
+            
+            # Run geoipupdate to download the database
+            logger.info(f"Downloading GeoIP database on {node.name}...")
+            update_result = await EdgeNodeService.execute_command(
+                node, 
+                "geoipupdate -v 2>&1 || echo 'geoipupdate not installed'",
+                timeout=120
+            )
+            
+            if "GeoLite2-Country" in update_result.stdout:
+                logger.info(f"GeoIP database downloaded successfully on {node.name}")
+            elif "not installed" in update_result.stdout:
+                logger.warning(f"geoipupdate not installed on {node.name}, run install_geoip first")
+            else:
+                logger.warning(f"GeoIP update result on {node.name}: {update_result.stdout}")
+            
+            return True
+            
+        except Exception as e:
+            logger.error(f"Failed to configure GeoIP on {node.name}: {e}")
+            return False
     
     @staticmethod
     async def update_heartbeat(db: AsyncSession, node_id: int) -> bool:

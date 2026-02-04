@@ -671,6 +671,28 @@
                     Инструменты для выпуска Let's Encrypt сертификатов
                 </p>
             </div>
+            
+            <!-- GeoIP -->
+            <div class="glass-card" id="card-geoip">
+                <div class="flex-between mb-3">
+                    <div style="display: flex; gap: 12px; align-items: center;">
+                        <div class="component-icon"><i class="fas fa-globe-americas"></i></div>
+                        <div>
+                            <h4 style="font-weight: 600;">GeoIP Database</h4>
+                            <span class="status-dot status-warning"></span> <span class="status-text" style="font-size: 12px; color: var(--text-muted);">Checking...</span>
+                        </div>
+                    </div>
+                    <div class="flex gap-1">
+                        <button class="btn btn-sm btn-secondary" onclick="runAction('install_geoip')">Install</button>
+                        <button class="btn btn-sm btn-secondary" onclick="configureGeoIP()">Configure</button>
+                        <button class="btn btn-sm btn-secondary" onclick="runAction('update_geoip')">Update DB</button>
+                    </div>
+                </div>
+                <p style="font-size: 13px; color: var(--text-secondary);">
+                    MaxMind GeoLite2 для определения страны посетителей (geo-аналитика)
+                </p>
+                <div id="geoip-credentials-status" style="margin-top: 12px; font-size: 13px;"></div>
+            </div>
         </div>
     </div>
 
@@ -1220,6 +1242,12 @@ async function runAction(action) {
     } else if (action === 'install_certbot') {
         component = 'certbot';
         cmd = 'install';
+    } else if (action === 'install_geoip') {
+        component = 'geoip';
+        cmd = 'install';
+    } else if (action === 'update_geoip') {
+        component = 'geoip';
+        cmd = 'update';
     } else if (action === 'install_python' || action === 'update_python') {
         component = 'python';
         cmd = 'install';  // Python uses 'install' to create/update venv
@@ -1353,18 +1381,19 @@ async function pollTaskStatus(taskId, interval = 2000) {
 // async function mockRunAction(action) { ... } (removed)
 
 async function installAll() {
-    if (!confirm('Это запустит полную установку всех компонентов на ноде. Продолжить?\n\nПорядок: System → Nginx → Certbot → Python → Agent')) return;
+    if (!confirm('Это запустит полную установку всех компонентов на ноде. Продолжить?\n\nПорядок: System → Nginx → Certbot → GeoIP → Python → Agent')) return;
     
     switchTab('logs');
     log('═══════════════════════════════════════════', 'info');
     log('Начало полной установки edge node', 'info');
     log('═══════════════════════════════════════════', 'info');
     
-    // Correct order: system deps first, then nginx, certbot, python env, and finally agent
+    // Correct order: system deps first, then nginx, certbot, geoip, python env, and finally agent
     const steps = [
         { action: 'install_deps', name: 'System Dependencies' },
         { action: 'install_nginx', name: 'Nginx Web Server' },
         { action: 'install_certbot', name: 'Certbot SSL' },
+        { action: 'install_geoip', name: 'GeoIP Database' },
         { action: 'install_python', name: 'Python Environment' },
         { action: 'install_agent', name: 'Edge Agent' }
     ];
@@ -1465,11 +1494,57 @@ async function checkAllComponents() {
         { id: 'nginx', card: 'card-nginx' },
         { id: 'python', card: 'card-python' },
         { id: 'agent', card: 'card-agent' },
-        { id: 'certbot', card: 'card-certbot' }
+        { id: 'certbot', card: 'card-certbot' },
+        { id: 'geoip', card: 'card-geoip' }
     ];
     
     for (const comp of components) {
         updateComponentStatus(comp.id, comp.card);
+    }
+    
+    // Also check GeoIP credentials status
+    checkGeoIPCredentials();
+}
+
+async function checkGeoIPCredentials() {
+    try {
+        const response = await api.get('/edge-nodes/geoip/status');
+        const container = document.getElementById('geoip-credentials-status');
+        
+        if (response.configured) {
+            container.innerHTML = `
+                <span style="color: var(--success);">
+                    <i class="fas fa-check-circle"></i> MaxMind credentials configured (Account: ${response.account_id})
+                </span>
+            `;
+        } else {
+            container.innerHTML = `
+                <span style="color: var(--warning);">
+                    <i class="fas fa-exclamation-triangle"></i> MaxMind credentials not configured. 
+                    Set MAXMIND_ACCOUNT_ID and MAXMIND_LICENSE_KEY in .env
+                </span>
+            `;
+        }
+    } catch (error) {
+        console.error('Failed to check GeoIP credentials:', error);
+    }
+}
+
+async function configureGeoIP() {
+    showNotification('Configuring GeoIP on node...', 'info');
+    switchTab('logs');
+    log('Configuring GeoIP with MaxMind credentials from server...', 'info');
+    
+    try {
+        const response = await api.post(`/edge-nodes/${NODE_ID}/configure-geoip`);
+        log(response.message, 'success');
+        showNotification('GeoIP configured successfully', 'success');
+        
+        // Refresh component status
+        updateComponentStatus('geoip', 'card-geoip');
+    } catch (error) {
+        log(`Error: ${error.message}`, 'error');
+        showNotification(error.message, 'error');
     }
 }
 

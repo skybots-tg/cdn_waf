@@ -276,3 +276,55 @@ async def check_node_health(
     )
     
     return health
+
+
+@router.post("/{node_id}/configure-geoip")
+async def configure_node_geoip(
+    node_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_superuser)
+):
+    """Configure GeoIP on edge node using credentials from .env (superuser only)"""
+    from app.core.config import settings
+    
+    node = await EdgeNodeService.get_node(db, node_id)
+    if not node:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Edge node not found"
+        )
+    
+    if not settings.MAXMIND_ACCOUNT_ID or not settings.MAXMIND_LICENSE_KEY:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="MaxMind credentials not configured in .env (MAXMIND_ACCOUNT_ID, MAXMIND_LICENSE_KEY)"
+        )
+    
+    success = await EdgeNodeService.configure_geoip(node)
+    
+    if success:
+        return {
+            "status": "success",
+            "message": f"GeoIP configured on {node.name}. Database will be downloaded automatically."
+        }
+    else:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to configure GeoIP on node"
+        )
+
+
+@router.get("/geoip/status")
+async def get_geoip_config_status(
+    current_user: User = Depends(get_current_superuser)
+):
+    """Check if MaxMind GeoIP credentials are configured (superuser only)"""
+    from app.core.config import settings
+    
+    configured = bool(settings.MAXMIND_ACCOUNT_ID and settings.MAXMIND_LICENSE_KEY)
+    
+    return {
+        "configured": configured,
+        "account_id": settings.MAXMIND_ACCOUNT_ID[:4] + "****" if settings.MAXMIND_ACCOUNT_ID else None,
+        "message": "MaxMind credentials configured" if configured else "Set MAXMIND_ACCOUNT_ID and MAXMIND_LICENSE_KEY in .env"
+    }

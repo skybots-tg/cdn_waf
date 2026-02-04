@@ -59,6 +59,11 @@ class Settings(BaseSettings):
     ANALYTICS_HOURLY_RETENTION: int = 90    # Hourly aggregated stats
     ANALYTICS_DAILY_RETENTION: int = 365    # Daily aggregated stats (1 year)
     
+    # MaxMind GeoIP (for geo analytics on edge nodes)
+    # Get free account at: https://www.maxmind.com/en/geolite2/signup
+    MAXMIND_ACCOUNT_ID: Optional[str] = None
+    MAXMIND_LICENSE_KEY: Optional[str] = None
+    
     # Logging
     LOG_LEVEL: str = "INFO"
     

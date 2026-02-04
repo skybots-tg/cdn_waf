@@ -14,6 +14,8 @@ NGINX_CDN_CONF="${NGINX_CONF_DIR}/cdn.conf"
 NGINX_SSL_DIR="/etc/nginx/ssl/cdn"
 NGINX_CACHE_DIR="/var/cache/nginx"
 NGINX_LOG_DIR="/var/log/nginx"
+GEOIP_DIR="/usr/share/GeoIP"
+GEOIP_CONF="/etc/GeoIP.conf"
 
 OS_NAME=""
 DIST_ID=""
@@ -315,6 +317,101 @@ install_certbot() {
     log "Certbot установлен."
 }
 
+# ---------- install_geoip ----------
+
+install_geoip() {
+    detect_os
+    require_root
+    log "Installing GeoIP (GeoLite2) with auto-update..."
+
+    # Install geoipupdate
+    if [[ "${DIST_FAMILY}" == "debian" ]]; then
+        # Add MaxMind PPA for geoipupdate
+        if [[ ! -f /etc/apt/sources.list.d/maxmind.list ]]; then
+            log "Adding MaxMind repository..."
+            run_apt install -y software-properties-common
+            add-apt-repository -y ppa:maxmind/ppa 2>/dev/null || true
+        fi
+        run_apt update -y
+        run_apt install -y geoipupdate
+    elif [[ "${DIST_FAMILY}" == "rhel" ]]; then
+        # Try to install from EPEL or download directly
+        run_yum install -y geoipupdate || {
+            log "geoipupdate not in repos, downloading directly..."
+            local GEOIP_VERSION="6.0.0"
+            local ARCH="linux_amd64"
+            curl -sL "https://github.com/maxmind/geoipupdate/releases/download/v${GEOIP_VERSION}/geoipupdate_${GEOIP_VERSION}_${ARCH}.tar.gz" | tar xz -C /tmp
+            cp "/tmp/geoipupdate_${GEOIP_VERSION}_${ARCH}/geoipupdate" /usr/local/bin/
+            chmod +x /usr/local/bin/geoipupdate
+        }
+    fi
+
+    # Create GeoIP directory
+    mkdir -p "${GEOIP_DIR}"
+
+    # Check if config exists
+    if [[ -f "${GEOIP_CONF}" ]] && grep -q "AccountID" "${GEOIP_CONF}" && ! grep -q "YOUR_ACCOUNT_ID" "${GEOIP_CONF}"; then
+        log "GeoIP.conf already configured, running update..."
+        geoipupdate -v || true
+    else
+        log ""
+        log "============================================"
+        log "GeoIP установлен, но требуется настройка!"
+        log ""
+        log "1. Зарегистрируйтесь на MaxMind (бесплатно):"
+        log "   https://www.maxmind.com/en/geolite2/signup"
+        log ""
+        log "2. Получите Account ID и License Key в личном кабинете:"
+        log "   https://www.maxmind.com/en/accounts/current/license-key"
+        log ""
+        log "3. Создайте /etc/GeoIP.conf:"
+        log ""
+        log "   AccountID YOUR_ACCOUNT_ID"
+        log "   LicenseKey YOUR_LICENSE_KEY"
+        log "   EditionIDs GeoLite2-Country"
+        log ""
+        log "4. Запустите обновление:"
+        log "   geoipupdate -v"
+        log ""
+        log "Автообновление будет работать через cron/systemd timer"
+        log "============================================"
+        
+        # Create example config
+        if [[ ! -f "${GEOIP_CONF}" ]]; then
+            cat > "${GEOIP_CONF}" <<'GEOIP_CONF_EOF'
+# GeoIP.conf - MaxMind GeoLite2 configuration
+# Get your free account at: https://www.maxmind.com/en/geolite2/signup
+
+# Replace with your Account ID and License Key
+AccountID YOUR_ACCOUNT_ID
+LicenseKey YOUR_LICENSE_KEY
+
+# Which databases to download (GeoLite2-Country is free and sufficient for analytics)
+EditionIDs GeoLite2-Country
+
+# Database directory
+DatabaseDirectory /usr/share/GeoIP
+GEOIP_CONF_EOF
+            chmod 600 "${GEOIP_CONF}"
+        fi
+    fi
+
+    # Setup auto-update via cron (runs twice a week - Tue and Fri)
+    local CRON_FILE="/etc/cron.d/geoipupdate"
+    if [[ ! -f "${CRON_FILE}" ]]; then
+        log "Setting up GeoIP auto-update cron job..."
+        cat > "${CRON_FILE}" <<'CRON_EOF'
+# GeoLite2 database auto-update (runs twice a week)
+# MaxMind updates databases on Tuesdays and Fridays
+0 3 * * 2,5 root /usr/bin/geoipupdate -s 2>&1 | logger -t geoipupdate
+CRON_EOF
+        chmod 644 "${CRON_FILE}"
+        log "Cron job created: ${CRON_FILE}"
+    fi
+
+    log "GeoIP setup complete."
+}
+
 # ---------- install_python_env ----------
 
 install_python_env() {
@@ -450,23 +547,27 @@ install_all() {
     log "Starting full edge node installation for ${OS_NAME} (${DIST_ID})..."
     log ""
 
-    log "=== Step 1/5: Installing system dependencies ==="
+    log "=== Step 1/6: Installing system dependencies ==="
     install_deps
     log ""
 
-    log "=== Step 2/5: Installing nginx ==="
+    log "=== Step 2/6: Installing nginx ==="
     install_nginx
     log ""
 
-    log "=== Step 3/5: Installing certbot ==="
+    log "=== Step 3/6: Installing certbot ==="
     install_certbot
     log ""
 
-    log "=== Step 4/5: Setting up Python environment ==="
+    log "=== Step 4/6: Installing GeoIP (for geo analytics) ==="
+    install_geoip
+    log ""
+
+    log "=== Step 5/6: Setting up Python environment ==="
     install_python_env
     log ""
 
-    log "=== Step 5/5: Installing agent service ==="
+    log "=== Step 6/6: Installing agent service ==="
     install_agent_service
     log ""
 
@@ -479,6 +580,9 @@ install_all() {
     systemctl status ${SERVICE_NAME} --no-pager -l || true
     log ""
     log "Check agent logs: journalctl -u ${SERVICE_NAME} -f"
+    log ""
+    log "NOTE: For geo analytics, configure /etc/GeoIP.conf"
+    log "      with your MaxMind credentials (free account)"
     log "============================================"
 }
 
@@ -524,6 +628,19 @@ verify_installation() {
         log "[OK] certbot installed: $(certbot --version 2>&1)"
     else
         err "[WARN] certbot not found (optional)"
+    fi
+
+    # Check GeoIP
+    if command -v geoipupdate >/dev/null 2>&1; then
+        log "[OK] geoipupdate installed"
+        if [[ -f "${GEOIP_DIR}/GeoLite2-Country.mmdb" ]]; then
+            local geoip_date=$(stat -c %y "${GEOIP_DIR}/GeoLite2-Country.mmdb" 2>/dev/null | cut -d' ' -f1)
+            log "[OK] GeoLite2-Country.mmdb exists (updated: ${geoip_date})"
+        else
+            err "[WARN] GeoLite2-Country.mmdb not found - configure /etc/GeoIP.conf and run geoipupdate"
+        fi
+    else
+        err "[WARN] geoipupdate not found (optional, for geo analytics)"
     fi
 
     # Check Python venv
@@ -600,10 +717,11 @@ usage() {
 Usage: $0 <command>
 
 Commands:
-  install_all          Full installation (deps + nginx + certbot + python + agent)
+  install_all          Full installation (deps + nginx + certbot + geoip + python + agent)
   install_deps         Install system dependencies only
   install_nginx        Install and configure nginx
   install_certbot      Install certbot
+  install_geoip        Install GeoIP (GeoLite2) with auto-update
   install_python       Setup Python virtual environment
   install_agent_service Install and start the edge agent service
   configure_nginx      Configure nginx for CDN (without installing)
@@ -619,6 +737,7 @@ Example (step by step):
   sudo $0 install_deps
   sudo $0 install_nginx
   sudo $0 install_certbot
+  sudo $0 install_geoip   # Optional but recommended for geo analytics
   sudo $0 install_python
   # Copy config.yaml and edge_config_updater.py to ${APP_DIR}
   sudo $0 install_agent_service
@@ -637,6 +756,9 @@ case "${1:-}" in
         ;;
     install_certbot)
         install_certbot
+        ;;
+    install_geoip)
+        install_geoip
         ;;
     install_python)
         install_python_env
