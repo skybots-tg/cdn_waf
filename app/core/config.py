@@ -54,6 +54,11 @@ class Settings(BaseSettings):
     # Edge Nodes
     EDGE_CONFIG_UPDATE_INTERVAL: int = 30
     
+    # Analytics retention (days)
+    ANALYTICS_RAW_LOGS_RETENTION: int = 30  # Raw request logs
+    ANALYTICS_HOURLY_RETENTION: int = 90    # Hourly aggregated stats
+    ANALYTICS_DAILY_RETENTION: int = 365    # Daily aggregated stats (1 year)
+    
     # Logging
     LOG_LEVEL: str = "INFO"
     

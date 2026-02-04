@@ -10,3 +10,4 @@ from app.models.certificate_log import CertificateLog, CertificateLogLevel
 from app.models.edge_node import EdgeNode
 from app.models.dns_node import DNSNode
 from app.models.log import RequestLog
+from app.models.analytics import HourlyStats, DailyStats, GeoStats, TopPathsStats, ErrorStats

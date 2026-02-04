@@ -36,6 +36,8 @@
                 <option value="24h" selected>Last 24 Hours</option>
                 <option value="7d">Last 7 Days</option>
                 <option value="30d">Last 30 Days</option>
+                <option value="90d">Last 90 Days</option>
+                <option value="6m">Last 6 Months</option>
             </select>
             <button class="btn btn-secondary" onclick="exportData()">
                 <i class="fas fa-download"></i> Export
@@ -165,6 +167,18 @@
                     <i class="fas fa-spinner fa-spin"></i> Loading...
                 </p>
             </div>
+        </div>
+    </div>
+
+    <!-- Unique Visitors (from daily stats) -->
+    <div class="glass-card mb-4" id="visitors-card" style="display: none;">
+        <h3 style="font-size: 18px; font-weight: 600; margin-bottom: 16px;">
+            <i class="fas fa-users"></i> Unique Visitors
+        </h3>
+        <div id="unique-visitors">
+            <p style="text-align: center; color: var(--text-muted); padding: 24px;">
+                Available for 7d+ time ranges
+            </p>
         </div>
     </div>
 
@@ -521,25 +535,79 @@ function getStatusBadgeClass(status) {
     return 'badge-secondary';
 }
 
-function exportData() {
+async function exportData() {
+    const timeRange = document.getElementById('time-range').value;
     showNotification('Exporting data...', 'info');
-    // TODO: Implement export
+    
+    try {
+        // Download CSV
+        const response = await fetch(`/api/v1/domains/${DOMAIN_ID}/export?range=${timeRange}&format=csv`);
+        if (!response.ok) throw new Error('Export failed');
+        
+        const blob = await response.blob();
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `domain_${DOMAIN_ID}_analytics_${timeRange}.csv`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        window.URL.revokeObjectURL(url);
+        
+        showNotification('Data exported successfully', 'success');
+    } catch (error) {
+        console.error('Export failed:', error);
+        showNotification('Failed to export data', 'error');
+    }
 }
 
 function viewFullLogs() {
-    showNotification('Opening full logs view...', 'info');
-    // TODO: Implement full logs view
+    // Open logs in modal or new page
+    window.open(`/domains/${DOMAIN_ID}/logs`, '_blank');
+}
+
+async function loadTopErrors() {
+    const timeRange = document.getElementById('time-range').value;
+    try {
+        const response = await fetch(`/api/v1/domains/${DOMAIN_ID}/stats/errors?range=${timeRange}&limit=10`);
+        const data = await response.json();
+        
+        const container = document.getElementById('top-errors');
+        
+        if (data.length === 0) {
+            container.innerHTML = '<p style="text-align: center; color: var(--success); padding: 24px;"><i class="fas fa-check-circle"></i> No errors found</p>';
+            return;
+        }
+        
+        container.innerHTML = data.map((item, index) => `
+            <div class="flex-between mb-2" style="padding: 8px 0; border-bottom: 1px solid var(--glass-border);">
+                <div style="flex: 1;">
+                    <span class="badge ${item.status_code >= 500 ? 'badge-error' : 'badge-warning'}">${item.status_code}</span>
+                    <span style="font-family: monospace; font-size: 13px; margin-left: 8px;">${item.path}</span>
+                </div>
+                <span style="font-weight: 600; color: var(--error);">${formatNumber(item.count)}</span>
+            </div>
+        `).join('');
+    } catch (error) {
+        console.error('Error loading top errors:', error);
+    }
 }
 
 // Initialize
 document.addEventListener('DOMContentLoaded', () => {
     loadAnalytics();
     loadTopPages();
+    loadTopErrors();
     loadGeoDistribution();
     loadRecentLogs();
     
     // Listen for time range changes
-    document.getElementById('time-range').addEventListener('change', loadAnalytics);
+    document.getElementById('time-range').addEventListener('change', () => {
+        loadAnalytics();
+        loadTopPages();
+        loadTopErrors();
+        loadGeoDistribution();
+    });
 });
 </script>
 {% endblock %}

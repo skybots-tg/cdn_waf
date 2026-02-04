@@ -11,6 +11,7 @@ celery_app = Celery(
         "app.tasks.certificate_tasks",
         "app.tasks.dns_tasks",
         "app.tasks.edge_tasks",
+        "app.tasks.analytics_tasks",
     ]
 )
 
@@ -50,5 +51,18 @@ celery_app.conf.beat_schedule = {
     "check-expiring-certificates-every-hour": {
         "task": "app.tasks.certificate.check_expiring_certificates",
         "schedule": crontab(minute=0),  # Every hour at :00
+    },
+    # Analytics tasks
+    "aggregate-hourly-stats": {
+        "task": "app.tasks.analytics.aggregate_hourly",
+        "schedule": crontab(minute=5),  # Every hour at :05 (after logs are collected)
+    },
+    "aggregate-daily-stats": {
+        "task": "app.tasks.analytics.aggregate_daily",
+        "schedule": crontab(hour=0, minute=15),  # Daily at 00:15 UTC
+    },
+    "cleanup-old-analytics-data": {
+        "task": "app.tasks.analytics.cleanup_old_data",
+        "schedule": crontab(hour=3, minute=0),  # Daily at 03:00 UTC (low traffic time)
     },
 }

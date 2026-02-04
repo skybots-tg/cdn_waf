@@ -18,6 +18,8 @@
                 <option value="24h" selected>Last 24 Hours</option>
                 <option value="7d">Last 7 Days</option>
                 <option value="30d">Last 30 Days</option>
+                <option value="90d">Last 90 Days</option>
+                <option value="6m">Last 6 Months</option>
             </select>
             <button class="btn btn-secondary" onclick="exportGlobalData()">
                 <i class="fas fa-download"></i> Export
@@ -407,9 +409,30 @@ function renderGlobalChart(labels, data) {
     });
 }
 
-function exportGlobalData() {
+async function exportGlobalData() {
+    const timeRange = document.getElementById('time-range').value;
     showNotification('Exporting global data...', 'info');
-    // TODO: Implement export
+    
+    try {
+        // Download CSV
+        const response = await fetch(`/api/v1/export/global?range=${timeRange}&format=csv`);
+        if (!response.ok) throw new Error('Export failed');
+        
+        const blob = await response.blob();
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `global_analytics_${timeRange}.csv`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        window.URL.revokeObjectURL(url);
+        
+        showNotification('Data exported successfully', 'success');
+    } catch (error) {
+        console.error('Export failed:', error);
+        showNotification('Failed to export data', 'error');
+    }
 }
 
 // Initialize

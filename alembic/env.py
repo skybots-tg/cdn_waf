@@ -29,6 +29,7 @@ from app.models.certificate import Certificate
 from app.models.edge_node import EdgeNode
 from app.models.dns_node import DNSNode
 from app.models.log import RequestLog
+from app.models.analytics import HourlyStats, DailyStats, GeoStats, TopPathsStats, ErrorStats
 
 # This is the Alembic Config object
 config = context.config

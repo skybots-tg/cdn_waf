@@ -1,0 +1,299 @@
+{% extends "base.html" %}
+
+{% block title %}{{ domain.name }} - Logs - FlareCloud{% endblock %}
+
+{% block content %}
+<div class="container" style="padding: 32px 24px;">
+    <!-- Domain Header -->
+    <div class="glass-card mb-4">
+        <div class="flex-between">
+            <div>
+                <h1><i class="fas fa-file-alt"></i> {{ domain.name }} - Request Logs</h1>
+                <div class="flex gap-2 mt-2">
+                    <span class="badge badge-success">
+                        <i class="fas fa-check-circle"></i> Active
+                    </span>
+                </div>
+            </div>
+            <div class="flex gap-2">
+                <a href="/domains/{{ domain.id }}/analytics" class="btn btn-secondary">
+                    <i class="fas fa-chart-line"></i> Back to Analytics
+                </a>
+            </div>
+        </div>
+    </div>
+
+    <!-- Filters -->
+    <div class="glass-card mb-4">
+        <h3 style="font-size: 16px; font-weight: 600; margin-bottom: 16px;">
+            <i class="fas fa-filter"></i> Filters
+        </h3>
+        <div style="display: flex; gap: 16px; flex-wrap: wrap; align-items: end;">
+            <div>
+                <label class="form-label">Status Code</label>
+                <select class="form-select" id="filter-status" style="min-width: 150px;">
+                    <option value="">All</option>
+                    <option value="200">200 OK</option>
+                    <option value="301">301 Redirect</option>
+                    <option value="302">302 Redirect</option>
+                    <option value="304">304 Not Modified</option>
+                    <option value="400">400 Bad Request</option>
+                    <option value="401">401 Unauthorized</option>
+                    <option value="403">403 Forbidden</option>
+                    <option value="404">404 Not Found</option>
+                    <option value="500">500 Server Error</option>
+                    <option value="502">502 Bad Gateway</option>
+                    <option value="503">503 Service Unavailable</option>
+                </select>
+            </div>
+            <div>
+                <label class="form-label">Method</label>
+                <select class="form-select" id="filter-method" style="min-width: 120px;">
+                    <option value="">All</option>
+                    <option value="GET">GET</option>
+                    <option value="POST">POST</option>
+                    <option value="PUT">PUT</option>
+                    <option value="DELETE">DELETE</option>
+                    <option value="PATCH">PATCH</option>
+                    <option value="HEAD">HEAD</option>
+                    <option value="OPTIONS">OPTIONS</option>
+                </select>
+            </div>
+            <div>
+                <label class="form-label">Limit</label>
+                <select class="form-select" id="filter-limit" style="min-width: 100px;">
+                    <option value="50">50</option>
+                    <option value="100" selected>100</option>
+                    <option value="200">200</option>
+                    <option value="500">500</option>
+                </select>
+            </div>
+            <button class="btn btn-primary" onclick="loadLogs()">
+                <i class="fas fa-search"></i> Apply
+            </button>
+            <button class="btn btn-secondary" onclick="resetFilters()">
+                <i class="fas fa-undo"></i> Reset
+            </button>
+        </div>
+    </div>
+
+    <!-- Logs Table -->
+    <div class="glass-card">
+        <div class="flex-between mb-3">
+            <h3 style="font-size: 18px; font-weight: 600;">
+                <i class="fas fa-list"></i> Request Logs
+            </h3>
+            <div id="logs-count" style="color: var(--text-muted); font-size: 14px;">
+                Loading...
+            </div>
+        </div>
+        <div id="logs-container" style="overflow-x: auto;">
+            <p style="text-align: center; color: var(--text-muted); padding: 32px;">
+                <i class="fas fa-spinner fa-spin"></i> Loading logs...
+            </p>
+        </div>
+        
+        <!-- Pagination -->
+        <div class="flex-between mt-3" id="pagination-container" style="display: none;">
+            <button class="btn btn-secondary btn-sm" id="btn-prev" onclick="prevPage()" disabled>
+                <i class="fas fa-chevron-left"></i> Previous
+            </button>
+            <span id="page-info" style="color: var(--text-muted);">Page 1</span>
+            <button class="btn btn-secondary btn-sm" id="btn-next" onclick="nextPage()">
+                Next <i class="fas fa-chevron-right"></i>
+            </button>
+        </div>
+    </div>
+</div>
+
+<style>
+.log-row {
+    border-bottom: 1px solid var(--glass-border);
+    transition: background-color 0.15s ease;
+}
+
+.log-row:hover {
+    background-color: var(--bg-tertiary);
+}
+
+.log-path {
+    max-width: 300px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.log-ua {
+    max-width: 200px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 11px;
+    color: var(--text-muted);
+}
+</style>
+
+<script>
+const DOMAIN_ID = {{ domain.id }};
+let currentPage = 0;
+let pageSize = 100;
+let totalLogs = 0;
+
+async function loadLogs() {
+    const status = document.getElementById('filter-status').value;
+    const method = document.getElementById('filter-method').value;
+    pageSize = parseInt(document.getElementById('filter-limit').value);
+    
+    const offset = currentPage * pageSize;
+    
+    let url = `/api/v1/domains/${DOMAIN_ID}/logs?limit=${pageSize}&offset=${offset}`;
+    if (status) url += `&status=${status}`;
+    if (method) url += `&method=${method}`;
+    
+    try {
+        const response = await fetch(url);
+        const data = await response.json();
+        
+        renderLogs(data);
+        totalLogs = data.length;
+        updatePagination();
+        
+        document.getElementById('logs-count').textContent = `Showing ${data.length} logs`;
+        
+    } catch (error) {
+        console.error('Error loading logs:', error);
+        document.getElementById('logs-container').innerHTML = 
+            '<p style="text-align: center; color: var(--error); padding: 24px;">Failed to load logs</p>';
+    }
+}
+
+function renderLogs(logs) {
+    const container = document.getElementById('logs-container');
+    
+    if (logs.length === 0) {
+        container.innerHTML = '<p style="text-align: center; color: var(--text-muted); padding: 24px;">No logs found</p>';
+        return;
+    }
+    
+    container.innerHTML = `
+        <table style="width: 100%; font-size: 13px; border-collapse: collapse;">
+            <thead>
+                <tr style="border-bottom: 2px solid var(--glass-border);">
+                    <th style="text-align: left; padding: 12px 8px; color: var(--text-secondary); font-weight: 500;">Time</th>
+                    <th style="text-align: left; padding: 12px 8px; color: var(--text-secondary); font-weight: 500;">Method</th>
+                    <th style="text-align: left; padding: 12px 8px; color: var(--text-secondary); font-weight: 500;">Path</th>
+                    <th style="text-align: center; padding: 12px 8px; color: var(--text-secondary); font-weight: 500;">Status</th>
+                    <th style="text-align: left; padding: 12px 8px; color: var(--text-secondary); font-weight: 500;">IP</th>
+                    <th style="text-align: left; padding: 12px 8px; color: var(--text-secondary); font-weight: 500;">Country</th>
+                    <th style="text-align: center; padding: 12px 8px; color: var(--text-secondary); font-weight: 500;">Cache</th>
+                    <th style="text-align: right; padding: 12px 8px; color: var(--text-secondary); font-weight: 500;">Size</th>
+                    <th style="text-align: right; padding: 12px 8px; color: var(--text-secondary); font-weight: 500;">Time</th>
+                </tr>
+            </thead>
+            <tbody>
+                ${logs.map(log => `
+                    <tr class="log-row">
+                        <td style="padding: 10px 8px; color: var(--text-muted); white-space: nowrap;">${formatTime(log.timestamp)}</td>
+                        <td style="padding: 10px 8px;">
+                            <span class="badge ${getMethodBadgeClass(log.method)}">${log.method}</span>
+                        </td>
+                        <td style="padding: 10px 8px; font-family: monospace;" class="log-path" title="${escapeHtml(log.path)}">${escapeHtml(log.path)}</td>
+                        <td style="padding: 10px 8px; text-align: center;">
+                            <span class="badge ${getStatusBadgeClass(log.status)}">${log.status}</span>
+                        </td>
+                        <td style="padding: 10px 8px; font-family: monospace; font-size: 12px;">${log.client_ip}</td>
+                        <td style="padding: 10px 8px;">${log.country_code || '-'}</td>
+                        <td style="padding: 10px 8px; text-align: center;">
+                            <span class="badge ${getCacheBadgeClass(log.cache_status)}">${log.cache_status || '-'}</span>
+                        </td>
+                        <td style="padding: 10px 8px; text-align: right; color: var(--text-secondary);">${formatBytes(log.bytes_sent)}</td>
+                        <td style="padding: 10px 8px; text-align: right; color: var(--text-secondary);">${log.request_time ? log.request_time + 'ms' : '-'}</td>
+                    </tr>
+                `).join('')}
+            </tbody>
+        </table>
+    `;
+}
+
+function formatTime(timestamp) {
+    const date = new Date(timestamp);
+    return date.toLocaleString();
+}
+
+function formatBytes(bytes) {
+    if (!bytes) return '0 B';
+    if (bytes >= 1073741824) return (bytes / 1073741824).toFixed(2) + ' GB';
+    if (bytes >= 1048576) return (bytes / 1048576).toFixed(2) + ' MB';
+    if (bytes >= 1024) return (bytes / 1024).toFixed(2) + ' KB';
+    return bytes + ' B';
+}
+
+function escapeHtml(text) {
+    if (!text) return '';
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+function getStatusBadgeClass(status) {
+    if (status >= 200 && status < 300) return 'badge-success';
+    if (status >= 300 && status < 400) return 'badge-info';
+    if (status >= 400 && status < 500) return 'badge-warning';
+    if (status >= 500) return 'badge-error';
+    return 'badge-secondary';
+}
+
+function getMethodBadgeClass(method) {
+    switch (method) {
+        case 'GET': return 'badge-success';
+        case 'POST': return 'badge-info';
+        case 'PUT': return 'badge-warning';
+        case 'DELETE': return 'badge-error';
+        default: return 'badge-secondary';
+    }
+}
+
+function getCacheBadgeClass(status) {
+    switch (status) {
+        case 'HIT': return 'badge-success';
+        case 'MISS': return 'badge-warning';
+        case 'BYPASS': return 'badge-secondary';
+        default: return 'badge-secondary';
+    }
+}
+
+function updatePagination() {
+    const container = document.getElementById('pagination-container');
+    container.style.display = 'flex';
+    
+    document.getElementById('btn-prev').disabled = currentPage === 0;
+    document.getElementById('btn-next').disabled = totalLogs < pageSize;
+    document.getElementById('page-info').textContent = `Page ${currentPage + 1}`;
+}
+
+function prevPage() {
+    if (currentPage > 0) {
+        currentPage--;
+        loadLogs();
+    }
+}
+
+function nextPage() {
+    if (totalLogs >= pageSize) {
+        currentPage++;
+        loadLogs();
+    }
+}
+
+function resetFilters() {
+    document.getElementById('filter-status').value = '';
+    document.getElementById('filter-method').value = '';
+    document.getElementById('filter-limit').value = '100';
+    currentPage = 0;
+    loadLogs();
+}
+
+// Initialize
+document.addEventListener('DOMContentLoaded', loadLogs);
+</script>
+{% endblock %}

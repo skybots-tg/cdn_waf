@@ -211,6 +211,21 @@ async def global_analytics_page(request: Request):
     })
 
 
+@router.get("/domains/{domain_id}/logs", response_class=HTMLResponse)
+async def domain_logs_page(request: Request, domain_id: int, db: AsyncSession = Depends(get_db)):
+    """Domain logs viewer page"""
+    domain_service = DomainService(db)
+    domain = await domain_service.get_by_id(domain_id)
+    if not domain:
+        return templates.TemplateResponse("404.html", {"request": request}, status_code=404)
+
+    return templates.TemplateResponse("domain_logs.html", {
+        "request": request,
+        "user": get_mock_user(request),
+        "domain": domain
+    })
+
+
 @router.get("/settings", response_class=HTMLResponse)
 async def settings_page(request: Request):
     """User settings page"""
