@@ -79,7 +79,7 @@ app.add_middleware(
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
 
 # Import and include routers
-from app.api.v1 import auth, domains, dns, edge_nodes, dns_nodes, cdn, security, analytics, organization, certificates
+from app.api.v1 import auth, domains, dns, edge_nodes, dns_nodes, cdn, security, analytics, organization, certificates, tasks, nginx_rules
 from app.api import web, internal
 
 # API routes
@@ -88,11 +88,13 @@ app.include_router(domains.router, prefix="/api/v1/domains", tags=["domains"])
 app.include_router(certificates.router, prefix="/api/v1/domains", tags=["certificates"])
 app.include_router(dns.router, prefix="/api/v1/dns", tags=["dns"])
 app.include_router(edge_nodes.router, prefix="/api/v1/edge-nodes", tags=["edge-nodes"])
+app.include_router(nginx_rules.router, prefix="/api/v1/edge-nodes", tags=["edge-nodes"])
 app.include_router(dns_nodes.router, prefix="/api/v1/dns-nodes", tags=["dns-nodes"])
 app.include_router(cdn.router, prefix="/api/v1/domains", tags=["cdn"])
 app.include_router(security.router, prefix="/api/v1/domains", tags=["security"])
 app.include_router(analytics.router, prefix="/api/v1", tags=["analytics"])
 app.include_router(organization.router, prefix="/api/v1/organization", tags=["organization"])
+app.include_router(tasks.router, prefix="/api/v1/tasks", tags=["tasks"])
 
 # Internal API for edge nodes
 app.include_router(internal.router, prefix="/internal/edge", tags=["internal"])

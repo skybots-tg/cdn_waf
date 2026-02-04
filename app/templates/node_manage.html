@@ -35,11 +35,14 @@
         <button class="tab-link active" onclick="switchTab('settings')">
             <i class="fas fa-cog"></i> Настройки
         </button>
+        <button class="tab-link" onclick="switchTab('nginx')">
+            <i class="fas fa-server"></i> Nginx правила
+        </button>
         <button class="tab-link" onclick="switchTab('components')">
-            <i class="fas fa-boxes"></i> Компоненты и Установка
+            <i class="fas fa-boxes"></i> Компоненты
         </button>
         <button class="tab-link" onclick="switchTab('logs')">
-            <i class="fas fa-terminal"></i> Логи операций
+            <i class="fas fa-terminal"></i> Логи
         </button>
     </div>
 
@@ -163,6 +166,362 @@
                     </div>
                 </form>
             </div>
+        </div>
+    </div>
+
+    <!-- Tab Content: Nginx Rules -->
+    <div id="tab-nginx" class="tab-content" style="display: none;">
+        <div class="glass-card mb-4">
+            <div class="flex-between">
+                <div>
+                    <h3 style="font-size: 18px; font-weight: 600;">
+                        <i class="fas fa-sliders-h"></i> Конфигурация Nginx
+                    </h3>
+                    <p style="color: var(--text-secondary); font-size: 14px;">
+                        Управление правилами веб-сервера, лимитами и протоколами
+                    </p>
+                </div>
+                <div style="display: flex; gap: 12px;">
+                    <button class="btn btn-secondary" onclick="resetNginxRules()">
+                        <i class="fas fa-undo"></i> Сбросить
+                    </button>
+                    <button class="btn btn-secondary" onclick="testNginxRules()">
+                        <i class="fas fa-check-circle"></i> Тест
+                    </button>
+                    <button class="btn btn-primary" onclick="applyNginxRules()">
+                        <i class="fas fa-save"></i> Применить
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <div class="grid grid-2 gap-3">
+            <!-- Client Settings -->
+            <div class="glass-card nginx-section">
+                <div class="section-header">
+                    <div class="section-icon"><i class="fas fa-upload"></i></div>
+                    <div>
+                        <h4>Клиентские лимиты</h4>
+                        <p>Размеры запросов и таймауты</p>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">
+                        Максимальный размер тела запроса
+                        <span class="hint">(client_max_body_size)</span>
+                    </label>
+                    <div class="input-with-unit">
+                        <input type="text" class="form-input" id="nginx-client-max-body-size" value="100m" placeholder="100m">
+                        <span class="unit-hint">m = МБ, g = ГБ</span>
+                    </div>
+                    <p class="form-hint">Максимальный размер загружаемых файлов. Например: 100m, 1g</p>
+                </div>
+                <div class="grid grid-2 gap-2">
+                    <div class="form-group">
+                        <label class="form-label">Таймаут тела запроса (сек)</label>
+                        <input type="number" class="form-input" id="nginx-client-body-timeout" value="60" min="1" max="3600">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Таймаут заголовков (сек)</label>
+                        <input type="number" class="form-input" id="nginx-client-header-timeout" value="60" min="1" max="3600">
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Буфер тела запроса</label>
+                    <input type="text" class="form-input" id="nginx-client-body-buffer-size" value="128k" placeholder="128k">
+                </div>
+            </div>
+
+            <!-- WebSocket Settings -->
+            <div class="glass-card nginx-section">
+                <div class="section-header">
+                    <div class="section-icon ws-icon"><i class="fas fa-plug"></i></div>
+                    <div>
+                        <h4>WebSocket</h4>
+                        <p>Поддержка двунаправленной связи</p>
+                    </div>
+                </div>
+                <div class="form-group" style="margin-bottom: 16px;">
+                    <label class="flex-between" style="cursor: pointer;">
+                        <span style="font-weight: 500;">Включить WebSocket</span>
+                        <div class="toggle-switch">
+                            <input type="checkbox" id="nginx-ws-enabled" checked>
+                            <span class="toggle-slider"></span>
+                        </div>
+                    </label>
+                    <p class="form-hint">Добавляет заголовки Upgrade и Connection для WS соединений</p>
+                </div>
+                <div class="grid grid-2 gap-2">
+                    <div class="form-group">
+                        <label class="form-label">Таймаут чтения (сек)</label>
+                        <input type="number" class="form-input" id="nginx-ws-read-timeout" value="3600" min="1" max="86400">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Таймаут отправки (сек)</label>
+                        <input type="number" class="form-input" id="nginx-ws-send-timeout" value="3600" min="1" max="86400">
+                    </div>
+                </div>
+                <div class="form-group" style="margin-bottom: 0;">
+                    <label class="form-label">Таймаут подключения (сек)</label>
+                    <input type="number" class="form-input" id="nginx-ws-connect-timeout" value="60" min="1" max="300">
+                </div>
+            </div>
+
+            <!-- Proxy Settings -->
+            <div class="glass-card nginx-section">
+                <div class="section-header">
+                    <div class="section-icon proxy-icon"><i class="fas fa-exchange-alt"></i></div>
+                    <div>
+                        <h4>Проксирование</h4>
+                        <p>Настройки связи с backend</p>
+                    </div>
+                </div>
+                <div class="grid grid-3 gap-2">
+                    <div class="form-group">
+                        <label class="form-label">Connect (сек)</label>
+                        <input type="number" class="form-input" id="nginx-proxy-connect-timeout" value="60" min="1" max="300">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Send (сек)</label>
+                        <input type="number" class="form-input" id="nginx-proxy-send-timeout" value="60" min="1" max="3600">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Read (сек)</label>
+                        <input type="number" class="form-input" id="nginx-proxy-read-timeout" value="60" min="1" max="3600">
+                    </div>
+                </div>
+                <div class="grid grid-2 gap-2">
+                    <div class="form-group">
+                        <label class="form-label">Размер буфера</label>
+                        <input type="text" class="form-input" id="nginx-proxy-buffer-size" value="4k" placeholder="4k">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Буферы (кол-во × размер)</label>
+                        <input type="text" class="form-input" id="nginx-proxy-buffers" value="8 4k" placeholder="8 4k">
+                    </div>
+                </div>
+            </div>
+
+            <!-- Gzip Settings -->
+            <div class="glass-card nginx-section">
+                <div class="section-header">
+                    <div class="section-icon gzip-icon"><i class="fas fa-compress-alt"></i></div>
+                    <div>
+                        <h4>Сжатие (Gzip)</h4>
+                        <p>Уменьшение размера ответов</p>
+                    </div>
+                </div>
+                <div class="form-group" style="margin-bottom: 16px;">
+                    <label class="flex-between" style="cursor: pointer;">
+                        <span style="font-weight: 500;">Включить Gzip</span>
+                        <div class="toggle-switch">
+                            <input type="checkbox" id="nginx-gzip-enabled" checked>
+                            <span class="toggle-slider"></span>
+                        </div>
+                    </label>
+                </div>
+                <div class="grid grid-2 gap-2">
+                    <div class="form-group">
+                        <label class="form-label">Уровень сжатия (1-9)</label>
+                        <input type="range" class="form-range" id="nginx-gzip-level" min="1" max="9" value="6">
+                        <div class="range-labels">
+                            <span>Быстро</span>
+                            <span id="gzip-level-value">6</span>
+                            <span>Сильно</span>
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Мин. размер (байт)</label>
+                        <input type="number" class="form-input" id="nginx-gzip-min-length" value="1000" min="0">
+                    </div>
+                </div>
+            </div>
+
+            <!-- Keepalive Settings -->
+            <div class="glass-card nginx-section">
+                <div class="section-header">
+                    <div class="section-icon keepalive-icon"><i class="fas fa-heartbeat"></i></div>
+                    <div>
+                        <h4>Keepalive</h4>
+                        <p>Постоянные соединения</p>
+                    </div>
+                </div>
+                <div class="grid grid-3 gap-2">
+                    <div class="form-group">
+                        <label class="form-label">Таймаут (сек)</label>
+                        <input type="number" class="form-input" id="nginx-keepalive-timeout" value="65" min="0" max="3600">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Макс. запросов</label>
+                        <input type="number" class="form-input" id="nginx-keepalive-requests" value="1000" min="0" max="100000">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Upstream conn.</label>
+                        <input type="number" class="form-input" id="nginx-keepalive-upstream" value="32" min="0" max="1000">
+                    </div>
+                </div>
+            </div>
+
+            <!-- HTTP/2 Settings -->
+            <div class="glass-card nginx-section">
+                <div class="section-header">
+                    <div class="section-icon http2-icon"><i class="fas fa-bolt"></i></div>
+                    <div>
+                        <h4>HTTP/2</h4>
+                        <p>Современный протокол</p>
+                    </div>
+                </div>
+                <div class="form-group" style="margin-bottom: 16px;">
+                    <label class="flex-between" style="cursor: pointer;">
+                        <span style="font-weight: 500;">Включить HTTP/2</span>
+                        <div class="toggle-switch">
+                            <input type="checkbox" id="nginx-http2-enabled" checked>
+                            <span class="toggle-slider"></span>
+                        </div>
+                    </label>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Макс. параллельных потоков</label>
+                    <input type="number" class="form-input" id="nginx-http2-streams" value="128" min="1" max="1000">
+                </div>
+            </div>
+
+            <!-- Rate Limiting -->
+            <div class="glass-card nginx-section">
+                <div class="section-header">
+                    <div class="section-icon rate-icon"><i class="fas fa-tachometer-alt"></i></div>
+                    <div>
+                        <h4>Лимит запросов</h4>
+                        <p>Защита от перегрузки</p>
+                    </div>
+                </div>
+                <div class="form-group" style="margin-bottom: 16px;">
+                    <label class="flex-between" style="cursor: pointer;">
+                        <span style="font-weight: 500;">Включить Rate Limiting</span>
+                        <div class="toggle-switch">
+                            <input type="checkbox" id="nginx-rate-enabled">
+                            <span class="toggle-slider"></span>
+                        </div>
+                    </label>
+                </div>
+                <div class="grid grid-2 gap-2">
+                    <div class="form-group">
+                        <label class="form-label">Лимит (r/s или r/m)</label>
+                        <input type="text" class="form-input" id="nginx-rate-limit" value="100r/s" placeholder="100r/s">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Burst (всплеск)</label>
+                        <input type="number" class="form-input" id="nginx-rate-burst" value="200" min="0">
+                    </div>
+                </div>
+            </div>
+
+            <!-- Security Settings -->
+            <div class="glass-card nginx-section">
+                <div class="section-header">
+                    <div class="section-icon security-icon"><i class="fas fa-shield-alt"></i></div>
+                    <div>
+                        <h4>Безопасность</h4>
+                        <p>Заголовки и защита</p>
+                    </div>
+                </div>
+                <div class="security-toggles">
+                    <label class="security-toggle">
+                        <input type="checkbox" id="nginx-hide-version" checked>
+                        <span>Скрывать версию Nginx</span>
+                    </label>
+                    <label class="security-toggle">
+                        <input type="checkbox" id="nginx-x-frame-options" checked>
+                        <span>X-Frame-Options (защита от clickjacking)</span>
+                    </label>
+                    <label class="security-toggle">
+                        <input type="checkbox" id="nginx-x-content-type" checked>
+                        <span>X-Content-Type-Options (nosniff)</span>
+                    </label>
+                    <label class="security-toggle">
+                        <input type="checkbox" id="nginx-x-xss" checked>
+                        <span>X-XSS-Protection</span>
+                    </label>
+                </div>
+            </div>
+
+            <!-- SSL Settings -->
+            <div class="glass-card nginx-section">
+                <div class="section-header">
+                    <div class="section-icon ssl-icon"><i class="fas fa-lock"></i></div>
+                    <div>
+                        <h4>SSL/TLS</h4>
+                        <p>Шифрование соединений</p>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Протоколы TLS</label>
+                    <div class="checkbox-group">
+                        <label class="checkbox-item">
+                            <input type="checkbox" id="nginx-tls12" checked> TLSv1.2
+                        </label>
+                        <label class="checkbox-item">
+                            <input type="checkbox" id="nginx-tls13" checked> TLSv1.3
+                        </label>
+                    </div>
+                </div>
+                <div class="form-group" style="margin-bottom: 16px;">
+                    <label class="flex-between" style="cursor: pointer;">
+                        <span>OCSP Stapling</span>
+                        <div class="toggle-switch">
+                            <input type="checkbox" id="nginx-ocsp-stapling" checked>
+                            <span class="toggle-slider"></span>
+                        </div>
+                    </label>
+                </div>
+                <div class="form-group" style="margin-bottom: 0;">
+                    <label class="form-label">Таймаут сессии</label>
+                    <input type="text" class="form-input" id="nginx-ssl-session-timeout" value="1d" placeholder="1d">
+                </div>
+            </div>
+
+            <!-- Cache Settings -->
+            <div class="glass-card nginx-section">
+                <div class="section-header">
+                    <div class="section-icon cache-icon"><i class="fas fa-database"></i></div>
+                    <div>
+                        <h4>Кэширование</h4>
+                        <p>Proxy cache для ускорения</p>
+                    </div>
+                </div>
+                <div class="form-group" style="margin-bottom: 16px;">
+                    <label class="flex-between" style="cursor: pointer;">
+                        <span style="font-weight: 500;">Включить кэш</span>
+                        <div class="toggle-switch">
+                            <input type="checkbox" id="nginx-cache-enabled" checked>
+                            <span class="toggle-slider"></span>
+                        </div>
+                    </label>
+                </div>
+                <div class="grid grid-2 gap-2">
+                    <div class="form-group">
+                        <label class="form-label">Макс. размер кэша</label>
+                        <input type="text" class="form-input" id="nginx-cache-max-size" value="10g" placeholder="10g">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Время неактивности</label>
+                        <input type="text" class="form-input" id="nginx-cache-inactive" value="7d" placeholder="7d">
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Config Preview -->
+        <div class="glass-card mt-4">
+            <div class="flex-between mb-3">
+                <h3 style="font-size: 16px; font-weight: 600;">
+                    <i class="fas fa-code"></i> Предпросмотр конфигурации
+                </h3>
+                <button class="btn btn-sm btn-secondary" onclick="previewNginxConfig()">
+                    <i class="fas fa-eye"></i> Показать
+                </button>
+            </div>
+            <pre class="config-preview" id="nginx-config-preview" style="display: none;"></pre>
         </div>
     </div>
 
@@ -379,10 +738,189 @@
 .input-group .form-input {
     flex: 1;
 }
+
+/* Nginx Rules Tab Styles */
+.nginx-section .section-header {
+    display: flex;
+    gap: 16px;
+    align-items: flex-start;
+    margin-bottom: 20px;
+    padding-bottom: 16px;
+    border-bottom: 1px solid var(--glass-border);
+}
+
+.nginx-section .section-icon {
+    width: 44px;
+    height: 44px;
+    border-radius: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 18px;
+    background: linear-gradient(135deg, var(--accent-light), transparent);
+    color: var(--accent-primary);
+    flex-shrink: 0;
+}
+
+.nginx-section .section-header h4 {
+    font-size: 16px;
+    font-weight: 600;
+    margin-bottom: 4px;
+}
+
+.nginx-section .section-header p {
+    font-size: 13px;
+    color: var(--text-secondary);
+    margin: 0;
+}
+
+/* Different icon colors */
+.ws-icon { background: linear-gradient(135deg, rgba(51, 154, 240, 0.15), transparent) !important; color: var(--info) !important; }
+.proxy-icon { background: linear-gradient(135deg, rgba(156, 39, 176, 0.15), transparent) !important; color: #9c27b0 !important; }
+.gzip-icon { background: linear-gradient(135deg, rgba(76, 175, 80, 0.15), transparent) !important; color: #4caf50 !important; }
+.keepalive-icon { background: linear-gradient(135deg, rgba(233, 30, 99, 0.15), transparent) !important; color: #e91e63 !important; }
+.http2-icon { background: linear-gradient(135deg, rgba(255, 152, 0, 0.15), transparent) !important; color: #ff9800 !important; }
+.rate-icon { background: linear-gradient(135deg, rgba(255, 87, 34, 0.15), transparent) !important; color: #ff5722 !important; }
+.security-icon { background: linear-gradient(135deg, rgba(0, 150, 136, 0.15), transparent) !important; color: #009688 !important; }
+.ssl-icon { background: linear-gradient(135deg, rgba(33, 150, 243, 0.15), transparent) !important; color: #2196f3 !important; }
+.cache-icon { background: linear-gradient(135deg, rgba(121, 85, 72, 0.15), transparent) !important; color: #795548 !important; }
+
+.form-hint {
+    font-size: 12px;
+    color: var(--text-secondary);
+    margin-top: 4px;
+}
+
+.hint {
+    font-size: 11px;
+    color: var(--text-muted);
+    font-weight: 400;
+    margin-left: 4px;
+}
+
+.input-with-unit {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.input-with-unit .form-input {
+    flex: 1;
+}
+
+.unit-hint {
+    font-size: 12px;
+    color: var(--text-muted);
+    white-space: nowrap;
+}
+
+.form-range {
+    width: 100%;
+    height: 6px;
+    background: var(--bg-tertiary);
+    border-radius: 3px;
+    outline: none;
+    -webkit-appearance: none;
+    margin-top: 8px;
+}
+
+.form-range::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 18px;
+    height: 18px;
+    background: var(--accent-primary);
+    border-radius: 50%;
+    cursor: pointer;
+    box-shadow: 0 2px 6px rgba(255, 107, 53, 0.3);
+}
+
+.range-labels {
+    display: flex;
+    justify-content: space-between;
+    font-size: 11px;
+    color: var(--text-muted);
+    margin-top: 4px;
+}
+
+.range-labels span:nth-child(2) {
+    font-weight: 600;
+    color: var(--accent-primary);
+    font-size: 14px;
+}
+
+.security-toggles {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.security-toggle {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    cursor: pointer;
+    font-size: 14px;
+}
+
+.security-toggle input[type="checkbox"] {
+    width: 18px;
+    height: 18px;
+    accent-color: var(--accent-primary);
+    cursor: pointer;
+}
+
+.checkbox-group {
+    display: flex;
+    gap: 16px;
+    flex-wrap: wrap;
+}
+
+.checkbox-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    cursor: pointer;
+    font-size: 14px;
+}
+
+.checkbox-item input[type="checkbox"] {
+    width: 16px;
+    height: 16px;
+    accent-color: var(--accent-primary);
+}
+
+.config-preview {
+    background: #1e1e1e;
+    color: #d4d4d4;
+    padding: 16px;
+    border-radius: 8px;
+    font-family: 'Consolas', 'Monaco', monospace;
+    font-size: 13px;
+    line-height: 1.5;
+    overflow-x: auto;
+    max-height: 400px;
+    white-space: pre;
+}
+
+.grid-3 {
+    grid-template-columns: repeat(3, 1fr);
+}
+
+@media (max-width: 768px) {
+    .grid-3 {
+        grid-template-columns: 1fr;
+    }
+}
 </style>
 
 <script>
 const NODE_ID = {{ node.id }};
+</script>
+<script src="/static/js/nginx_rules.js"></script>
+<script>
+// ============================================
+// Page Functions
+// ============================================
 
 function copyToClipboard(elementId) {
     const el = document.getElementById(elementId);
@@ -554,6 +1092,17 @@ async function runAction(action) {
             params: params
         });
         
+        // Check if this is an async task response
+        if (response.task_id) {
+            log(`Task started: ${response.message}`, 'info');
+            showNotification('Задача запущена, ожидайте...', 'info');
+            
+            // Start polling for task status
+            await pollTaskStatus(response.task_id);
+            return;
+        }
+        
+        // Synchronous response
         if (response.success) {
             log(`Command executed successfully`, 'success');
             if (response.stdout) log(response.stdout);
@@ -569,6 +1118,63 @@ async function runAction(action) {
         log(`Error: ${error.message}`, 'error');
         showNotification('Ошибка выполнения команды', 'error');
     }
+}
+
+// Poll for async task status
+async function pollTaskStatus(taskId, interval = 2000) {
+    const maxAttempts = 150; // 5 minutes max (150 * 2s)
+    let attempts = 0;
+    
+    while (attempts < maxAttempts) {
+        attempts++;
+        
+        try {
+            const response = await api.get(`/tasks/${taskId}`);
+            
+            if (response.status === 'PENDING') {
+                log(`Waiting for task to start...`, 'info');
+            } else if (response.status === 'STARTED' || response.status === 'PROGRESS') {
+                if (response.progress) {
+                    log(response.progress, 'info');
+                }
+            } else if (response.status === 'SUCCESS') {
+                // Task completed successfully
+                const result = response.result;
+                if (result) {
+                    if (result.success) {
+                        log(`Task completed successfully`, 'success');
+                        if (result.stdout) log(result.stdout);
+                        showNotification('Операция выполнена', 'success');
+                    } else {
+                        log(`Task failed (exit code: ${result.exit_code || 'unknown'})`, 'error');
+                        if (result.stdout) log(result.stdout, 'warn');
+                        if (result.stderr) log(result.stderr, 'error');
+                        showNotification('Ошибка выполнения команды', 'error');
+                    }
+                }
+                return; // Done
+            } else if (response.status === 'FAILURE') {
+                log(`Task failed: ${response.error || 'Unknown error'}`, 'error');
+                showNotification('Ошибка выполнения задачи', 'error');
+                return; // Done
+            } else if (response.status === 'REVOKED') {
+                log(`Task was cancelled`, 'warn');
+                showNotification('Задача отменена', 'warning');
+                return; // Done
+            }
+            
+            // Wait before next poll
+            await new Promise(resolve => setTimeout(resolve, interval));
+            
+        } catch (error) {
+            log(`Error checking task status: ${error.message}`, 'error');
+            // Continue polling despite errors
+            await new Promise(resolve => setTimeout(resolve, interval));
+        }
+    }
+    
+    log(`Task polling timeout after ${maxAttempts * interval / 1000} seconds`, 'warn');
+    showNotification('Превышено время ожидания', 'warning');
 }
 
 // async function mockRunAction(action) { ... } (removed)
@@ -704,10 +1310,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
 const originalSwitchTab = window.switchTab;
 window.switchTab = function(tabName) {
-    // Call original logic (implemented in HTML previously, but we replaced it?) 
-    // Wait, the original switchTab was defined above. We are overriding it here to add hooks.
-    
-    // Re-implementing switchTab logic because 'originalSwitchTab' might not capture the global function properly if defined in same scope
+    // Re-implementing switchTab logic
     document.querySelectorAll('.tab-content').forEach(el => el.style.display = 'none');
     document.querySelectorAll('.tab-link').forEach(el => el.classList.remove('active'));
     document.getElementById(`tab-${tabName}`).style.display = 'block';
@@ -716,6 +1319,8 @@ window.switchTab = function(tabName) {
     
     if (tabName === 'components') {
         checkAllComponents();
+    } else if (tabName === 'nginx') {
+        loadNginxRules();
     }
 }
 </script>

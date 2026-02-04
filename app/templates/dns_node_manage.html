@@ -525,16 +525,92 @@ async function runAction(action) {
         
         const result = await response.json();
         
+        // Check if this is an async task response
+        if (result.task_id) {
+            log(`Task started: ${result.message}`, 'info');
+            showNotification('Задача запущена, ожидайте...', 'info');
+            
+            // Start polling for task status
+            await pollTaskStatus(result.task_id);
+            return;
+        }
+        
+        // Synchronous response
         if (result.success) {
             log(`Success!`, 'success');
             if (result.stdout) log(result.stdout);
+            showNotification('Операция выполнена', 'success');
         } else {
-            log(`Failed: ${result.stderr}`, 'error');
+            log(`Failed (exit code: ${result.exit_code || 'unknown'})`, 'error');
+            if (result.stdout) log(result.stdout, 'warn');
+            if (result.stderr) log(result.stderr, 'error');
+            showNotification('Ошибка выполнения команды', 'error');
         }
         
     } catch (error) {
         log(`Error: ${error.message}`, 'error');
+        showNotification('Ошибка выполнения команды', 'error');
     }
+}
+
+// Poll for async task status
+async function pollTaskStatus(taskId, interval = 2000) {
+    const maxAttempts = 150; // 5 minutes max (150 * 2s)
+    let attempts = 0;
+    
+    while (attempts < maxAttempts) {
+        attempts++;
+        
+        try {
+            const response = await fetch(`/api/v1/tasks/${taskId}`, {
+                headers: { 'Authorization': `Bearer ${localStorage.getItem('access_token')}` }
+            });
+            const data = await response.json();
+            
+            if (data.status === 'PENDING') {
+                log(`Waiting for task to start...`, 'info');
+            } else if (data.status === 'STARTED' || data.status === 'PROGRESS') {
+                if (data.progress) {
+                    log(data.progress, 'info');
+                }
+            } else if (data.status === 'SUCCESS') {
+                // Task completed successfully
+                const result = data.result;
+                if (result) {
+                    if (result.success) {
+                        log(`Task completed successfully`, 'success');
+                        if (result.stdout) log(result.stdout);
+                        showNotification('Операция выполнена', 'success');
+                    } else {
+                        log(`Task failed (exit code: ${result.exit_code || 'unknown'})`, 'error');
+                        if (result.stdout) log(result.stdout, 'warn');
+                        if (result.stderr) log(result.stderr, 'error');
+                        showNotification('Ошибка выполнения команды', 'error');
+                    }
+                }
+                return; // Done
+            } else if (data.status === 'FAILURE') {
+                log(`Task failed: ${data.error || 'Unknown error'}`, 'error');
+                showNotification('Ошибка выполнения задачи', 'error');
+                return; // Done
+            } else if (data.status === 'REVOKED') {
+                log(`Task was cancelled`, 'warn');
+                showNotification('Задача отменена', 'warning');
+                return; // Done
+            }
+            
+            // Wait before next poll
+            await new Promise(resolve => setTimeout(resolve, interval));
+            
+        } catch (error) {
+            log(`Error checking task status: ${error.message}`, 'error');
+            // Continue polling despite errors
+            await new Promise(resolve => setTimeout(resolve, interval));
+        }
+    }
+    
+    log(`Task polling timeout after ${maxAttempts * interval / 1000} seconds`, 'warn');
+    showNotification('Превышено время ожидания', 'warning');
 }
 
 async function installAll() {

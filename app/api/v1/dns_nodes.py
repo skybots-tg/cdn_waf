@@ -1,5 +1,5 @@
 """DNS Nodes API"""
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Union
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -16,9 +16,14 @@ from app.schemas.dns_node import (
     DNSComponentAction,
     DNSComponentStatus
 )
+from app.schemas.task import TaskStartResponse
 from app.services.dns_node_service import DNSNodeService
+from app.tasks.edge_tasks import run_node_component_task
 
 router = APIRouter()
+
+# Actions that should run asynchronously (long-running operations)
+ASYNC_ACTIONS = {'install', 'update'}
 
 @router.get("/", response_model=List[DNSNodeResponse])
 async def list_dns_nodes(
@@ -84,17 +89,38 @@ async def delete_dns_node(
     if not await DNSNodeService.delete_node(db, node_id):
         raise HTTPException(status_code=404, detail="Node not found")
 
-@router.post("/{node_id}/component", response_model=DNSNodeCommandResult)
+@router.post("/{node_id}/component", response_model=Union[DNSNodeCommandResult, TaskStartResponse])
 async def manage_component(
     node_id: int,
     action: DNSComponentAction,
     current_user: User = Depends(get_current_superuser),
     db: AsyncSession = Depends(get_db)
 ):
-    """Manage DNS node component"""
+    """
+    Manage DNS node component
+    
+    Long-running actions (install, update) run asynchronously and return task_id.
+    Use GET /api/v1/tasks/{task_id} to check status.
+    """
     node = await DNSNodeService.get_node(db, node_id)
     if not node:
         raise HTTPException(status_code=404, detail="Node not found")
+    
+    # Check if this is a long-running action
+    if action.action in ASYNC_ACTIONS:
+        # Start async task
+        task = run_node_component_task.delay(
+            node_id=node_id,
+            component=action.component,
+            action=action.action,
+            node_type="dns",
+            params=None
+        )
+        return TaskStartResponse(
+            task_id=task.id,
+            status="PENDING",
+            message=f"Started {action.action} for {action.component}"
+        )
         
     return await DNSNodeService.manage_component_action(node, action.component, action.action, db)
 

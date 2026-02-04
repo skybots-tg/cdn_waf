@@ -1,5 +1,5 @@
 """Edge nodes API endpoints"""
-from typing import List, Optional, Dict
+from typing import List, Optional, Dict, Union
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -15,10 +15,15 @@ from app.schemas.edge_node import (
     EdgeComponentAction,
     EdgeComponentStatus
 )
+from app.schemas.task import TaskStartResponse
 from app.services.edge_service import EdgeNodeService
 from app.core.security import get_current_superuser
+from app.tasks.edge_tasks import run_node_component_task
 
 router = APIRouter()
+
+# Actions that should run asynchronously (long-running operations)
+ASYNC_ACTIONS = {'install', 'update'}
 
 
 @router.get("/stats", response_model=EdgeNodeStats)
@@ -189,7 +194,7 @@ async def get_component_status(
     return status
 
 
-@router.post("/{node_id}/component", response_model=EdgeNodeCommandResult)
+@router.post("/{node_id}/component", response_model=Union[EdgeNodeCommandResult, TaskStartResponse])
 async def manage_component(
     node_id: int,
     action_data: EdgeComponentAction,
@@ -199,8 +204,11 @@ async def manage_component(
     """
     Manage component on edge node (superuser only)
     
-    Supported components: nginx, redis, certbot
+    Supported components: nginx, redis, certbot, python, agent, system
     Supported actions: start, stop, restart, reload, status, install, update
+    
+    Long-running actions (install, update) run asynchronously and return task_id.
+    Use GET /api/v1/tasks/{task_id} to check status.
     """
     node = await EdgeNodeService.get_node(db, node_id)
     if not node:
@@ -215,6 +223,23 @@ async def manage_component(
             detail="Edge node is disabled"
         )
     
+    # Check if this is a long-running action
+    if action_data.action in ASYNC_ACTIONS:
+        # Start async task
+        task = run_node_component_task.delay(
+            node_id=node_id,
+            component=action_data.component,
+            action=action_data.action,
+            node_type="edge",
+            params=action_data.params
+        )
+        return TaskStartResponse(
+            task_id=task.id,
+            status="PENDING",
+            message=f"Started {action_data.action} for {action_data.component}"
+        )
+    
+    # For quick actions, run synchronously
     result = await EdgeNodeService.manage_component(
         node,
         action_data.component,
