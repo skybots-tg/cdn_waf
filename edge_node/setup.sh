@@ -324,11 +324,24 @@ install_python_env() {
     mkdir -p "${APP_DIR}"
     cd "${APP_DIR}"
 
+    # Проверяем, существует ли venv и работоспособен ли он (есть ли pip)
+    if [[ -d "venv" ]]; then
+        if [[ ! -x "venv/bin/pip" ]]; then
+            log "venv существует, но повреждён (pip отсутствует). Пересоздаю..."
+            rm -rf venv
+        else
+            log "venv уже существует и работоспособен."
+        fi
+    fi
+
     if [[ ! -d "venv" ]]; then
         log "Создаю virtualenv..."
         python3 -m venv venv
-    else
-        log "venv уже существует, пропускаю создание."
+        if [[ ! -x "venv/bin/pip" ]]; then
+            err "Не удалось создать venv с pip. Проверьте установку python3-venv."
+            exit 1
+        fi
+        log "virtualenv создан успешно."
     fi
 
     if [[ -f "${APP_DIR}/requirements.txt" ]]; then
