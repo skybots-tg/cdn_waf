@@ -110,7 +110,14 @@ class NginxRulesService:
             ])
         
         # SSL settings
-        protocols = " ".join(config.ssl.protocols)
+        # Deduplicate protocols while preserving order
+        seen = set()
+        unique_protocols = []
+        for p in config.ssl.protocols:
+            if p not in seen:
+                seen.add(p)
+                unique_protocols.append(p)
+        protocols = " ".join(unique_protocols)
         lines.extend([
             "# === SSL/TLS Settings ===",
             f"ssl_protocols {protocols};",
