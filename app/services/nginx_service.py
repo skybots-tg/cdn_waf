@@ -246,7 +246,10 @@ class NginxRulesService:
                 'client_max_body_size', 'client_body_timeout', 'client_header_timeout',
                 'client_body_buffer_size', 'large_client_header_buffers',
                 'keepalive_timeout', 'keepalive_requests',
-                'server_tokens'
+                'server_tokens',
+                'ssl_protocols', 'ssl_prefer_server_ciphers', 'ssl_session_timeout',
+                'ssl_session_cache', 'ssl_stapling', 'ssl_stapling_verify',
+                'ssl_ciphers', 'ssl_ecdh_curve'
             ]
             
             # Build sed command to comment out conflicting directives
