@@ -6,58 +6,94 @@
 
 Edge-нода состоит из:
 
-1. **Nginx/OpenResty** - HTTP(S) reverse proxy с кэшированием
-2. **Config Updater** - Python скрипт, который получает конфигурацию с control plane
+1. **Nginx** - HTTP(S) reverse proxy с кэшированием
+2. **Config Updater (Agent)** - Python скрипт, который получает конфигурацию с control plane
 3. **Monitoring Agent** - Отправляет метрики и логи в центральную систему
 
 ## Установка Edge-ноды
 
 ### Требования
 
-- Ubuntu 20.04/22.04 или другой Linux
-- Python 3.11+
-- Nginx/OpenResty
+- Ubuntu 22.04 или 24.04 (рекомендуется)
+- Python 3.10+ (встроен в Ubuntu)
+- Nginx (устанавливается автоматически)
 - Минимум 2GB RAM, 20GB диск
+- Root или sudo доступ
 
-### Шаги установки
+### Быстрая установка (автоматическая)
 
-1. Установите Nginx или OpenResty:
+**Вариант 1: Через веб-интерфейс Control Plane**
 
+1. Добавьте edge-ноду в Control Plane (указав IP, SSH credentials)
+2. Нажмите "Install System" → "Install Nginx" → "Install Python" → "Install Agent"
+3. Нода автоматически начнёт получать конфигурацию
+
+**Вариант 2: Через скрипт (на самой ноде)**
+
+1. Скопируйте файлы на сервер:
 ```bash
-# Для OpenResty (рекомендуется)
-sudo apt-get update
-sudo apt-get install -y wget gnupg
-wget -qO - https://openresty.org/package/pubkey.gpg | sudo apt-key add -
-sudo add-apt-repository -y "deb http://openresty.org/package/ubuntu $(lsb_release -sc) main"
-sudo apt-get update
-sudo apt-get install -y openresty
+scp -r edge_node/ root@your-edge-ip:/opt/cdn_waf/
 ```
 
-2. Установите Python зависимости:
-
+2. Создайте конфигурационный файл:
 ```bash
-cd edge_node
-pip install -r requirements.txt
-```
-
-3. Создайте конфигурационный файл:
-
-```bash
+ssh root@your-edge-ip
+cd /opt/cdn_waf
 cp config.example.yaml config.yaml
-# Отредактируйте config.yaml
+nano config.yaml  # Укажите id, api_key, control_plane url
 ```
 
-4. Запустите config updater:
-
+3. Запустите полную установку:
 ```bash
-python edge_config_updater.py
+sudo ./setup.sh install_all
 ```
 
-5. Запустите Nginx:
+### Пошаговая установка (ручная)
+
+Если нужен более гранулярный контроль:
 
 ```bash
-sudo systemctl start openresty
-sudo systemctl enable openresty
+# 1. Установка системных зависимостей
+sudo ./setup.sh install_deps
+
+# 2. Установка и настройка Nginx
+sudo ./setup.sh install_nginx
+
+# 3. Установка Certbot (опционально, для локальных сертификатов)
+sudo ./setup.sh install_certbot
+
+# 4. Настройка Python окружения
+sudo ./setup.sh install_python
+
+# 5. Создание конфигурации (ВАЖНО: сделать до следующего шага!)
+cp config.example.yaml config.yaml
+# Отредактируйте config.yaml - укажите:
+#   - edge_node.id (уникальный ID ноды из Control Plane)
+#   - edge_node.name (имя ноды)
+#   - control_plane.url (URL вашего Control Plane)
+#   - control_plane.api_key (API ключ ноды из Control Plane)
+
+# 6. Установка и запуск агента
+sudo ./setup.sh install_agent_service
+
+# 7. Проверка установки
+sudo ./setup.sh verify
+```
+
+### Проверка статуса
+
+```bash
+# Статус nginx
+sudo systemctl status nginx
+
+# Статус агента
+sudo systemctl status cdn-waf-agent
+
+# Логи агента
+sudo journalctl -u cdn-waf-agent -f
+
+# Проверка nginx конфига
+sudo nginx -t
 ```
 
 ## Конфигурация

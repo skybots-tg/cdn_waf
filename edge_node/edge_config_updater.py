@@ -50,12 +50,43 @@ NGINX_TEMPLATE = Template("""
 # Version: {{ version|default('unknown') }}
 # Generated at: {{ timestamp|default('') }}
 
-# Default server for ACME challenges on HTTP (handles requests for unconfigured domains)
+# ============================================
+# Cache zones for all domains (must be in http context)
+# ============================================
+{% for domain in domains %}
+{% set safe_name = domain.name|replace('.', '_') %}
+proxy_cache_path /var/cache/nginx/{{ safe_name }} levels=1:2 keys_zone={{ safe_name }}:10m max_size=1g inactive=10m use_temp_path=off;
+{% endfor %}
+
+# ============================================
+# Upstream definitions
+# ============================================
+{% for domain in domains %}
+{% set safe_name = domain.name|replace('.', '_') %}
+{% set backend_protocol = 'https' if domain.tls_settings.mode in ['full', 'strict'] else 'http' %}
+upstream {{ safe_name }}_backend {
+    {% for origin in domain.origins %}
+    server {{ origin.host }}:{{ origin.port if backend_protocol == 'http' else (443 if origin.port == 80 else origin.port) }} weight={{ origin.weight }} {% if origin.is_backup %}backup{% endif %};
+    {% endfor %}
+}
+{% endfor %}
+
+# ============================================
+# Default server for unconfigured domains
+# ============================================
 server {
     listen 80 default_server;
+    listen [::]:80 default_server;
     server_name _;
     
     access_log /var/log/nginx/default_access.log;
+    
+    # Health check endpoint
+    location /health {
+        access_log off;
+        return 200 "OK\n";
+        add_header Content-Type text/plain;
+    }
     
     # ACME Challenge support for any domain (even unconfigured)
     location /.well-known/acme-challenge/ {
@@ -68,27 +99,23 @@ server {
     
     # Return 404 for all other requests to unconfigured domains
     location / {
-        return 404 "Domain not configured on this CDN node";
+        return 404 "Domain not configured on this CDN node\n";
     }
 }
 
+# ============================================
+# Domain configurations
+# ============================================
 {% for domain in domains %}
 {% set safe_name = domain.name|replace('.', '_') %}
 {% set backend_protocol = 'https' if domain.tls_settings.mode in ['full', 'strict'] else 'http' %}
 
+# ----------------------------------------
 # Domain: {{ domain.name }}
+# ----------------------------------------
 
-# Cache zone for this domain (http context)
-proxy_cache_path /var/cache/nginx/{{ safe_name }} levels=1:2 keys_zone={{ safe_name }}:10m max_size=1g inactive=10m use_temp_path=off;
-
-upstream {{ safe_name }}_backend {
-    {% for origin in domain.origins %}
-    server {{ origin.host }}:{{ origin.port if backend_protocol == 'http' else (443 if origin.port == 80 else origin.port) }} weight={{ origin.weight }} {% if origin.is_backup %}backup{% endif %};
-    {% endfor %}
-}
-
-{# HTTPS server if TLS is enabled and certificate is available #}
 {% if domain.tls_settings.enabled and domain.tls_certificate %}
+{# HTTPS server block #}
 server {
     listen 443 ssl http2;
     server_name {{ domain.name }};
@@ -309,7 +336,10 @@ class EdgeConfigUpdater:
     def __init__(self, config_path: str = "config.yaml"):
         # Путь к конфигу можно переопределить через env,
         # относительный путь считаем от директории скрипта.
-        config_path = os.getenv("EDGE_UPDATER_CONFIG", config_path)
+        env_config = os.getenv("EDGE_UPDATER_CONFIG")
+        if env_config:
+            config_path = env_config
+        
         config_file = Path(config_path)
         if not config_file.is_absolute():
             config_file = Path(__file__).resolve().parent / config_file
@@ -327,13 +357,20 @@ class EdgeConfigUpdater:
         self.reload_command = self.config["nginx"]["reload_command"]
         self.test_command = self.config["nginx"].get("test_command", "nginx -t")
         self.update_interval = int(self.config.get("update_interval", 30))
-        self.request_timeout = float(self.config.get("request_timeout", 10.0))
+        self.request_timeout = float(self.config.get("request_timeout", 15.0))
 
-        # Create certs directory
-        self.certs_dir.mkdir(parents=True, exist_ok=True)
+        # Create certs directory with proper permissions
+        try:
+            self.certs_dir.mkdir(parents=True, exist_ok=True)
+            os.chmod(self.certs_dir, 0o700)
+        except PermissionError:
+            logger.warning("Could not set permissions on certs dir: %s", self.certs_dir)
         
         # Ensure log format config exists
         self.ensure_log_format_config()
+        
+        logger.info("EdgeConfigUpdater initialized (node_id=%s, control_plane=%s)", 
+                   self.node_id, self.control_plane_url)
 
     def get_system_metrics(self) -> Dict[str, float]:
         """Get system metrics"""
@@ -505,6 +542,14 @@ class EdgeConfigUpdater:
 
     def generate_nginx_config(self, config: Dict[str, Any]) -> str:
         """Generate Nginx configuration from config data"""
+        # Ensure domains list exists (even if empty)
+        if 'domains' not in config:
+            config['domains'] = []
+        
+        # Ensure global_settings exists
+        if 'global_settings' not in config:
+            config['global_settings'] = {'control_plane_url': self.control_plane_url}
+        
         return NGINX_TEMPLATE.render(**config)
 
     def reload_nginx(self) -> bool:
@@ -522,7 +567,7 @@ class EdgeConfigUpdater:
                 logger.error("Nginx config test failed: %s", result.stderr.strip())
                 return False
 
-            # Reload Nginx
+            # Reload Nginx (try reload first, fall back to restart if not running)
             reload_cmd = shlex.split(self.reload_command)
             result = subprocess.run(
                 reload_cmd,
@@ -534,11 +579,47 @@ class EdgeConfigUpdater:
                 logger.info("Nginx reloaded successfully")
                 return True
             else:
-                logger.error("Nginx reload failed: %s", result.stderr.strip())
-                return False
+                # Reload failed, try restart (nginx might not be running)
+                logger.warning("Nginx reload failed, trying restart: %s", result.stderr.strip())
+                restart_result = subprocess.run(
+                    ["systemctl", "restart", "nginx"],
+                    capture_output=True,
+                    text=True,
+                )
+                if restart_result.returncode == 0:
+                    logger.info("Nginx restarted successfully")
+                    return True
+                else:
+                    logger.error("Nginx restart also failed: %s", restart_result.stderr.strip())
+                    return False
 
         except Exception as e:
             logger.error("Failed to reload Nginx: %s", e)
+            return False
+    
+    def backup_config(self) -> Optional[str]:
+        """Backup current nginx config before overwriting"""
+        if not self.nginx_config_path.exists():
+            return None
+        
+        backup_path = self.nginx_config_path.with_suffix('.conf.bak')
+        try:
+            import shutil
+            shutil.copy2(self.nginx_config_path, backup_path)
+            return str(backup_path)
+        except Exception as e:
+            logger.warning("Failed to backup config: %s", e)
+            return None
+    
+    def restore_config(self, backup_path: str) -> bool:
+        """Restore nginx config from backup"""
+        try:
+            import shutil
+            shutil.copy2(backup_path, self.nginx_config_path)
+            logger.info("Restored config from backup")
+            return True
+        except Exception as e:
+            logger.error("Failed to restore config from backup: %s", e)
             return False
 
     async def update_config(self):
@@ -571,11 +652,27 @@ class EdgeConfigUpdater:
                 cache_path = Path(f"/var/cache/nginx/{safe_name}")
                 try:
                     cache_path.mkdir(parents=True, exist_ok=True)
-                    # Optional: Set permissions? Assuming script runs as root/privileged
-                    # os.chown(str(cache_path), nginx_uid, nginx_gid)
+                    # Set ownership to nginx user (www-data on Debian/Ubuntu, nginx on RHEL)
+                    try:
+                        import pwd
+                        import grp
+                        # Try www-data first (Ubuntu/Debian)
+                        try:
+                            uid = pwd.getpwnam('www-data').pw_uid
+                            gid = grp.getgrnam('www-data').gr_gid
+                        except KeyError:
+                            # Fallback to nginx user (RHEL/CentOS)
+                            uid = pwd.getpwnam('nginx').pw_uid
+                            gid = grp.getgrnam('nginx').gr_gid
+                        os.chown(str(cache_path), uid, gid)
+                    except Exception:
+                        pass  # Running as non-root or user doesn't exist
                 except Exception as e:
                     logger.warning("Failed to create cache dir %s: %s", cache_path, e)
 
+        # Backup existing config before overwriting
+        backup_path = self.backup_config()
+        
         # Write to file
         self.nginx_config_path.parent.mkdir(parents=True, exist_ok=True)
         self.nginx_config_path.write_text(nginx_config)
@@ -584,8 +681,22 @@ class EdgeConfigUpdater:
         if self.reload_nginx():
             self.current_version = version
             logger.info("Config updated to version %s", self.current_version)
+            # Remove backup on success
+            if backup_path:
+                try:
+                    Path(backup_path).unlink()
+                except Exception:
+                    pass
         else:
-            logger.error("Failed to reload Nginx, keeping old config in memory")
+            logger.error("Failed to reload Nginx with new config")
+            # Restore from backup
+            if backup_path:
+                if self.restore_config(backup_path):
+                    # Try reloading with old config
+                    self.reload_nginx()
+                    logger.info("Restored previous config after failure")
+            else:
+                logger.error("No backup available to restore")
 
     async def run(self):
         """Main loop"""
@@ -608,9 +719,79 @@ class EdgeConfigUpdater:
             await asyncio.sleep(self.update_interval)
 
 
+def validate_config(config: Dict[str, Any]) -> bool:
+    """Validate edge node configuration"""
+    required_sections = ['edge_node', 'control_plane', 'nginx']
+    
+    for section in required_sections:
+        if section not in config:
+            logger.error("Missing required config section: %s", section)
+            return False
+    
+    # Validate edge_node
+    if 'id' not in config['edge_node']:
+        logger.error("Missing edge_node.id in config")
+        return False
+    
+    # Validate control_plane
+    if 'url' not in config['control_plane']:
+        logger.error("Missing control_plane.url in config")
+        return False
+    if 'api_key' not in config['control_plane']:
+        logger.error("Missing control_plane.api_key in config")
+        return False
+    if config['control_plane']['api_key'] == 'your-api-key-here':
+        logger.error("control_plane.api_key contains placeholder value")
+        return False
+    
+    # Validate nginx
+    if 'config_path' not in config['nginx']:
+        logger.error("Missing nginx.config_path in config")
+        return False
+    if 'reload_command' not in config['nginx']:
+        logger.error("Missing nginx.reload_command in config")
+        return False
+    
+    return True
+
+
 async def main():
     """Main entry point"""
-    updater = EdgeConfigUpdater()
+    logger.info("Starting Edge Config Updater...")
+    
+    # Find config file
+    config_path = os.getenv("EDGE_UPDATER_CONFIG", "config.yaml")
+    config_file = Path(config_path)
+    if not config_file.is_absolute():
+        config_file = Path(__file__).resolve().parent / config_file
+    
+    # Check config file exists
+    if not config_file.exists():
+        logger.error("Config file not found: %s", config_file)
+        logger.error("Please create config.yaml from config.example.yaml")
+        return
+    
+    # Load and validate config
+    with open(config_file) as f:
+        config = yaml.safe_load(f)
+    
+    if not validate_config(config):
+        logger.error("Config validation failed. Please check your config.yaml")
+        return
+    
+    logger.info("Config loaded from %s", config_file)
+    
+    # Check nginx is available
+    try:
+        result = subprocess.run(['nginx', '-t'], capture_output=True, text=True)
+        if result.returncode != 0:
+            logger.warning("Nginx config test failed: %s", result.stderr)
+            logger.warning("Agent will continue, but nginx might not reload properly")
+    except FileNotFoundError:
+        logger.error("nginx command not found. Please install nginx first.")
+        return
+    
+    updater = EdgeConfigUpdater(str(config_file))
     await updater.run()
 
 

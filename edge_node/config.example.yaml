@@ -8,13 +8,15 @@ control_plane:
   api_key: "your-api-key-here"
   
 update_interval: 30  # seconds
+request_timeout: 15.0  # seconds for HTTP requests to control plane
 
 nginx:
   config_path: "/etc/nginx/conf.d/cdn.conf"
+  certs_dir: "/etc/nginx/ssl/cdn"
   reload_command: "systemctl reload nginx"
+  test_command: "nginx -t"
   
 monitoring:
   enabled: true
   endpoint: "https://control.yourcdn.ru/api/v1/edge/metrics"
-
 

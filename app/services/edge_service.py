@@ -508,7 +508,7 @@ class EdgeNodeService:
             elif component == "certbot":
                 return await EdgeNodeService.run_setup_script(node, "install_certbot")
             elif component == "python":
-                # Upload requirements.txt before installing python env
+                # Upload requirements.txt before installing/updating python env
                 await EdgeNodeService.execute_command(node, "mkdir -p /opt/cdn_waf")
                 if not await EdgeNodeService.upload_file(node, "edge_node/requirements.txt", "/opt/cdn_waf/requirements.txt"):
                      return EdgeNodeCommandResult(
@@ -556,6 +556,8 @@ class EdgeNodeService:
                     config_content = config_content.replace('url: "https://control.yourcdn.ru"', f'url: "{control_plane_url}"')
                     if node.api_key:
                         config_content = config_content.replace('api_key: "your-api-key-here"', f'api_key: "{node.api_key}"')
+                    else:
+                        logger.warning(f"Node {node.name} has no API key set! Agent authentication will fail.")
                     
                     # Write to temp file
                     with tempfile.NamedTemporaryFile(mode='w', delete=False) as tmp:
@@ -579,7 +581,25 @@ class EdgeNodeService:
                     if tmp_config_path:
                         os.unlink(tmp_config_path)
                 
+                # Configure nginx for CDN before installing agent (if nginx is installed)
+                nginx_check = await EdgeNodeService.execute_command(node, "command -v nginx")
+                if nginx_check.success:
+                    logger.info(f"Configuring nginx for CDN on node {node.name}")
+                    configure_result = await EdgeNodeService.run_setup_script(node, "configure_nginx")
+                    if not configure_result.success:
+                        logger.warning(f"Failed to configure nginx: {configure_result.stderr}")
+                
                 return await EdgeNodeService.run_setup_script(node, "install_agent_service")
+
+        # Handle python update separately (also upload requirements.txt first)
+        if component == "python" and action == "update":
+            await EdgeNodeService.execute_command(node, "mkdir -p /opt/cdn_waf")
+            if not await EdgeNodeService.upload_file(node, "edge_node/requirements.txt", "/opt/cdn_waf/requirements.txt"):
+                 return EdgeNodeCommandResult(
+                    success=False, stdout="", stderr="Failed to upload requirements.txt", 
+                    exit_code=1, execution_time=0
+                )
+            # Continue to command_map to run the update command
 
         command_map = {
             "nginx": {
@@ -605,7 +625,9 @@ class EdgeNodeService:
                 "install": "apt-get update && apt-get install -y curl git build-essential python3-dev python3-venv"
             },
             "python": {
-                "update": "cd /opt/cdn_waf && python3 -m venv venv && ./venv/bin/pip install -r requirements.txt"
+                # Note: 'install' is handled above in the if-elif block with file upload
+                # 'update' command here assumes requirements.txt is already present
+                "update": "cd /opt/cdn_waf && ./venv/bin/pip install --upgrade pip && ./venv/bin/pip install -r requirements.txt"
             },
             "agent": {
                 "start": "systemctl start cdn-waf-agent",

@@ -230,10 +230,13 @@
                             <span class="status-dot status-warning"></span> <span class="status-text" style="font-size: 12px; color: var(--text-muted);">Checking...</span>
                         </div>
                     </div>
-                    <button class="btn btn-sm btn-secondary" onclick="runAction('update_python')">Обновить venv</button>
+                    <div class="flex gap-1">
+                        <button class="btn btn-sm btn-secondary" onclick="runAction('install_python')">Install</button>
+                        <button class="btn btn-sm btn-secondary" onclick="runAction('update_python')">Update</button>
+                    </div>
                 </div>
                 <p style="font-size: 13px; color: var(--text-secondary);">
-                    Виртуальное окружение и зависимости приложения
+                    Виртуальное окружение и зависимости приложения (/opt/cdn_waf/venv)
                 </p>
             </div>
 
@@ -243,17 +246,18 @@
                     <div style="display: flex; gap: 12px; align-items: center;">
                         <div class="component-icon"><i class="fas fa-robot"></i></div>
                         <div>
-                            <h4 style="font-weight: 600;">WAF Agent</h4>
+                            <h4 style="font-weight: 600;">Edge Agent (cdn-waf-agent)</h4>
                             <span class="status-dot status-warning"></span> <span class="status-text" style="font-size: 12px; color: var(--text-muted);">Checking...</span>
                         </div>
                     </div>
                     <div class="flex gap-1">
+                        <button class="btn btn-sm btn-primary" onclick="runAction('install_agent')">Install</button>
                         <button class="btn btn-sm btn-secondary" onclick="runAction('restart_agent')">Restart</button>
-                        <button class="btn btn-sm btn-secondary" onclick="runAction('update_agent')">Update Code</button>
+                        <button class="btn btn-sm btn-secondary" onclick="runAction('update_agent')">Update</button>
                     </div>
                 </div>
                 <p style="font-size: 13px; color: var(--text-secondary);">
-                    Служба синхронизации конфигураций и отправки логов
+                    Служба синхронизации конфигураций и отправки логов. Требует настроенного API ключа.
                 </p>
             </div>
             
@@ -492,17 +496,44 @@ async function runAction(action) {
     let cmd = '';
     
     // Map action to component/command
-    if (action.includes('nginx')) component = 'nginx';
-    else if (action.includes('certbot')) component = 'certbot';
-    else if (action.includes('python')) component = 'python'; // python env
-    else if (action.includes('agent')) component = 'agent'; // waf agent
-    else if (action === 'install_deps') component = 'system';
-    
-    if (action.startsWith('install_')) cmd = 'install';
-    else if (action.startsWith('reload_')) cmd = 'reload';
-    else if (action.startsWith('restart_')) cmd = 'restart';
-    else if (action.startsWith('update_')) cmd = 'update';
-    else cmd = action;
+    // Handle specific action names first
+    if (action === 'install_deps') {
+        component = 'system';
+        cmd = 'install';
+    } else if (action === 'install_nginx') {
+        component = 'nginx';
+        cmd = 'install';
+    } else if (action === 'reload_nginx') {
+        component = 'nginx';
+        cmd = 'reload';
+    } else if (action === 'install_certbot') {
+        component = 'certbot';
+        cmd = 'install';
+    } else if (action === 'install_python' || action === 'update_python') {
+        component = 'python';
+        cmd = 'install';  // Python uses 'install' to create/update venv
+    } else if (action === 'install_agent') {
+        component = 'agent';
+        cmd = 'install';
+    } else if (action === 'update_agent') {
+        component = 'agent';
+        cmd = 'update';
+    } else if (action === 'restart_agent') {
+        component = 'agent';
+        cmd = 'restart';
+    } else {
+        // Fallback for generic patterns
+        if (action.includes('nginx')) component = 'nginx';
+        else if (action.includes('certbot')) component = 'certbot';
+        else if (action.includes('python')) component = 'python';
+        else if (action.includes('agent')) component = 'agent';
+        
+        if (action.startsWith('install_')) cmd = 'install';
+        else if (action.startsWith('reload_')) cmd = 'reload';
+        else if (action.startsWith('restart_')) cmd = 'restart';
+        else if (action.startsWith('update_')) cmd = 'update';
+        else cmd = action;
+    }
 
     const params = {};
     if (component === 'agent') {
@@ -541,18 +572,52 @@ async function runAction(action) {
 // async function mockRunAction(action) { ... } (removed)
 
 async function installAll() {
-    if (!confirm('Это запустит полную переустановку всех компонентов на ноде. Продолжить?')) return;
+    if (!confirm('Это запустит полную установку всех компонентов на ноде. Продолжить?\n\nПорядок: System → Nginx → Certbot → Python → Agent')) return;
     
     switchTab('logs');
-    log('Начало полной установки...', 'info');
+    log('═══════════════════════════════════════════', 'info');
+    log('Начало полной установки edge node', 'info');
+    log('═══════════════════════════════════════════', 'info');
     
-    const steps = ['install_deps', 'install_python', 'install_nginx', 'install_certbot', 'install_agent'];
+    // Correct order: system deps first, then nginx, certbot, python env, and finally agent
+    const steps = [
+        { action: 'install_deps', name: 'System Dependencies' },
+        { action: 'install_nginx', name: 'Nginx Web Server' },
+        { action: 'install_certbot', name: 'Certbot SSL' },
+        { action: 'install_python', name: 'Python Environment' },
+        { action: 'install_agent', name: 'Edge Agent' }
+    ];
     
-    for (const step of steps) {
-        await runAction(step);
+    let success = true;
+    for (let i = 0; i < steps.length; i++) {
+        const step = steps[i];
+        log(``, 'normal');
+        log(`[${i + 1}/${steps.length}] Устанавливаю: ${step.name}...`, 'info');
+        
+        try {
+            await runAction(step.action);
+        } catch (error) {
+            log(`Ошибка при установке ${step.name}: ${error.message}`, 'error');
+            success = false;
+            if (!confirm(`Произошла ошибка при установке ${step.name}. Продолжить с остальными компонентами?`)) {
+                break;
+            }
+        }
     }
     
-    log('Все компоненты установлены!', 'success');
+    log(``, 'normal');
+    log('═══════════════════════════════════════════', 'info');
+    if (success) {
+        log('✓ Все компоненты установлены успешно!', 'success');
+        log('Нода готова к работе.', 'success');
+    } else {
+        log('⚠ Установка завершена с ошибками', 'error');
+        log('Проверьте логи выше и исправьте проблемы.', 'error');
+    }
+    log('═══════════════════════════════════════════', 'info');
+    
+    // Refresh component statuses
+    checkAllComponents();
 }
 
 async function checkConnection() {
