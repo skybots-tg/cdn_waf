@@ -3,7 +3,7 @@ import logging
 from datetime import datetime, timedelta, date
 from celery import shared_task
 
-from app.core.database import async_session_maker
+from app.core.database import AsyncSessionLocal
 from app.services.analytics_service import AnalyticsService
 
 logger = logging.getLogger(__name__)
@@ -18,7 +18,7 @@ def aggregate_hourly_stats():
     import asyncio
     
     async def _run():
-        async with async_session_maker() as db:
+        async with AsyncSessionLocal() as db:
             try:
                 # Aggregate previous hour
                 records = await AnalyticsService.aggregate_hourly_stats(db)
@@ -40,7 +40,7 @@ def aggregate_daily_stats():
     import asyncio
     
     async def _run():
-        async with async_session_maker() as db:
+        async with AsyncSessionLocal() as db:
             try:
                 yesterday = (datetime.utcnow() - timedelta(days=1)).date()
                 
@@ -87,7 +87,7 @@ def cleanup_old_analytics_data():
     import asyncio
     
     async def _run():
-        async with async_session_maker() as db:
+        async with AsyncSessionLocal() as db:
             try:
                 deleted = await AnalyticsService.cleanup_old_data(db)
                 
@@ -115,7 +115,7 @@ def backfill_aggregations(days: int = 7):
     import asyncio
     
     async def _run():
-        async with async_session_maker() as db:
+        async with AsyncSessionLocal() as db:
             try:
                 results = {
                     "hourly": 0,
