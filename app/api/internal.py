@@ -296,6 +296,10 @@ async def get_edge_config(
             }
             config_domains.append(domain_config)
     
+    # Sort domains by name to ensure consistent order across all edge nodes
+    # This prevents different edge nodes from having different default_server for HTTPS
+    config_domains.sort(key=lambda d: d["name"])
+    
     return {
         "version": node.config_version,
         "changed": True,

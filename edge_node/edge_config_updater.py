@@ -80,7 +80,7 @@ upstream {{ safe_name }}_backend {
 {% endfor %}
 
 # ============================================
-# Default server for unconfigured domains
+# Default server for unconfigured domains (HTTP)
 # ============================================
 server {
     listen 80 default_server;
@@ -109,6 +109,28 @@ server {
     location / {
         return 404 "Domain not configured on this CDN node\n";
     }
+}
+
+# ============================================
+# Default server for unconfigured domains (HTTPS)
+# This prevents wrong certificate being served when SNI doesn't match
+# ============================================
+server {
+    listen 443 ssl default_server;
+    listen [::]:443 ssl default_server;
+    server_name _;
+    
+    # Use self-signed/dummy certificate for default server
+    # These will be generated on first run if they don't exist
+    ssl_certificate /etc/nginx/ssl/cdn/default.crt;
+    ssl_certificate_key /etc/nginx/ssl/cdn/default.key;
+    
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers HIGH:!aNULL:!MD5;
+    
+    # Reject connections to unconfigured domains
+    # Return 421 Misdirected Request - indicates wrong server for this domain
+    return 421 "Domain not configured on this CDN node\n";
 }
 
 # ============================================
@@ -436,6 +458,9 @@ class EdgeConfigUpdater:
         except PermissionError:
             logger.warning("Could not set permissions on certs dir: %s", self.certs_dir)
         
+        # Ensure default certificate exists for HTTPS default_server
+        self.ensure_default_certificate()
+        
         # Ensure log format config exists
         self.ensure_log_format_config()
         
@@ -471,6 +496,85 @@ class EdgeConfigUpdater:
         except Exception as e:
             logger.error(f"Failed to send heartbeat: {e}")
 
+    def ensure_default_certificate(self):
+        """Ensure a self-signed certificate exists for the HTTPS default_server"""
+        cert_path = self.certs_dir / "default.crt"
+        key_path = self.certs_dir / "default.key"
+        
+        if cert_path.exists() and key_path.exists():
+            logger.debug("Default certificate already exists")
+            return
+        
+        logger.info("Generating self-signed default certificate...")
+        
+        try:
+            # Try using openssl command (most compatible)
+            result = subprocess.run([
+                "openssl", "req", "-x509", "-nodes",
+                "-days", "3650",
+                "-newkey", "rsa:2048",
+                "-keyout", str(key_path),
+                "-out", str(cert_path),
+                "-subj", "/CN=localhost/O=CDN Default/C=US"
+            ], capture_output=True, text=True)
+            
+            if result.returncode == 0:
+                os.chmod(key_path, 0o600)
+                logger.info("Generated default self-signed certificate")
+            else:
+                logger.error("Failed to generate default certificate: %s", result.stderr)
+        except FileNotFoundError:
+            logger.warning("openssl not found, trying Python cryptography...")
+            try:
+                from cryptography import x509
+                from cryptography.x509.oid import NameOID
+                from cryptography.hazmat.primitives import hashes, serialization
+                from cryptography.hazmat.primitives.asymmetric import rsa
+                from cryptography.hazmat.backends import default_backend
+                from datetime import datetime, timedelta
+                
+                # Generate key
+                key = rsa.generate_private_key(
+                    public_exponent=65537,
+                    key_size=2048,
+                    backend=default_backend()
+                )
+                
+                # Generate certificate
+                subject = issuer = x509.Name([
+                    x509.NameAttribute(NameOID.COMMON_NAME, "localhost"),
+                    x509.NameAttribute(NameOID.ORGANIZATION_NAME, "CDN Default"),
+                ])
+                
+                cert = (
+                    x509.CertificateBuilder()
+                    .subject_name(subject)
+                    .issuer_name(issuer)
+                    .public_key(key.public_key())
+                    .serial_number(x509.random_serial_number())
+                    .not_valid_before(datetime.utcnow())
+                    .not_valid_after(datetime.utcnow() + timedelta(days=3650))
+                    .sign(key, hashes.SHA256(), default_backend())
+                )
+                
+                # Write files
+                with open(key_path, "wb") as f:
+                    f.write(key.private_bytes(
+                        encoding=serialization.Encoding.PEM,
+                        format=serialization.PrivateFormat.TraditionalOpenSSL,
+                        encryption_algorithm=serialization.NoEncryption()
+                    ))
+                os.chmod(key_path, 0o600)
+                
+                with open(cert_path, "wb") as f:
+                    f.write(cert.public_bytes(serialization.Encoding.PEM))
+                
+                logger.info("Generated default self-signed certificate using cryptography")
+            except Exception as e:
+                logger.error("Failed to generate default certificate: %s", e)
+        except Exception as e:
+            logger.error("Failed to generate default certificate: %s", e)
+    
     def ensure_log_format_config(self):
         """Write the log format configuration file"""
         try:
