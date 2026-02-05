@@ -127,17 +127,24 @@ async def authenticate_api_key(token: str, db: AsyncSession):
     """Authenticate user using API key"""
     from app.models.user import APIToken, User
     from sqlalchemy.orm import selectinload
+    import logging
+    
+    logger = logging.getLogger(__name__)
     
     # Hash the provided token
     token_hash = hashlib.sha256(token.encode()).hexdigest()
     
-    # Find token in database with allowed domains
-    result = await db.execute(
-        select(APIToken)
-        .options(selectinload(APIToken.allowed_domains))
-        .where(APIToken.token_hash == token_hash)
-    )
-    api_token = result.scalar_one_or_none()
+    try:
+        # Find token in database with allowed domains
+        result = await db.execute(
+            select(APIToken)
+            .options(selectinload(APIToken.allowed_domains))
+            .where(APIToken.token_hash == token_hash)
+        )
+        api_token = result.scalar_one_or_none()
+    except Exception as e:
+        logger.error(f"Database error while looking up API token: {e}")
+        raise HTTPException(status_code=500, detail="Database error during authentication")
     
     if not api_token:
         raise HTTPException(status_code=401, detail="Invalid API key")
@@ -150,15 +157,25 @@ async def authenticate_api_key(token: str, db: AsyncSession):
     if api_token.expires_at and api_token.expires_at < datetime.utcnow():
         raise HTTPException(status_code=401, detail="API key has expired")
     
-    # Update last used timestamp
-    api_token.last_used_at = datetime.utcnow()
-    await db.commit()
+    # Update last used timestamp - don't commit here, let get_db handle it
+    # This avoids issues with double commits and transaction state
+    try:
+        api_token.last_used_at = datetime.utcnow()
+        # Flush to ensure the change is written but don't commit yet
+        await db.flush()
+    except Exception as e:
+        logger.warning(f"Failed to update last_used_at for API token: {e}")
+        # Non-critical error, continue authentication
     
-    # Get user
-    result = await db.execute(
-        select(User).where(User.id == api_token.user_id)
-    )
-    user = result.scalar_one_or_none()
+    try:
+        # Get user
+        result = await db.execute(
+            select(User).where(User.id == api_token.user_id)
+        )
+        user = result.scalar_one_or_none()
+    except Exception as e:
+        logger.error(f"Database error while looking up user for API token: {e}")
+        raise HTTPException(status_code=500, detail="Database error during authentication")
     
     if not user:
         raise HTTPException(status_code=401, detail="User not found")

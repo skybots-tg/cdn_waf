@@ -220,8 +220,12 @@ async def get_edge_config(
             else:
                 full_name = f"{sub_name}.{domain.name}"
             
-            # Find certificate for this specific subdomain (get newest by expiry date)
+            # Find certificate for this specific subdomain
+            # Priority: 1) exact match, 2) wildcard cert, 3) root domain cert
             from app.models.certificate import CertificateStatus
+            certificate = None
+            
+            # 1. Try exact match for this FQDN
             cert_result = await db.execute(
                 select(Certificate).where(
                     Certificate.domain_id == domain.id,
@@ -230,6 +234,31 @@ async def get_edge_config(
                 ).order_by(Certificate.not_after.desc()).limit(1)
             )
             certificate = cert_result.scalar_one_or_none()
+            
+            # 2. If no exact match and this is a subdomain, try wildcard cert
+            if not certificate and sub_name != "@":
+                wildcard_name = f"*.{domain.name}"
+                cert_result = await db.execute(
+                    select(Certificate).where(
+                        Certificate.domain_id == domain.id,
+                        Certificate.status == CertificateStatus.ISSUED,
+                        Certificate.common_name == wildcard_name
+                    ).order_by(Certificate.not_after.desc()).limit(1)
+                )
+                certificate = cert_result.scalar_one_or_none()
+            
+            # 3. If still no cert and this is a subdomain, try root domain cert
+            if not certificate and sub_name != "@":
+                cert_result = await db.execute(
+                    select(Certificate).where(
+                        Certificate.domain_id == domain.id,
+                        Certificate.status == CertificateStatus.ISSUED,
+                        Certificate.common_name == domain.name
+                    ).order_by(Certificate.not_after.desc()).limit(1)
+                )
+                certificate = cert_result.scalar_one_or_none()
+                if certificate:
+                    print(f"DEBUG: Using root domain certificate for {full_name}")
                 
             domain_config = {
                 "id": domain.id,
