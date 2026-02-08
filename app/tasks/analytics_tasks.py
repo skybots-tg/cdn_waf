@@ -3,7 +3,7 @@ import logging
 from datetime import datetime, timedelta, date
 from celery import shared_task
 
-from app.core.database import AsyncSessionLocal
+from app.tasks.utils import create_task_db_session
 from app.services.analytics_service import AnalyticsService
 
 logger = logging.getLogger(__name__)
@@ -18,15 +18,19 @@ def aggregate_hourly_stats():
     import asyncio
     
     async def _run():
-        async with AsyncSessionLocal() as db:
-            try:
-                # Aggregate previous hour
-                records = await AnalyticsService.aggregate_hourly_stats(db)
-                logger.info(f"Hourly aggregation completed: {records} records")
-                return {"status": "success", "records": records}
-            except Exception as e:
-                logger.error(f"Hourly aggregation failed: {e}", exc_info=True)
-                return {"status": "error", "error": str(e)}
+        engine, SessionLocal = create_task_db_session()
+        try:
+            async with SessionLocal() as db:
+                try:
+                    # Aggregate previous hour
+                    records = await AnalyticsService.aggregate_hourly_stats(db)
+                    logger.info(f"Hourly aggregation completed: {records} records")
+                    return {"status": "success", "records": records}
+                except Exception as e:
+                    logger.error(f"Hourly aggregation failed: {e}", exc_info=True)
+                    return {"status": "error", "error": str(e)}
+        finally:
+            await engine.dispose()
     
     return asyncio.run(_run())
 
@@ -40,36 +44,40 @@ def aggregate_daily_stats():
     import asyncio
     
     async def _run():
-        async with AsyncSessionLocal() as db:
-            try:
-                yesterday = (datetime.utcnow() - timedelta(days=1)).date()
-                
-                # Aggregate daily stats
-                daily_records = await AnalyticsService.aggregate_daily_stats(db, yesterday)
-                
-                # Aggregate geo stats
-                geo_records = await AnalyticsService.aggregate_geo_stats(db, yesterday)
-                
-                # Aggregate top paths
-                paths_records = await AnalyticsService.aggregate_top_paths(db, yesterday)
-                
-                # Aggregate error stats
-                error_records = await AnalyticsService.aggregate_error_stats(db, yesterday)
-                
-                total = daily_records + geo_records + paths_records + error_records
-                logger.info(f"Daily aggregation completed: {total} total records")
-                
-                return {
-                    "status": "success",
-                    "daily_stats": daily_records,
-                    "geo_stats": geo_records,
-                    "top_paths": paths_records,
-                    "error_stats": error_records,
-                    "total": total
-                }
-            except Exception as e:
-                logger.error(f"Daily aggregation failed: {e}", exc_info=True)
-                return {"status": "error", "error": str(e)}
+        engine, SessionLocal = create_task_db_session()
+        try:
+            async with SessionLocal() as db:
+                try:
+                    yesterday = (datetime.utcnow() - timedelta(days=1)).date()
+                    
+                    # Aggregate daily stats
+                    daily_records = await AnalyticsService.aggregate_daily_stats(db, yesterday)
+                    
+                    # Aggregate geo stats
+                    geo_records = await AnalyticsService.aggregate_geo_stats(db, yesterday)
+                    
+                    # Aggregate top paths
+                    paths_records = await AnalyticsService.aggregate_top_paths(db, yesterday)
+                    
+                    # Aggregate error stats
+                    error_records = await AnalyticsService.aggregate_error_stats(db, yesterday)
+                    
+                    total = daily_records + geo_records + paths_records + error_records
+                    logger.info(f"Daily aggregation completed: {total} total records")
+                    
+                    return {
+                        "status": "success",
+                        "daily_stats": daily_records,
+                        "geo_stats": geo_records,
+                        "top_paths": paths_records,
+                        "error_stats": error_records,
+                        "total": total
+                    }
+                except Exception as e:
+                    logger.error(f"Daily aggregation failed: {e}", exc_info=True)
+                    return {"status": "error", "error": str(e)}
+        finally:
+            await engine.dispose()
     
     return asyncio.run(_run())
 
@@ -87,21 +95,25 @@ def cleanup_old_analytics_data():
     import asyncio
     
     async def _run():
-        async with AsyncSessionLocal() as db:
-            try:
-                deleted = await AnalyticsService.cleanup_old_data(db)
-                
-                total_deleted = sum(deleted.values())
-                logger.info(f"Cleanup completed: {total_deleted} total records deleted")
-                
-                return {
-                    "status": "success",
-                    "deleted": deleted,
-                    "total_deleted": total_deleted
-                }
-            except Exception as e:
-                logger.error(f"Cleanup failed: {e}", exc_info=True)
-                return {"status": "error", "error": str(e)}
+        engine, SessionLocal = create_task_db_session()
+        try:
+            async with SessionLocal() as db:
+                try:
+                    deleted = await AnalyticsService.cleanup_old_data(db)
+                    
+                    total_deleted = sum(deleted.values())
+                    logger.info(f"Cleanup completed: {total_deleted} total records deleted")
+                    
+                    return {
+                        "status": "success",
+                        "deleted": deleted,
+                        "total_deleted": total_deleted
+                    }
+                except Exception as e:
+                    logger.error(f"Cleanup failed: {e}", exc_info=True)
+                    return {"status": "error", "error": str(e)}
+        finally:
+            await engine.dispose()
     
     return asyncio.run(_run())
 
@@ -115,46 +127,50 @@ def backfill_aggregations(days: int = 7):
     import asyncio
     
     async def _run():
-        async with AsyncSessionLocal() as db:
-            try:
-                results = {
-                    "hourly": 0,
-                    "daily": 0,
-                    "geo": 0,
-                    "paths": 0,
-                    "errors": 0
-                }
-                
-                now = datetime.utcnow()
-                
-                # Backfill hourly stats
-                for hours_ago in range(1, days * 24 + 1):
-                    target_hour = now - timedelta(hours=hours_ago)
-                    target_hour = target_hour.replace(minute=0, second=0, microsecond=0)
+        engine, SessionLocal = create_task_db_session()
+        try:
+            async with SessionLocal() as db:
+                try:
+                    results = {
+                        "hourly": 0,
+                        "daily": 0,
+                        "geo": 0,
+                        "paths": 0,
+                        "errors": 0
+                    }
                     
-                    records = await AnalyticsService.aggregate_hourly_stats(db, target_hour)
-                    results["hourly"] += records
-                
-                # Backfill daily stats
-                for days_ago in range(1, days + 1):
-                    target_date = (now - timedelta(days=days_ago)).date()
+                    now = datetime.utcnow()
                     
-                    results["daily"] += await AnalyticsService.aggregate_daily_stats(db, target_date)
-                    results["geo"] += await AnalyticsService.aggregate_geo_stats(db, target_date)
-                    results["paths"] += await AnalyticsService.aggregate_top_paths(db, target_date)
-                    results["errors"] += await AnalyticsService.aggregate_error_stats(db, target_date)
-                
-                total = sum(results.values())
-                logger.info(f"Backfill completed: {total} total records for {days} days")
-                
-                return {
-                    "status": "success",
-                    "days_processed": days,
-                    "records": results,
-                    "total": total
-                }
-            except Exception as e:
-                logger.error(f"Backfill failed: {e}", exc_info=True)
-                return {"status": "error", "error": str(e)}
+                    # Backfill hourly stats
+                    for hours_ago in range(1, days * 24 + 1):
+                        target_hour = now - timedelta(hours=hours_ago)
+                        target_hour = target_hour.replace(minute=0, second=0, microsecond=0)
+                        
+                        records = await AnalyticsService.aggregate_hourly_stats(db, target_hour)
+                        results["hourly"] += records
+                    
+                    # Backfill daily stats
+                    for days_ago in range(1, days + 1):
+                        target_date = (now - timedelta(days=days_ago)).date()
+                        
+                        results["daily"] += await AnalyticsService.aggregate_daily_stats(db, target_date)
+                        results["geo"] += await AnalyticsService.aggregate_geo_stats(db, target_date)
+                        results["paths"] += await AnalyticsService.aggregate_top_paths(db, target_date)
+                        results["errors"] += await AnalyticsService.aggregate_error_stats(db, target_date)
+                    
+                    total = sum(results.values())
+                    logger.info(f"Backfill completed: {total} total records for {days} days")
+                    
+                    return {
+                        "status": "success",
+                        "days_processed": days,
+                        "records": results,
+                        "total": total
+                    }
+                except Exception as e:
+                    logger.error(f"Backfill failed: {e}", exc_info=True)
+                    return {"status": "error", "error": str(e)}
+        finally:
+            await engine.dispose()
     
     return asyncio.run(_run())

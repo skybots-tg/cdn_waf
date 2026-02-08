@@ -4,35 +4,10 @@ import logging
 from typing import Optional, Dict, Any
 from celery import shared_task
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
 from app.tasks import celery_app
-from app.core.config import settings
+from app.tasks.utils import create_task_db_session
 
 logger = logging.getLogger(__name__)
-
-
-def create_task_db_session():
-    """
-    Create a new database engine and session factory for use in Celery tasks.
-    
-    Each Celery task runs in its own process/thread with its own event loop,
-    so we need to create a fresh engine that's bound to the current event loop.
-    This avoids "Future attached to a different loop" and concurrent operation errors.
-    """
-    engine = create_async_engine(
-        str(settings.DATABASE_URL),
-        pool_size=5,
-        max_overflow=10,
-        echo=settings.DEBUG,
-    )
-    session_factory = async_sessionmaker(
-        engine,
-        class_=AsyncSession,
-        expire_on_commit=False,
-        autocommit=False,
-        autoflush=False,
-    )
-    return engine, session_factory
 
 
 @celery_app.task(name="app.tasks.edge.update_edge_config")
