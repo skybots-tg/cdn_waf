@@ -14,8 +14,7 @@ from app.models.domain import Domain, DomainStatus
 def check_dns_health():
     """Check health of all enabled DNS nodes"""
     # Since Celery tasks are sync by default, we need to run async code
-    loop = asyncio.get_event_loop()
-    return loop.run_until_complete(_check_dns_health_async())
+    return asyncio.run(_check_dns_health_async())
 
 async def _check_dns_health_async():
     """Async implementation of health check"""
@@ -39,8 +38,7 @@ async def _check_dns_health_async():
 @celery_app.task(name="app.tasks.dns.sync_dns_nodes")
 def sync_dns_nodes():
     """Sync DNS records to all enabled nodes"""
-    loop = asyncio.get_event_loop()
-    return loop.run_until_complete(_sync_dns_nodes_async())
+    return asyncio.run(_sync_dns_nodes_async())
 
 async def _sync_dns_nodes_async():
     """Async implementation of DNS sync"""
@@ -64,8 +62,7 @@ async def _sync_dns_nodes_async():
 @celery_app.task(name="app.tasks.dns.verify_pending_domains")
 def verify_pending_domains():
     """Check NS records for pending domains"""
-    loop = asyncio.get_event_loop()
-    return loop.run_until_complete(_verify_pending_domains_async())
+    return asyncio.run(_verify_pending_domains_async())
 
 async def _verify_pending_domains_async():
     """Async implementation of domain verification"""

@@ -29,8 +29,7 @@ def issue_certificate(domain_id: int):
             finally:
                 await redis_client.disconnect()
 
-    loop = asyncio.get_event_loop()
-    loop.run_until_complete(_issue())
+    asyncio.run(_issue())
     
     return {"status": "processed", "domain_id": domain_id}
 
@@ -125,8 +124,7 @@ def renew_certificate(certificate_id: int, force: bool = False):
             finally:
                 await redis_client.disconnect()
 
-    loop = asyncio.get_event_loop()
-    return loop.run_until_complete(_renew())
+    return asyncio.run(_renew())
 
 
 @celery_app.task(name="app.tasks.certificate.check_expiring_certificates")
@@ -210,8 +208,7 @@ def check_expiring_certificates():
             finally:
                 await redis_client.disconnect()
     
-    loop = asyncio.get_event_loop()
-    return loop.run_until_complete(_check())
+    return asyncio.run(_check())
 
 
 @celery_app.task(name="app.tasks.certificate.check_pending_certificates")
@@ -266,8 +263,7 @@ def check_pending_certificates():
             finally:
                 await redis_client.disconnect()
     
-    loop = asyncio.get_event_loop()
-    return loop.run_until_complete(_check())
+    return asyncio.run(_check())
 
 
 @celery_app.task(name="app.tasks.certificate.issue_single_certificate")
@@ -307,7 +303,6 @@ def issue_single_certificate(certificate_id: int, email: str = None):
             finally:
                 await redis_client.disconnect()
 
-    loop = asyncio.get_event_loop()
-    loop.run_until_complete(_issue())
+    asyncio.run(_issue())
     
     return {"status": "processed", "certificate_id": certificate_id}
