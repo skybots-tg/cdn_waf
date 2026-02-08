@@ -409,10 +409,8 @@ function showCreateAPIKeyModal() {
 }
 
 function closeModal() {
-    const modal = document.querySelector('.modal');
-    if (modal) {
-        modal.remove();
-    }
+    // Remove both .modal and .modal-overlay elements
+    document.querySelectorAll('.modal, .modal-overlay').forEach(modal => modal.remove());
 }
 
 async function createAPIKey() {
