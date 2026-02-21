@@ -147,11 +147,13 @@ class DBResolver(BaseResolver):
                     rdata=SOA(
                         mname=primary_ns,
                         rname=self.admin_email,
-                        serial=int(datetime.utcnow().strftime("%Y%m%d%H")),
-                        refresh=3600,
-                        retry=600,
-                        expire=86400,
-                        minttl=self.ttl
+                        times=(
+                            int(datetime.utcnow().strftime("%Y%m%d%H")),  # serial
+                            3600,   # refresh
+                            600,    # retry
+                            86400,  # expire
+                            self.ttl  # minimum
+                        )
                     )
                 ))
                 return reply
