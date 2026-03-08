@@ -97,6 +97,7 @@ function populateNginxForm(config) {
         setVal('nginx-proxy-read-timeout', config.proxy.proxy_read_timeout, 60);
         setVal('nginx-proxy-buffer-size', config.proxy.proxy_buffer_size, '4k');
         setVal('nginx-proxy-buffers', config.proxy.proxy_buffers, '8 4k');
+        setVal('nginx-proxy-busy-buffers-size', config.proxy.proxy_busy_buffers_size, '8k');
     }
     
     // Gzip settings
@@ -206,7 +207,7 @@ function collectNginxRules() {
             proxy_read_timeout: getInt('nginx-proxy-read-timeout'),
             proxy_buffer_size: getVal('nginx-proxy-buffer-size'),
             proxy_buffers: getVal('nginx-proxy-buffers'),
-            proxy_busy_buffers_size: "8k"
+            proxy_busy_buffers_size: getVal('nginx-proxy-busy-buffers-size')
         },
         gzip: {
             enabled: isChecked('nginx-gzip-enabled'),
