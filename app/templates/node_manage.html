@@ -419,9 +419,19 @@
                         </div>
                     </label>
                 </div>
-                <div class="form-group">
-                    <label class="form-label">Макс. параллельных потоков</label>
-                    <input type="number" class="form-input" id="nginx-http2-streams" value="128" min="1" max="1000">
+                <div class="grid grid-3 gap-2">
+                    <div class="form-group">
+                        <label class="form-label">Макс. потоков</label>
+                        <input type="number" class="form-input" id="nginx-http2-streams" value="128" min="1" max="1000">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Макс. размер поля</label>
+                        <input type="text" class="form-input" id="nginx-http2-max-field-size" value="4k" placeholder="4k">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Макс. размер заголовка</label>
+                        <input type="text" class="form-input" id="nginx-http2-max-header-size" value="16k" placeholder="16k">
+                    </div>
                 </div>
             </div>
 
@@ -1055,7 +1065,7 @@
 <script>
 const NODE_ID = {{ node.id }};
 </script>
-<script src="/static/js/nginx_rules.js?v=2"></script>
+<script src="/static/js/nginx_rules.js?v=3"></script>
 <script>
 // ============================================
 // Page Functions

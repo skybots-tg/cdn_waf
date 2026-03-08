@@ -155,6 +155,18 @@ class NginxRulesService:
                 "",
             ])
         
+        # Proxy settings (http-level defaults for all server/location blocks)
+        lines.extend([
+            "# === Proxy Settings ===",
+            f"proxy_connect_timeout {config.proxy.proxy_connect_timeout}s;",
+            f"proxy_send_timeout {config.proxy.proxy_send_timeout}s;",
+            f"proxy_read_timeout {config.proxy.proxy_read_timeout}s;",
+            f"proxy_buffer_size {config.proxy.proxy_buffer_size};",
+            f"proxy_buffers {config.proxy.proxy_buffers};",
+            f"proxy_busy_buffers_size {config.proxy.proxy_busy_buffers_size};",
+            "",
+        ])
+        
         # Rate limiting zone (if enabled)
         if config.rate_limit.enabled:
             lines.extend([
@@ -256,7 +268,9 @@ class NginxRulesService:
                 'server_tokens',
                 'ssl_protocols', 'ssl_prefer_server_ciphers', 'ssl_session_timeout',
                 'ssl_session_cache', 'ssl_stapling', 'ssl_stapling_verify',
-                'ssl_ciphers', 'ssl_ecdh_curve'
+                'ssl_ciphers', 'ssl_ecdh_curve',
+                'proxy_connect_timeout', 'proxy_send_timeout', 'proxy_read_timeout',
+                'proxy_buffer_size', 'proxy_buffers', 'proxy_busy_buffers_size'
             ]
             
             # Build sed command to comment out conflicting directives

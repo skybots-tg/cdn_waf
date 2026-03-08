@@ -120,6 +120,8 @@ function populateNginxForm(config) {
     if (config.http2) {
         setChecked('nginx-http2-enabled', config.http2.enabled !== false);
         setVal('nginx-http2-streams', config.http2.max_concurrent_streams, 128);
+        setVal('nginx-http2-max-field-size', config.http2.max_field_size, '4k');
+        setVal('nginx-http2-max-header-size', config.http2.max_header_size, '16k');
     }
     
     // Rate limiting
@@ -253,8 +255,8 @@ function collectNginxRules() {
         http2: {
             enabled: isChecked('nginx-http2-enabled'),
             max_concurrent_streams: getInt('nginx-http2-streams'),
-            max_field_size: "4k",
-            max_header_size: "16k"
+            max_field_size: getVal('nginx-http2-max-field-size'),
+            max_header_size: getVal('nginx-http2-max-header-size')
         },
         security: {
             server_tokens: !isChecked('nginx-hide-version'),
