@@ -68,7 +68,7 @@ def upgrade():
     # backfill from legacy columns if present
     if _has_column(inspector, "rate_limits", "limit"):
         op.execute(
-            "UPDATE rate_limits SET limit_value = limit WHERE limit_value IS NULL"
+            'UPDATE rate_limits SET limit_value = "limit" WHERE limit_value IS NULL'
         )
     if _has_column(inspector, "rate_limits", "interval"):
         op.execute(
