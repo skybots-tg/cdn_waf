@@ -33,6 +33,7 @@ from app.services.user_service import UserService
 from app.models.user import User, APIToken
 from app.models.domain import Domain
 from app.models.organization import Organization, OrganizationMember
+from app.api.v1.dependencies import get_user_org_ids
 
 router = APIRouter()
 
@@ -123,25 +124,8 @@ async def get_user_domains(
     Возвращает все домены, доступные текущему пользователю через его организации.
     Используется для выбора доменов при создании API ключа.
     """
-    # Get user's organizations (owned + member)
-    org_ids_result = await db.execute(
-        select(Organization.id).where(Organization.owner_id == current_user.id)
-    )
-    owned_org_ids = [row[0] for row in org_ids_result.fetchall()]
+    user_org_ids = await get_user_org_ids(current_user, db)
     
-    member_org_ids_result = await db.execute(
-        select(OrganizationMember.organization_id)
-        .where(OrganizationMember.user_id == current_user.id)
-    )
-    member_org_ids = [row[0] for row in member_org_ids_result.fetchall()]
-    
-    user_org_ids = set(owned_org_ids + member_org_ids)
-    
-    # Include default organization (ID=1) for legacy compatibility
-    # TODO: Remove this when proper organization assignment is implemented
-    user_org_ids.add(1)
-    
-    # For superusers, grant access to all domains
     if current_user.is_superuser:
         domains_result = await db.execute(
             select(Domain).order_by(Domain.name)
@@ -233,26 +217,10 @@ async def create_api_key(
     # Hash token for storage
     token_hash = hashlib.sha256(token.encode()).hexdigest()
     
-    # Validate domain_ids if provided - ensure user has access to these domains
     allowed_domains = []
     if token_create.domain_ids:
-        # Get user's organizations
-        org_ids_result = await db.execute(
-            select(Organization.id).where(Organization.owner_id == current_user.id)
-        )
-        owned_org_ids = [row[0] for row in org_ids_result.fetchall()]
+        user_org_ids = await get_user_org_ids(current_user, db)
         
-        member_org_ids_result = await db.execute(
-            select(OrganizationMember.organization_id)
-            .where(OrganizationMember.user_id == current_user.id)
-        )
-        member_org_ids = [row[0] for row in member_org_ids_result.fetchall()]
-        
-        user_org_ids = set(owned_org_ids + member_org_ids)
-        # Include default organization for legacy compatibility
-        user_org_ids.add(1)
-        
-        # Get domains that belong to user's organizations (or all for superusers)
         if current_user.is_superuser:
             domains_result = await db.execute(
                 select(Domain).where(Domain.id.in_(token_create.domain_ids))
@@ -390,23 +358,8 @@ async def update_api_key(
             # Empty list = all domains access
             token.allowed_domains = []
         else:
-            # Get user's organizations
-            org_ids_result = await db.execute(
-                select(Organization.id).where(Organization.owner_id == current_user.id)
-            )
-            owned_org_ids = [row[0] for row in org_ids_result.fetchall()]
-            
-            member_org_ids_result = await db.execute(
-                select(OrganizationMember.organization_id)
-                .where(OrganizationMember.user_id == current_user.id)
-            )
-            member_org_ids = [row[0] for row in member_org_ids_result.fetchall()]
-            
-            user_org_ids = set(owned_org_ids + member_org_ids)
-            # Include default organization for legacy compatibility
-            user_org_ids.add(1)
-            
-            # Get domains that belong to user's organizations (or all for superusers)
+            user_org_ids = await get_user_org_ids(current_user, db)
+
             if current_user.is_superuser:
                 domains_result = await db.execute(
                     select(Domain).where(Domain.id.in_(token_update.domain_ids))

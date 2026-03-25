@@ -301,18 +301,9 @@ async def get_tls_settings(
     )
     tls_settings = result.scalar_one_or_none()
     
-    # If settings don't exist, create default ones
     if not tls_settings:
-        # Verify domain exists
-        domain_result = await db.execute(
-            select(Domain).where(Domain.id == domain_id)
-        )
-        domain = domain_result.scalar_one_or_none()
-        if not domain:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Domain not found"
-            )
+        from app.api.v1.dependencies import get_domain_or_404
+        domain = await get_domain_or_404(domain_id, db)
         
         # Create default TLS settings
         tls_settings = DomainTLSSettings(

@@ -18,6 +18,7 @@ from app.schemas.dns_node import (
     DNSNodeCommandResult,
     DNSComponentStatus
 )
+from app.services.ssh_utils import SSHCredentials, ssh_execute, ssh_upload
 
 logger = logging.getLogger(__name__)
 
@@ -135,75 +136,21 @@ class DNSNodeService:
         timeout: int = 30
     ) -> DNSNodeCommandResult:
         """Execute command via SSH"""
-        ssh_host = node.ssh_host or node.ip_address
-        ssh_port = node.ssh_port or 22
-        ssh_user = node.ssh_user or "root"
-        ssh_key = node.ssh_key
-        ssh_password = node.ssh_password
-        
-        if not ssh_key and not ssh_password:
-             return DNSNodeCommandResult(
-                success=False, stdout="", stderr="SSH credentials not configured",
-                exit_code=1, execution_time=0.0
-            )
-
-        try:
-            start_time = datetime.utcnow()
-            import asyncssh
-            connect_kwargs = {
-                "host": ssh_host, "port": ssh_port, "username": ssh_user,
-                "known_hosts": None
-            }
-
-            if ssh_key:
-                client_keys = [asyncssh.import_private_key(ssh_key)]
-                connect_kwargs["client_keys"] = client_keys
-            elif ssh_password:
-                connect_kwargs["password"] = ssh_password
-
-            async with asyncssh.connect(**connect_kwargs) as conn:
-                result = await conn.run(command, timeout=timeout)
-                execution_time = (datetime.utcnow() - start_time).total_seconds()
-                
-                return DNSNodeCommandResult(
-                    success=result.exit_status == 0,
-                    stdout=result.stdout,
-                    stderr=result.stderr,
-                    exit_code=result.exit_status,
-                    execution_time=execution_time
-                )
-        except Exception as e:
-            logger.error(f"SSH Error on {node.name}: {e}")
-            return DNSNodeCommandResult(
-                success=False, stdout="", stderr=str(e), exit_code=1, execution_time=0.0
-            )
+        creds = SSHCredentials.from_node(node)
+        result = await ssh_execute(creds, command, timeout)
+        return DNSNodeCommandResult(
+            success=result.success,
+            stdout=result.stdout,
+            stderr=result.stderr,
+            exit_code=result.exit_code,
+            execution_time=result.execution_time,
+        )
 
     @staticmethod
     async def upload_file(node: DNSNode, local_path: str, remote_path: str) -> Tuple[bool, str]:
         """Upload file via SCP"""
-        ssh_host = node.ssh_host or node.ip_address
-        ssh_port = node.ssh_port or 22
-        ssh_user = node.ssh_user or "root"
-        ssh_key = node.ssh_key
-        ssh_password = node.ssh_password
-        
-        try:
-            import asyncssh
-            connect_kwargs = {
-                "host": ssh_host, "port": ssh_port, "username": ssh_user,
-                "known_hosts": None
-            }
-            if ssh_key:
-                connect_kwargs["client_keys"] = [asyncssh.import_private_key(ssh_key)]
-            elif ssh_password:
-                connect_kwargs["password"] = ssh_password
-
-            async with asyncssh.connect(**connect_kwargs) as conn:
-                await asyncssh.scp(local_path, (conn, remote_path))
-                return True, ""
-        except Exception as e:
-            logger.error(f"Upload failed to {node.name}: {e}")
-            return False, str(e)
+        creds = SSHCredentials.from_node(node)
+        return await ssh_upload(creds, local_path, remote_path)
 
     @staticmethod
     async def get_logs(node: DNSNode, lines: int = 100) -> str:
@@ -433,155 +380,15 @@ ACME_EMAIL={settings.ACME_EMAIL}
 
     @staticmethod
     async def manage_component_action(node: DNSNode, component: str, action: str, db: AsyncSession = None) -> DNSNodeCommandResult:
-        if action == "install":
-            if component == "dependencies":
-                return await DNSNodeService.install_dependencies(node)
-            elif component == "python_env":
-                return await DNSNodeService.install_python_env(node)
-            elif component == "app_code":
-                return await DNSNodeService.update_app_code(node)
-            elif component == "config":
-                return await DNSNodeService.update_config(node)
-            elif component == "dns_service":
-                return await DNSNodeService.install_service(node)
-            elif component == "certbot":
-                return await DNSNodeService.install_certbot(node)
-            elif component == "migrations":
-                return await DNSNodeService.run_migrations(node)
-            elif component == "dns_server": # Alias for full install? Or just service?
-                 # If user clicks "Install" on "DNS Server" component in old UI
-                 return await DNSNodeService.install_node(node)
-            elif component == "database" and db:
-                 return await DNSNodeService.sync_database(node, db)
-        
-        if component == "certbot" and action == "issue":
-             return await DNSNodeService.issue_certificate(node)
-
-        # Service management
-        if component in ["dns_service", "dns_server"]:
-             cmd_map = {
-                "start": "systemctl start cdn-waf-dns",
-                "stop": "systemctl stop cdn-waf-dns",
-                "restart": "systemctl restart cdn-waf-dns",
-                "status": "systemctl status cdn-waf-dns"
-            }
-             if action in cmd_map:
-                 return await DNSNodeService.execute_command(node, cmd_map[action])
-        
-        if component == "database" and action == "sync" and db:
-             return await DNSNodeService.sync_database(node, db)
-
-        return DNSNodeCommandResult(
-            success=False,
-            stdout="",
-            stderr=f"Unknown component or action: {component} {action}",
-            exit_code=1,
-            execution_time=0
-        )
+        from app.services.dns_node_component_service import DNSNodeComponentService
+        return await DNSNodeComponentService.manage_component_action(node, component, action, db)
 
     @staticmethod
     async def get_component_status(node: DNSNode, component: str) -> DNSComponentStatus:
-        """Get component status"""
-        if component in ["dns_server", "dns_service"]:
-             # Check if service file exists to determine "installed"
-             check_installed = "systemctl list-unit-files cdn-waf-dns.service"
-             res_installed = await DNSNodeService.execute_command(node, check_installed)
-             is_installed = res_installed.success and "cdn-waf-dns.service" in res_installed.stdout
-             
-             cmd = "systemctl is-active cdn-waf-dns"
-             res = await DNSNodeService.execute_command(node, cmd)
-             running = res.stdout.strip() == "active"
-             
-             return DNSComponentStatus(
-                 component=component,
-                 installed=is_installed,
-                 running=running,
-                 status_text="Active" if running else ("Inactive" if is_installed else "Not Installed")
-             )
-        
-        if component == "certbot":
-             res = await DNSNodeService.execute_command(node, "certbot --version")
-             installed = res.success
-             version = res.stdout.strip().split()[-1] if installed and res.stdout else None
-             return DNSComponentStatus(
-                 component=component, 
-                 installed=installed, 
-                 running=True, # Always "running" as CLI tool
-                 version=version,
-                 status_text="Installed" if installed else "Missing"
-             )
-
-        if component == "migrations":
-             # Check if alembic exists
-             res = await DNSNodeService.execute_command(node, "[ -x /opt/cdn_waf/venv/bin/alembic ]")
-             # Maybe check current revision? Too complex for now.
-             return DNSComponentStatus(
-                 component=component, 
-                 installed=res.success, 
-                 running=True, 
-                 status_text="Ready" if res.success else "Missing Alembic"
-             )
-        
-        if component == "database":
-             # Check if we can query the DB
-             res = await DNSNodeService.execute_command(node, "sudo -u postgres psql cdn_waf -c 'SELECT count(*) FROM domains'")
-             if res.success:
-                 try:
-                     count = res.stdout.split('\n')[2].strip()
-                     return DNSComponentStatus(
-                         component=component,
-                         installed=True,
-                         running=True,
-                         status_text=f"OK ({count} domains)"
-                     )
-                 except:
-                     pass
-             
-             return DNSComponentStatus(
-                 component=component,
-                 installed=False,
-                 running=False,
-                 status_text="Error"
-             )
-
-        # For other components, we can check existence of files
-        if component == "dependencies":
-             # Check for python3
-             res = await DNSNodeService.execute_command(node, "which python3")
-             return DNSComponentStatus(component=component, installed=res.success, running=True, status_text="Installed" if res.success else "Missing")
-        
-        if component == "python_env":
-             res = await DNSNodeService.execute_command(node, "[ -d /opt/cdn_waf/venv ]")
-             return DNSComponentStatus(component=component, installed=res.success, running=True, status_text="Installed" if res.success else "Missing")
-
-        if component == "app_code":
-             res = await DNSNodeService.execute_command(node, "[ -d /opt/cdn_waf/app ]")
-             return DNSComponentStatus(component=component, installed=res.success, running=True, status_text="Installed" if res.success else "Missing")
-        
-        if component == "config":
-             res = await DNSNodeService.execute_command(node, "[ -f /opt/cdn_waf/.env ]")
-             return DNSComponentStatus(component=component, installed=res.success, running=True, status_text="Configured" if res.success else "Missing")
-
-        return DNSComponentStatus(component=component, installed=False, running=False, status_text="Unknown")
+        from app.services.dns_node_component_service import DNSNodeComponentService
+        return await DNSNodeComponentService.get_component_status(node, component)
 
     @staticmethod
     async def check_health(node: DNSNode, db: AsyncSession = None) -> Dict[str, Any]:
-        """Check node health and update status"""
-        
-        # Check service status
-        res = await DNSNodeService.get_component_status(node, "dns_service")
-        
-        status = "online" if res.running else ("offline" if res.installed else "unknown")
-        
-        # If we have DB session, update status
-        if db:
-            node.status = status
-            node.last_heartbeat = datetime.utcnow()
-            await db.commit()
-            await db.refresh(node)
-            
-        return {
-            "status": status,
-            "service_active": res.running,
-            "installed": res.installed
-        }
+        from app.services.dns_node_component_service import DNSNodeComponentService
+        return await DNSNodeComponentService.check_health(node, db)

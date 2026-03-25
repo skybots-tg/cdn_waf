@@ -1,20 +1,22 @@
 """Internal API for edge nodes to pull configuration"""
-from typing import Dict, Any, List, Optional
+import logging
+from typing import Dict, Any, Optional
 from fastapi import APIRouter, Depends, HTTPException, Header, status
-from fastapi.responses import PlainTextResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
-from datetime import datetime, timezone
+from datetime import datetime
 
 from app.core.database import get_db
+from app.core.config import settings
 from app.models.edge_node import EdgeNode
 from app.models.domain import Domain
 from app.models.origin import Origin
 from app.models.cache import CacheRule
 from app.models.waf import WAFRule, RateLimit
 from app.models.certificate import Certificate
-from app.models.log import RequestLog
 from app.services.edge_service import EdgeNodeService
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -60,8 +62,14 @@ async def verify_edge_node(
 
 
 @router.get("/debug-db")
-async def debug_db_state(db: AsyncSession = Depends(get_db)):
-    """Debug endpoint to check DB state"""
+async def debug_db_state(
+    node: EdgeNode = Depends(verify_edge_node),
+    db: AsyncSession = Depends(get_db)
+):
+    """Debug endpoint to check DB state (requires edge node auth)"""
+    if not settings.DEBUG:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+
     domains_result = await db.execute(select(Domain))
     domains = domains_result.scalars().all()
     
@@ -112,20 +120,11 @@ async def get_edge_config(
             "changed": False
         }
     
-    # Debug: Check for all domains to see if some are pending
-    all_domains_result = await db.execute(select(Domain))
-    all_domains = all_domains_result.scalars().all()
-    print(f"DEBUG: Total domains in DB: {len(all_domains)}")
-    for d in all_domains:
-        print(f"DEBUG: Domain: {d.name}, Status: {d.status}, ID: {d.id}")
-
-    # Get all active domains (simplified - in production filter by node assignment)
-    print("DEBUG: Fetching active domains")
     domains_result = await db.execute(
         select(Domain).where(Domain.status == "active")
     )
     domains = domains_result.scalars().all()
-    print(f"DEBUG: Found {len(domains)} active domains")
+    logger.debug(f"Found {len(domains)} active domains")
     
     config_domains = []
     
@@ -184,12 +183,12 @@ async def get_edge_config(
             
             # Add this IP as an origin for this subdomain
             subdomains_map[sub_name].append({
-                "id": record.id * 1000 + 555, # Fake ID
+                "id": -(record.id * 10 + hash(sub_name) % 10),
                 "host": record.content,
-                "port": 80, # Default port for DNS-based origin
+                "port": 80,
                 "is_backup": False,
                 "weight": record.weight or 100,
-                "protocol": "http" # Default protocol
+                "protocol": "http"
             })
 
         # Get other rules (shared across all subdomains for now)
@@ -258,7 +257,7 @@ async def get_edge_config(
                 )
                 certificate = cert_result.scalar_one_or_none()
                 if certificate:
-                    print(f"DEBUG: Using root domain certificate for {full_name}")
+                    logger.debug(f"Using root domain certificate for {full_name}")
                 
             domain_config = {
                 "id": domain.id,
@@ -313,7 +312,7 @@ async def get_edge_config(
             "log_level": "info",
             "worker_connections": 4096,
             "keepalive_timeout": 65,
-            "control_plane_url": "https://flarecloud.ru"
+            "control_plane_url": settings.PUBLIC_URL
         }
     }
 
@@ -378,151 +377,5 @@ async def get_certificate(
     }
 
 
-@router.post("/logs")
-async def receive_logs(
-    logs: List[Dict[str, Any]],
-    node: EdgeNode = Depends(verify_edge_node),
-    db: AsyncSession = Depends(get_db)
-):
-    """
-    Receive logs from edge node
-    
-    Body: Array of log entries
-    [
-        {
-            "timestamp": "2024-01-01T12:00:00Z",
-            "domain": "example.com",
-            "path": "/api/test",
-            "method": "GET",
-            "status": 200,
-            "bytes_sent": 1024,
-            "client_ip": "1.2.3.4",
-            "cache_status": "HIT"
-        }
-    ]
-    """
-    if not logs:
-        return {"status": "ok", "received": 0}
-
-    # Pre-fetch domains to minimize queries
-    domain_names = list(set(log.get("domain") for log in logs if log.get("domain")))
-    domains_map = {}
-    
-    if domain_names:
-        domains_result = await db.execute(
-            select(Domain).where(Domain.name.in_(domain_names))
-        )
-        domains_map = {d.name: d.id for d in domains_result.scalars().all()}
-    
-    log_entries = []
-    for log_data in logs:
-        domain_name = log_data.get("domain")
-        domain_id = domains_map.get(domain_name)
-        
-        # Parse timestamp
-        timestamp_str = log_data.get("timestamp")
-        if timestamp_str:
-            try:
-                timestamp = datetime.fromisoformat(timestamp_str.replace("Z", "+00:00"))
-                # Ensure naive UTC for PostgreSQL
-                if timestamp.tzinfo is not None:
-                    timestamp = timestamp.astimezone(timezone.utc).replace(tzinfo=None)
-            except ValueError:
-                timestamp = datetime.utcnow()
-        else:
-            timestamp = datetime.utcnow()
-        
-        entry = RequestLog(
-            timestamp=timestamp,
-            domain_id=domain_id,
-            edge_node_id=node.id,
-            method=log_data.get("method"),
-            path=log_data.get("path"),
-            status_code=log_data.get("status"),
-            bytes_sent=log_data.get("bytes_sent", 0),
-            client_ip=log_data.get("client_ip"),
-            cache_status=log_data.get("cache_status"),
-            user_agent=log_data.get("user_agent"),
-            referer=log_data.get("referer"),
-            request_time=log_data.get("request_time"),
-            country_code=log_data.get("country_code"),
-            waf_status=log_data.get("waf_status"),
-            waf_rule_id=log_data.get("waf_rule_id")
-        )
-        log_entries.append(entry)
-    
-    if log_entries:
-        db.add_all(log_entries)
-        await db.commit()
-    
-    return {
-        "status": "ok",
-        "received": len(logs),
-        "timestamp": datetime.utcnow().isoformat()
-    }
-
-
-from app.core.redis import redis_client
-
-@router.get("/acme-challenge/{token}", response_class=PlainTextResponse)
-async def get_acme_challenge(
-    token: str,
-    node: EdgeNode = Depends(verify_edge_node)
-):
-    """Get ACME challenge response for edge nodes"""
-    import logging
-    logger = logging.getLogger(__name__)
-    
-    logger.info(f"ACME challenge request from edge node {node.name} for token: {token[:20]}...")
-    
-    validation = None
-    if redis_client:
-        key = f"acme:challenge:{token}"
-        validation = await redis_client.get(key)
-        logger.info(f"Redis lookup for key: {key}, found: {validation is not None}")
-    
-    if not validation:
-        # List all keys for debugging
-        if redis_client:
-            import redis.asyncio as redis_lib
-            all_keys = await redis_client.keys("acme:challenge:*")
-            logger.warning(f"Challenge not found. Available keys: {all_keys}")
-        
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Challenge not found"
-        )
-    
-    # Return plain text (required by ACME spec)
-    return PlainTextResponse(content=validation)
-
-
-@router.get("/download/edge_config_updater.py", response_class=PlainTextResponse)
-async def download_edge_config_updater(
-    node: EdgeNode = Depends(verify_edge_node)
-):
-    """Download latest edge_config_updater.py for edge nodes"""
-    import logging
-    from pathlib import Path
-    
-    logger = logging.getLogger(__name__)
-    logger.info(f"Edge node {node.name} requesting edge_config_updater.py download")
-    
-    # Simple authentication via shared key (from config.yaml on edge node)
-    # You could also use verify_edge_node dependency, but this is simpler
-    
-    # Read the file
-    updater_path = Path(__file__).parent.parent.parent / "edge_node" / "edge_config_updater.py"
-    
-    if not updater_path.exists():
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="edge_config_updater.py not found"
-        )
-    
-    with open(updater_path, 'r', encoding='utf-8') as f:
-        content = f.read()
-    
-    logger.info(f"Sending edge_config_updater.py ({len(content)} bytes)")
-    
-    return PlainTextResponse(content=content)
+from app.api.internal_logs import router as logs_router
+router.include_router(logs_router)

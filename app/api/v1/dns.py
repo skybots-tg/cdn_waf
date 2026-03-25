@@ -11,6 +11,7 @@ from app.models.user import User
 from app.models.dns import DNSRecord
 from app.models.domain import Domain
 from app.tasks.dns_tasks import sync_dns_nodes
+from app.api.v1.dependencies import get_domain_or_404
 
 router = APIRouter()
 
@@ -46,13 +47,7 @@ async def create_dns_record(
     require_domain_access(current_user, domain_id)
     
     # Verify domain exists
-    result = await db.execute(select(Domain).where(Domain.id == domain_id))
-    domain = result.scalar_one_or_none()
-    if not domain:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Domain not found"
-        )
+    domain = await get_domain_or_404(domain_id, db)
     
     # Normalize record name
     # If name is absolute (ends with domain name), make it relative
@@ -94,13 +89,7 @@ async def import_dns_records(
     require_domain_access(current_user, domain_id)
     
     # Verify domain exists
-    result = await db.execute(select(Domain).where(Domain.id == domain_id))
-    domain = result.scalar_one_or_none()
-    if not domain:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Domain not found"
-        )
+    domain = await get_domain_or_404(domain_id, db)
     
     count = 0
     domain_name = domain.name.lower()

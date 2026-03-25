@@ -143,7 +143,6 @@ async def scan_dns_records(
 
             add_record(record)
 
-    # Common subdomains
     common_subdomains = [
         "www", "mail", "remote", "blog", "webmail", "server",
         "ns1", "ns2", "smtp", "secure", "vpn", "m", "shop",
@@ -151,6 +150,9 @@ async def scan_dns_records(
         "pop", "dev", "test", "staging", "app", "cdn", "dashboard",
         "auth", "payment", "docs", "files", "static",
     ]
+
+    # Underscore-prefixed names that carry TXT records (DMARC, DKIM, SPF, etc.)
+    txt_subdomains = ["_dmarc", "_domainkey", "_spf", "_mta-sts", "_smtp._tls"]
 
     for subdomain in common_subdomains:
         fqdn = f"{subdomain}.{domain}"
@@ -176,6 +178,31 @@ async def scan_dns_records(
                     record["content"] = str(getattr(rdata, "target", rdata)).rstrip(".")
 
                 add_record(record)
+
+    for subdomain in txt_subdomains:
+        fqdn = f"{subdomain}.{domain}"
+        answers = await _resolve(resolver, fqdn, "TXT")
+        if not answers:
+            continue
+
+        ttl = answers.rrset.ttl if answers.rrset is not None else None
+
+        for rdata in answers:
+            txt_parts = getattr(rdata, "strings", None)
+            if txt_parts:
+                content = " ".join(
+                    s.decode() if isinstance(s, bytes) else s for s in txt_parts
+                )
+            else:
+                content = rdata.to_text().strip('"')
+
+            add_record({
+                "type": "TXT",
+                "name": subdomain,
+                "content": content,
+                "ttl": ttl,
+                "proxied": False,
+            })
 
     return records
 

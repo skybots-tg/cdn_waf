@@ -62,6 +62,12 @@ class RedisClient:
             return False
         return await self.redis.exists(key) > 0
 
+    async def keys(self, pattern: str) -> list:
+        """List keys matching pattern. WARNING: O(N) — use only for debugging."""
+        if not self.redis:
+            return []
+        return await self.redis.keys(pattern)
+
     async def publish(self, channel: str, message: str):
         """Publish message to channel"""
         if not self.redis:

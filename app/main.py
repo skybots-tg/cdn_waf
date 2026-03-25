@@ -108,7 +108,7 @@ async def root():
     """Root endpoint"""
     return {
         "message": "FlareCloud Control Panel API",
-        "version": "0.1.0",
+        "version": "1.0.0",
         "docs": "/docs",
     }
 

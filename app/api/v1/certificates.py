@@ -13,6 +13,7 @@ from app.models.domain import Domain
 from app.models.dns import DNSRecord
 from app.models.certificate import Certificate, CertificateStatus, CertificateType
 from app.models.certificate_log import CertificateLog, CertificateLogLevel
+from app.api.v1.dependencies import get_domain_or_404
 
 router = APIRouter()
 
@@ -35,15 +36,10 @@ async def list_domain_certificates(
     - `revoked` - отозван
     - `failed` - ошибка при выпуске
     """
-    # Check if user has access to this domain
     if current_user:
         require_domain_access(current_user, domain_id)
     
-    result = await db.execute(select(Domain).where(Domain.id == domain_id))
-    domain = result.scalar_one_or_none()
-    
-    if not domain:
-        raise HTTPException(status_code=404, detail="Domain not found")
+    domain = await get_domain_or_404(domain_id, db)
     
     certs_result = await db.execute(
         select(Certificate).where(Certificate.domain_id == domain_id)
@@ -76,17 +72,11 @@ async def get_available_certificates(
     
     Возвращает все DNS A-записи домена, для которых еще не выпущен SSL сертификат.
     """
-    # Check if user has access to this domain
     if current_user:
         require_domain_access(current_user, domain_id)
     
-    result = await db.execute(select(Domain).where(Domain.id == domain_id))
-    domain = result.scalar_one_or_none()
+    domain = await get_domain_or_404(domain_id, db)
     
-    if not domain:
-        raise HTTPException(status_code=404, detail="Domain not found")
-    
-    # Get all A records
     dns_result = await db.execute(
         select(DNSRecord).where(
             DNSRecord.domain_id == domain_id,
@@ -154,17 +144,11 @@ async def issue_certificate_for_subdomain(
     - `subdomain`: `@` для основного домена, или имя поддомена (www, api, etc.)
     - `email`: Email для уведомлений от Let's Encrypt (опционально)
     """
-    # Check if user has access to this domain
     if current_user:
         require_domain_access(current_user, domain_id)
     
-    result = await db.execute(select(Domain).where(Domain.id == domain_id))
-    domain = result.scalar_one_or_none()
+    domain = await get_domain_or_404(domain_id, db)
     
-    if not domain:
-        raise HTTPException(status_code=404, detail="Domain not found")
-    
-    # Build FQDN
     if subdomain == "@":
         fqdn = domain.name
     else:
@@ -423,15 +407,10 @@ async def delete_certificate(
     **Важно:** Если это единственный активный сертификат для домена,
     HTTPS перестанет работать.
     """
-    # Check if user has access to this domain
     if current_user:
         require_domain_access(current_user, domain_id)
     
-    result = await db.execute(select(Domain).where(Domain.id == domain_id))
-    domain = result.scalar_one_or_none()
-    
-    if not domain:
-        raise HTTPException(status_code=404, detail="Domain not found")
+    await get_domain_or_404(domain_id, db)
     
     cert_result = await db.execute(
         select(Certificate).where(
