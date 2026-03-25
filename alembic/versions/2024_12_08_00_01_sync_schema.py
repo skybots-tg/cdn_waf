@@ -72,7 +72,7 @@ def upgrade():
         )
     if _has_column(inspector, "rate_limits", "interval"):
         op.execute(
-            "UPDATE rate_limits SET interval_seconds = interval WHERE interval_seconds IS NULL"
+            'UPDATE rate_limits SET interval_seconds = "interval" WHERE interval_seconds IS NULL'
         )
 
     # --- certificates ---
