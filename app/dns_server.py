@@ -338,10 +338,8 @@ async def sync_data(payload: DNSSyncPayload):
                 )
                 table_columns = [r[0] for r in cols_res]
                 if not table_columns:
-                    raise HTTPException(
-                        status_code=400,
-                        detail=f"Table {table_name} has no columns (not found?)",
-                    )
+                    logger.warning(f"Sync: table {table_name} does not exist, skipping {len(rows)} rows")
+                    return
                 # Use only columns that exist both in DB and in incoming rows
                 used_columns = [c for c in table_columns if any(c in row for row in rows) or c in defaults]
                 if not used_columns:
@@ -356,7 +354,12 @@ async def sync_data(payload: DNSSyncPayload):
                 ]
                 db.execute(stmt, filtered_rows)
 
-            db.execute(text("TRUNCATE TABLE dns_records, domains, organizations, users, edge_nodes, dns_nodes RESTART IDENTITY CASCADE"))
+            existing = db.execute(text(
+                "SELECT tablename FROM pg_tables WHERE schemaname = 'public' "
+                "AND tablename IN ('dns_records','domains','organizations','users','edge_nodes','dns_nodes')"
+            )).scalars().all()
+            if existing:
+                db.execute(text(f"TRUNCATE TABLE {', '.join(existing)} RESTART IDENTITY CASCADE"))
             
             # 2. Insert Users
             if payload.users:
