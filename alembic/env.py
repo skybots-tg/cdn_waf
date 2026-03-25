@@ -4,7 +4,7 @@ from logging.config import fileConfig
 import sys
 from pathlib import Path
 
-from sqlalchemy import pool
+from sqlalchemy import pool, text as sa_text
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
@@ -60,6 +60,21 @@ def run_migrations_offline() -> None:
 
 
 def do_run_migrations(connection: Connection) -> None:
+    connection.execute(sa_text("""
+        DO $$ BEGIN
+            IF EXISTS (
+                SELECT 1 FROM information_schema.columns
+                WHERE table_name = 'alembic_version'
+                  AND column_name = 'version_num'
+                  AND character_maximum_length < 128
+            ) THEN
+                ALTER TABLE alembic_version
+                    ALTER COLUMN version_num TYPE VARCHAR(128);
+            END IF;
+        END $$;
+    """))
+    connection.commit()
+
     context.configure(connection=connection, target_metadata=target_metadata)
 
     with context.begin_transaction():
