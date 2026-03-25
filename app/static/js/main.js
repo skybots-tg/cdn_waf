@@ -3,12 +3,15 @@ function getToken() {
     return localStorage.getItem('access_token') || '';
 }
 
+function getRefreshToken() {
+    return localStorage.getItem('refresh_token') || '';
+}
+
 // Global Auth Check
 function checkAuth() {
     const publicPages = ['/login', '/signup', '/'];
     const currentPath = window.location.pathname;
     
-    // Skip auth check for public pages
     if (publicPages.includes(currentPath)) {
         return true;
     }
@@ -23,21 +26,72 @@ function checkAuth() {
     return true;
 }
 
-// Global Fetch Interceptor for 401 handling
+// Silent token refresh via refresh_token
+let _refreshPromise = null;
+
+async function silentRefresh() {
+    if (_refreshPromise) return _refreshPromise;
+
+    const refreshToken = getRefreshToken();
+    if (!refreshToken) return false;
+
+    _refreshPromise = (async () => {
+        try {
+            const resp = await fetch('/api/v1/auth/refresh', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ refresh_token: refreshToken }),
+            });
+            if (!resp.ok) return false;
+
+            const data = await resp.json();
+            localStorage.setItem('access_token', data.access_token);
+            localStorage.setItem('refresh_token', data.refresh_token);
+            if (typeof api !== 'undefined') {
+                api.token = data.access_token;
+            }
+            return true;
+        } catch {
+            return false;
+        } finally {
+            _refreshPromise = null;
+        }
+    })();
+
+    return _refreshPromise;
+}
+
+// Global Fetch Interceptor — retry once with refreshed token on 401
 (function() {
     const originalFetch = window.fetch;
     window.fetch = function(...args) {
-        return originalFetch.apply(this, args).then(response => {
+        return originalFetch.apply(this, args).then(async response => {
             if (response.status === 401) {
-                // Unauthorized - redirect to login
                 const currentPath = window.location.pathname;
                 const publicPages = ['/login', '/signup', '/'];
-                
-                if (!publicPages.includes(currentPath)) {
+                if (publicPages.includes(currentPath)) return response;
+
+                // Skip refresh attempt for the refresh endpoint itself
+                const url = typeof args[0] === 'string' ? args[0] : args[0]?.url || '';
+                if (url.includes('/auth/refresh')) {
                     localStorage.removeItem('access_token');
-                    console.warn('Unauthorized request detected, redirecting to login');
+                    localStorage.removeItem('refresh_token');
                     window.location.href = '/login?redirect=' + encodeURIComponent(currentPath);
+                    return response;
                 }
+
+                const refreshed = await silentRefresh();
+                if (refreshed) {
+                    // Retry the original request with the new token
+                    const [input, init = {}] = args;
+                    const newHeaders = new Headers(init.headers || {});
+                    newHeaders.set('Authorization', 'Bearer ' + localStorage.getItem('access_token'));
+                    return originalFetch(input, { ...init, headers: newHeaders });
+                }
+
+                localStorage.removeItem('access_token');
+                localStorage.removeItem('refresh_token');
+                window.location.href = '/login?redirect=' + encodeURIComponent(currentPath);
             }
             return response;
         });
@@ -132,14 +186,18 @@ class API {
         });
     }
     
-    setToken(token) {
+    setToken(token, refreshToken) {
         this.token = token;
         localStorage.setItem('access_token', token);
+        if (refreshToken) {
+            localStorage.setItem('refresh_token', refreshToken);
+        }
     }
     
     clearToken() {
         this.token = null;
         localStorage.removeItem('access_token');
+        localStorage.removeItem('refresh_token');
     }
 }
 
@@ -191,7 +249,7 @@ async function handleLogin(event) {
     
     try {
         const response = await api.post('/auth/login', { email, password });
-        api.setToken(response.access_token);
+        api.setToken(response.access_token, response.refresh_token);
         showNotification('Login successful!', 'success');
         
         // Redirect to the page user was trying to access, or dashboard by default

@@ -222,7 +222,12 @@ class DNSNodeService:
             if not success:
                 return DNSNodeCommandResult(success=False, stdout="", stderr=f"Bundle upload failed: {error}", exit_code=1, execution_time=0)
             
-            unzip_cmd = "cd /opt/cdn_waf && (apt-get install -y unzip || true) && unzip -o bundle.zip && rm bundle.zip"
+            unzip_cmd = (
+                "cd /opt/cdn_waf"
+                " && (apt-get install -y unzip || true)"
+                " && rm -rf alembic/versions app"
+                " && unzip -o bundle.zip && rm bundle.zip"
+            )
             upload_res = await DNSNodeService.execute_command(node, unzip_cmd, timeout=120)
             if not upload_res.success:
                 return upload_res
@@ -292,8 +297,15 @@ ACME_EMAIL={settings.ACME_EMAIL}
         if res.success:
             return res
 
-        if "Can't locate revision" in (res.stdout or "") + (res.stderr or ""):
-            logger.warning(f"Alembic revision mismatch on {node.name}, clearing alembic_version and retrying")
+        combined_output = (res.stdout or "") + (res.stderr or "")
+        recoverable = (
+            "Can't locate revision" in combined_output
+            or "Multiple head revisions" in combined_output
+        )
+
+        if recoverable:
+            reason = "multiple heads" if "Multiple head" in combined_output else "revision mismatch"
+            logger.warning(f"Alembic {reason} on {node.name}, clearing alembic_version and retrying")
             clear = await DNSNodeService.execute_command(
                 node,
                 "sudo -u postgres psql cdn_waf -c 'DELETE FROM alembic_version;'",
@@ -314,7 +326,7 @@ ACME_EMAIL={settings.ACME_EMAIL}
             )
             combined_stdout = (
                 res.stdout
-                + "\n[auto] cleared stale alembic_version, stamped head\n"
+                + f"\n[auto] cleared alembic_version ({reason}), stamped head\n"
                 + upgrade.stdout
             )
             return DNSNodeCommandResult(

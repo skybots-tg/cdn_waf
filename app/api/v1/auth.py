@@ -13,6 +13,7 @@ from app.core.security import (
     verify_password,
     create_access_token,
     create_refresh_token,
+    decode_token,
     get_current_active_user,
     get_optional_current_user,
 )
@@ -102,6 +103,58 @@ async def login(
     return TokenResponse(
         access_token=access_token,
         refresh_token=refresh_token,
+    )
+
+
+@router.post("/refresh", response_model=TokenResponse)
+async def refresh_tokens(
+    request_body: dict,
+    db: AsyncSession = Depends(get_db)
+):
+    """Exchange a valid refresh token for a new access + refresh token pair"""
+    refresh_token = request_body.get("refresh_token")
+    if not refresh_token:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="refresh_token is required"
+        )
+
+    try:
+        payload = decode_token(refresh_token)
+    except HTTPException:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired refresh token"
+        )
+
+    if payload.get("type") != "refresh":
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid token type"
+        )
+
+    try:
+        user_id = int(payload.get("sub"))
+    except (TypeError, ValueError):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid refresh token"
+        )
+
+    user_service = UserService(db)
+    user = await user_service.get_by_id(user_id)
+    if not user or not user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="User not found or inactive"
+        )
+
+    new_access = create_access_token({"sub": str(user.id)})
+    new_refresh = create_refresh_token({"sub": str(user.id)})
+
+    return TokenResponse(
+        access_token=new_access,
+        refresh_token=new_refresh,
     )
 
 
