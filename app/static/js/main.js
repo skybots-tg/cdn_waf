@@ -88,11 +88,6 @@ class API {
         });
         
         if (!response.ok) {
-            if (response.status === 401) {
-                this.clearToken();
-                window.location.href = '/login';
-                return;
-            }
             let errorMsg = 'Request failed';
             try {
                 const error = await response.json();
@@ -163,8 +158,17 @@ function showNotification(message, type = 'info') {
     
     setTimeout(() => {
         notification.style.opacity = '0';
-        setTimeout(() => notification.remove(), 300);
+        notification.addEventListener('transitionend', () => notification.remove(), { once: true });
+        setTimeout(() => notification.remove(), 500);
     }, 3000);
+}
+
+// HTML Escape
+const _escapeEl = document.createElement('div');
+function escapeHtml(text) {
+    if (text === null || text === undefined) return '';
+    _escapeEl.textContent = String(text);
+    return _escapeEl.innerHTML;
 }
 
 // Form Validation
@@ -256,13 +260,13 @@ function renderDomains(domains) {
     container.innerHTML = domains.map(domain => `
         <div class="glass-card">
             <div class="flex-between mb-2">
-                <h3>${domain.name}</h3>
-                <span class="badge badge-${getStatusBadge(domain.status)}">${domain.status}</span>
+                <h3>${escapeHtml(domain.name)}</h3>
+                <span class="badge badge-${getStatusBadge(domain.status)}">${escapeHtml(domain.status)}</span>
             </div>
             <div class="flex gap-2">
-                <a href="/domains/${domain.id}" class="btn btn-secondary btn-sm">Manage</a>
-                <a href="/domains/${domain.id}/dns" class="btn btn-secondary btn-sm">DNS</a>
-                <a href="/domains/${domain.id}/settings" class="btn btn-secondary btn-sm">Settings</a>
+                <a href="/domains/${encodeURIComponent(domain.id)}" class="btn btn-secondary btn-sm">Manage</a>
+                <a href="/domains/${encodeURIComponent(domain.id)}/dns" class="btn btn-secondary btn-sm">DNS</a>
+                <a href="/domains/${encodeURIComponent(domain.id)}/settings" class="btn btn-secondary btn-sm">Settings</a>
             </div>
         </div>
     `).join('');
@@ -440,6 +444,7 @@ async function createAPIKey() {
 }
 
 function showAPIKeyResult(data) {
+    const keyValue = data.token || data.key || 'key_xxxxxxxxxxxxxx';
     const modal = document.createElement('div');
     modal.className = 'modal';
     modal.innerHTML = `
@@ -456,7 +461,7 @@ function showAPIKeyResult(data) {
             <div class="form-group">
                 <label class="form-label">API Key</label>
                 <div style="display: flex; gap: 8px;">
-                    <input type="text" class="form-input" id="api-key-value" value="${data.token || data.key || 'key_xxxxxxxxxxxxxx'}" readonly style="font-family: monospace; font-size: 13px;">
+                    <input type="text" class="form-input" id="api-key-value" readonly style="font-family: monospace; font-size: 13px;">
                     <button onclick="copyAPIKey()" class="btn btn-secondary">
                         <i class="fas fa-copy"></i> Copy
                     </button>
@@ -464,7 +469,7 @@ function showAPIKeyResult(data) {
             </div>
             <div class="form-group">
                 <label class="form-label">Usage Example</label>
-                <pre style="background: var(--bg-tertiary); padding: 12px; border-radius: 8px; overflow-x: auto; font-size: 12px;">curl -H "Authorization: Bearer ${data.token || data.key || 'YOUR_API_KEY'}" \\
+                <pre style="background: var(--bg-tertiary); padding: 12px; border-radius: 8px; overflow-x: auto; font-size: 12px;">curl -H "Authorization: Bearer ${escapeHtml(keyValue)}" \\
   https://api.flarecloud.ru/api/v1/domains</pre>
             </div>
             <div style="text-align: right;">
@@ -475,18 +480,23 @@ function showAPIKeyResult(data) {
     
     document.body.appendChild(modal);
     
-    // Select the key text
-    setTimeout(() => {
-        const input = document.getElementById('api-key-value');
-        if (input) input.select();
-    }, 100);
+    const input = document.getElementById('api-key-value');
+    if (input) {
+        input.value = keyValue;
+        setTimeout(() => input.select(), 100);
+    }
 }
 
 function copyAPIKey() {
     const input = document.getElementById('api-key-value');
+    if (!input) return;
     input.select();
-    document.execCommand('copy');
-    showNotification('API key copied to clipboard', 'success');
+    navigator.clipboard.writeText(input.value).then(() => {
+        showNotification('API key copied to clipboard', 'success');
+    }).catch(() => {
+        document.execCommand('copy');
+        showNotification('API key copied to clipboard', 'success');
+    });
 }
 
 async function deleteAPIKey(keyId) {

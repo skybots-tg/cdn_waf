@@ -131,7 +131,7 @@ async def scan_dns_records(
             elif record_type == "TXT":
                 txt_parts = getattr(rdata, "strings", None)
                 if txt_parts:
-                    record["content"] = " ".join(
+                    record["content"] = "".join(
                         s.decode() if isinstance(s, bytes) else s
                         for s in txt_parts
                     )
@@ -190,7 +190,7 @@ async def scan_dns_records(
         for rdata in answers:
             txt_parts = getattr(rdata, "strings", None)
             if txt_parts:
-                content = " ".join(
+                content = "".join(
                     s.decode() if isinstance(s, bytes) else s for s in txt_parts
                 )
             else:

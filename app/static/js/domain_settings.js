@@ -61,8 +61,11 @@ function renderCacheRules(rules) {
 }
 
 function showAddCacheRuleModal() {
-    // TODO: Implement modal
-    alert('Cache rule modal - to be implemented');
+    showNotification('Cache rule modal - coming soon', 'info');
+}
+
+function editCacheRule(ruleId) {
+    showNotification('Edit cache rule - coming soon', 'info');
 }
 
 async function deleteCacheRule(ruleId) {
@@ -258,7 +261,11 @@ function getHealthBadge(status) {
 }
 
 function showAddOriginModal() {
-    alert('Origin modal - to be implemented');
+    showNotification('Origin modal - coming soon', 'info');
+}
+
+function editOrigin(originId) {
+    showNotification('Edit origin - coming soon', 'info');
 }
 
 async function checkOriginHealth(originId) {
@@ -466,7 +473,7 @@ function renderCertificates(certs, available = []) {
                                     title="View Details">
                                 <i class="fas fa-info-circle"></i>
                             </button>
-                            <button class="btn btn-icon btn-sm" style="background: var(--accent-secondary); color: white;" 
+                            <button class="btn btn-icon btn-sm" style="background: var(--info); color: white;" 
                                     onclick="renewCertificate(${cert.id}, '${escapeHtml(cert.common_name)}')" 
                                     title="Force Renewal">
                                 <i class="fas fa-sync"></i>
@@ -512,7 +519,7 @@ async function requestACME() {
 }
 
 function showUploadCertModal() {
-    alert('Upload certificate modal - to be implemented');
+    showNotification('Upload certificate modal - coming soon', 'info');
 }
 
 async function deleteCertificate(certId) {
@@ -998,8 +1005,7 @@ async function copyCertificateLogs(certId) {
 }
 
 function closeModal() {
-    const modals = document.querySelectorAll('.modal-overlay');
-    modals.forEach(modal => modal.remove());
+    document.querySelectorAll('.modal-overlay, .modal').forEach(el => el.remove());
 }
 
 async function saveACMESettings() {
@@ -1186,15 +1192,57 @@ function renderIPRules(rules) {
     `).join('');
 }
 
-function showAddWAFRuleModal() { alert('Not implemented'); }
-function showAddRateLimitModal() { alert('Not implemented'); }
-function showAddIPRuleModal() { alert('Not implemented'); }
-function editWAFRule(id) { alert('Not implemented'); }
-function deleteWAFRule(id) { alert('Not implemented'); }
-function editRateLimit(id) { alert('Not implemented'); }
-function deleteRateLimit(id) { alert('Not implemented'); }
-function editIPRule(id) { alert('Not implemented'); }
-function deleteIPRule(id) { alert('Not implemented'); }
+function showAddWAFRuleModal() { showNotification('WAF rule editor - coming soon', 'info'); }
+function showAddRateLimitModal() { showNotification('Rate limit editor - coming soon', 'info'); }
+function showAddIPRuleModal() { showNotification('IP rule editor - coming soon', 'info'); }
+function editWAFRule(id) { showNotification('WAF rule editor - coming soon', 'info'); }
+function editRateLimit(id) { showNotification('Rate limit editor - coming soon', 'info'); }
+function editIPRule(id) { showNotification('IP rule editor - coming soon', 'info'); }
+
+async function deleteWAFRule(id) {
+    if (!confirm('Delete this WAF rule?')) return;
+    try {
+        const response = await fetch(`/api/v1/domains/${DOMAIN_ID}/waf/rules/${id}`, {
+            method: 'DELETE',
+            headers: { 'Authorization': `Bearer ${getToken()}` }
+        });
+        if (!response.ok) throw new Error('Failed to delete WAF rule');
+        showNotification('WAF rule deleted', 'success');
+        loadWAFRules();
+    } catch (error) {
+        showNotification('Failed to delete WAF rule', 'error');
+    }
+}
+
+async function deleteRateLimit(id) {
+    if (!confirm('Delete this rate limit?')) return;
+    try {
+        const response = await fetch(`/api/v1/domains/${DOMAIN_ID}/rate-limits/${id}`, {
+            method: 'DELETE',
+            headers: { 'Authorization': `Bearer ${getToken()}` }
+        });
+        if (!response.ok) throw new Error('Failed to delete rate limit');
+        showNotification('Rate limit deleted', 'success');
+        loadRateLimits();
+    } catch (error) {
+        showNotification('Failed to delete rate limit', 'error');
+    }
+}
+
+async function deleteIPRule(id) {
+    if (!confirm('Delete this IP rule?')) return;
+    try {
+        const response = await fetch(`/api/v1/domains/${DOMAIN_ID}/ip-rules/${id}`, {
+            method: 'DELETE',
+            headers: { 'Authorization': `Bearer ${getToken()}` }
+        });
+        if (!response.ok) throw new Error('Failed to delete IP rule');
+        showNotification('IP rule deleted', 'success');
+        loadIPRules();
+    } catch (error) {
+        showNotification('Failed to delete IP rule', 'error');
+    }
+}
 
 // Utility functions
 function getToken() {

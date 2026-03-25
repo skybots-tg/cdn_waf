@@ -19,6 +19,7 @@
     --accent-primary: #ff6b35;
     --accent-hover: #ff5722;
     --accent-light: #fff3f0;
+    --accent-secondary: #339af0;
     
     /* Status Colors */
     --success: #51cf66;
@@ -85,7 +86,8 @@ body {
     transition: all var(--transition-base);
 }
 
-.glass-card:hover {
+.glass-card.interactive:hover,
+a.glass-card:hover {
     box-shadow: var(--shadow-lg);
     transform: translateY(-2px);
 }
@@ -215,6 +217,27 @@ body {
     border-color: var(--text-muted);
 }
 
+.btn-error {
+    background: var(--error);
+    color: white;
+}
+
+.btn-error:hover {
+    filter: brightness(0.9);
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(255, 107, 107, 0.3);
+}
+
+.btn-warning {
+    background: var(--warning);
+    color: #212529;
+}
+
+.btn-warning:hover {
+    filter: brightness(0.9);
+    transform: translateY(-1px);
+}
+
 .btn-sm {
     padding: 6px 12px;
     font-size: 13px;
@@ -339,6 +362,10 @@ body {
 
 .badge-warning {
     background: rgba(255, 212, 59, 0.15);
+    color: #b8860b;
+}
+
+[data-theme="dark"] .badge-warning {
     color: var(--warning);
 }
 
@@ -355,6 +382,16 @@ body {
 .badge-orange {
     background: var(--accent-light);
     color: var(--accent-primary);
+}
+
+.badge-primary {
+    background: rgba(255, 107, 53, 0.15);
+    color: var(--accent-primary);
+}
+
+.badge-secondary {
+    background: var(--bg-tertiary);
+    color: var(--text-secondary);
 }
 
 /* Table */
@@ -475,6 +512,14 @@ body {
 .gap-2 { gap: 16px; }
 .gap-3 { gap: 24px; }
 
+.text-secondary {
+    color: var(--text-secondary);
+}
+
+.text-muted {
+    color: var(--text-muted);
+}
+
 /* Notifications */
 .notification {
     background: var(--bg-secondary);
@@ -490,6 +535,7 @@ body {
     gap: 12px;
     animation: slideIn 0.3s ease;
     border: 1px solid var(--glass-border);
+    transition: opacity 0.3s ease;
 }
 
 .notification-success {
@@ -531,7 +577,7 @@ body {
     display: flex;
     align-items: center;
     justify-content: center;
-    z-index: 1000;
+    z-index: 10000;
     padding: 20px;
     animation: fadeIn 0.2s ease;
 }

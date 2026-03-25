@@ -29,16 +29,16 @@
 
     <!-- Sub-tabs -->
     <div class="sub-tabs mb-4">
-        <button class="sub-tab-btn active" onclick="showTab('cdn')">
+        <button class="sub-tab-btn active" onclick="showTab('cdn', this)">
             <i class="fas fa-server"></i> CDN & Cache
         </button>
-        <button class="sub-tab-btn" onclick="showTab('origins')">
+        <button class="sub-tab-btn" onclick="showTab('origins', this)">
             <i class="fas fa-network-wired"></i> Origins
         </button>
-        <button class="sub-tab-btn" onclick="showTab('ssl')">
+        <button class="sub-tab-btn" onclick="showTab('ssl', this)">
             <i class="fas fa-lock"></i> SSL/TLS
         </button>
-        <button class="sub-tab-btn" onclick="showTab('security')">
+        <button class="sub-tab-btn" onclick="showTab('security', this)">
             <i class="fas fa-shield-alt"></i> Security
         </button>
     </div>
@@ -338,24 +338,19 @@
 <script>
 const DOMAIN_ID = {{ domain.id }};
 
-function showTab(tabName) {
-    // Hide all tabs
+function showTab(tabName, btn) {
     document.querySelectorAll('.tab-content').forEach(tab => {
         tab.style.display = 'none';
     });
     
-    // Remove active class from all buttons
-    document.querySelectorAll('.sub-tab-btn').forEach(btn => {
-        btn.classList.remove('active');
+    document.querySelectorAll('.sub-tab-btn').forEach(b => {
+        b.classList.remove('active');
     });
     
-    // Show selected tab
     document.getElementById(`tab-${tabName}`).style.display = 'block';
     
-    // Add active class to button
-    event.target.classList.add('active');
+    if (btn) btn.classList.add('active');
     
-    // Load tab data
     loadTabData(tabName);
 }
 

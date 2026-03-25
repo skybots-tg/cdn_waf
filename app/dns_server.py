@@ -58,7 +58,6 @@ class DBResolver(BaseResolver):
         
     def get_nameservers(self, db: Session) -> List[str]:
         """Get hostnames of active DNS nodes"""
-        # Since we might not sync DNSNode table, we use hardcoded or try to fetch
         try:
             nodes = db.execute(
                 select(DNSNode).where(DNSNode.enabled == True)
@@ -81,26 +80,52 @@ class DBResolver(BaseResolver):
         except Exception:
             return []
 
+    def _make_soa(self, zone_qname, ns_list):
+        """Build SOA RR for authority section / SOA queries."""
+        primary_ns = ns_list[0] if ns_list else self.ns1
+        return RR(
+            zone_qname,
+            QTYPE.SOA,
+            ttl=self.ttl,
+            rdata=SOA(
+                mname=primary_ns,
+                rname=self.admin_email,
+                times=(
+                    int(datetime.utcnow().strftime("%Y%m%d%H")),
+                    3600, 600, 86400, self.ttl,
+                )
+            )
+        )
+
+    def _add_authority(self, reply, zone_qname, ns_list):
+        """Add NS records to the AUTHORITY section (RFC 1035 s4.3.1)."""
+        for ns in ns_list:
+            reply.add_auth(RR(zone_qname, QTYPE.NS, ttl=self.ttl, rdata=NS(ns)))
+
+    @staticmethod
+    def _make_txt_rdata(content: str) -> TXT:
+        """Create TXT RDATA, splitting content > 255 bytes into chunks."""
+        raw = content.encode("utf-8")
+        if len(raw) <= 255:
+            return TXT(raw)
+        chunks = [raw[i:i+255] for i in range(0, len(raw), 255)]
+        return TXT(chunks)
+
     def resolve(self, request: DNSRecord, handler) -> DNSRecord:
         reply = request.reply()
         qname = request.q.qname
         qtype_num = request.q.qtype
         qtype_name = QTYPE[qtype_num]
         
-        domain_name = str(qname).rstrip('.').lower().lower()
+        domain_name = str(qname).rstrip('.').lower()
         
-        # logger.info(f"Query: {qname} ({qtype_name})")
+        logger.debug(f"Query: {qname} ({qtype_name})")
         
         with SessionLocal() as db:
-            # 1. Find the domain (zone)
-            # We need to find the longest matching domain in our DB
-            # e.g. for "sub.example.com", we might host "example.com"
-            
             parts = domain_name.split('.')
             zone = None
             zone_domain = None
             
-            # Try to match domain from specific to general
             for i in range(len(parts)):
                 candidate = ".".join(parts[i:])
                 domain = db.execute(
@@ -113,122 +138,72 @@ class DBResolver(BaseResolver):
                     break
             
             if not zone:
-                # logger.debug(f"Domain not found: {domain_name}")
-                reply.header.rcode = RCODE.REFUSED # We are not authoritative
-                return reply
-            
-            # logger.info(f"Found zone: {zone.name}, status: {zone.status}")
-
-            # Allow ACTIVE and PENDING states
-            if zone.status not in [DomainStatus.ACTIVE, DomainStatus.PENDING]:
-                # logger.debug(f"Domain inactive: {zone.name} ({zone.status})")
                 reply.header.rcode = RCODE.REFUSED
                 return reply
 
-            # Calculate relative name for DB lookup
-            # if query is "www.example.com" and zone is "example.com", name is "www"
-            # if query is "example.com", name is "@"
-            
+            if zone.status not in [DomainStatus.ACTIVE, DomainStatus.PENDING]:
+                reply.header.rcode = RCODE.REFUSED
+                return reply
+
             if domain_name == zone_domain:
                 record_name = "@"
             else:
-                # remove zone suffix
                 record_name = domain_name[:-len(zone_domain)-1]
             
-            # Handle SOA
+            ns_list = self.get_nameservers(db)
+            zone_qname = DNSLabel(zone_domain + ".")
+
+            # --- SOA query ---
             if qtype_name == "SOA":
-                ns_list = self.get_nameservers(db)
-                primary_ns = ns_list[0] if ns_list else self.ns1
-                
-                reply.add_answer(RR(
-                    qname,
-                    QTYPE.SOA,
-                    ttl=self.ttl,
-                    rdata=SOA(
-                        mname=primary_ns,
-                        rname=self.admin_email,
-                        times=(
-                            int(datetime.utcnow().strftime("%Y%m%d%H")),  # serial
-                            3600,   # refresh
-                            600,    # retry
-                            86400,  # expire
-                            self.ttl  # minimum
-                        )
-                    )
-                ))
+                reply.add_answer(self._make_soa(zone_qname, ns_list))
+                self._add_authority(reply, zone_qname, ns_list)
                 return reply
 
-            # Handle NS for apex
+            # --- NS for apex ---
             if qtype_name == "NS" and record_name == "@":
-                ns_list = self.get_nameservers(db)
-                if ns_list:
-                    for ns in ns_list:
-                         reply.add_answer(RR(qname, QTYPE.NS, ttl=self.ttl, rdata=NS(ns)))
-                else:
-                    reply.add_answer(RR(qname, QTYPE.NS, ttl=self.ttl, rdata=NS(self.ns1)))
-                    reply.add_answer(RR(qname, QTYPE.NS, ttl=self.ttl, rdata=NS(self.ns2)))
+                for ns in ns_list:
+                    reply.add_answer(RR(qname, QTYPE.NS, ttl=self.ttl, rdata=NS(ns)))
                 return reply
 
-            # Look for records
+            # --- General record lookup ---
             records = db.execute(
                 select(DNSModel).where(
                     and_(
                         DNSModel.domain_id == zone.id,
                         or_(
                             DNSModel.name == record_name,
-                            DNSModel.name == domain_name  # Handle absolute names in DB
+                            DNSModel.name == domain_name
                         )
                     )
-                    # We might want to filter by type, but CNAME handling is special
                 )
             ).scalars().all()
             
-            # Filter for specific type or CNAME
             matching_records = [r for r in records if r.type == qtype_name]
             cname_records = [r for r in records if r.type == 'CNAME']
-            
-            # If we found CNAME but query was not for CNAME, we should follow it (or just return it?)
-            # Standard behavior: return CNAME. Recursive resolver will follow.
-            # BUT if it's proxied, we return A records of edge nodes!
-            
-            final_records = []
-            
-            # Logic for Proxied records (A, AAAA, CNAME)
-            # If any record for this name is proxied, we return Edge Node IPs
-            # We must check the queried record specifically or the CNAME chain
-            
-            # Find the specific record being queried
+
             target_record = next((r for r in matching_records), None)
-            
-            # If we are querying A/AAAA and the record exists and is proxied -> return Edge IPs
-            # OR if we are querying A/AAAA and there is a CNAME that is proxied -> return Edge IPs (CNAME Flattening for root or just proxying)
             
             is_proxied = False
             
             if target_record and target_record.proxied and qtype_name in ['A', 'AAAA']:
                 is_proxied = True
             elif cname_records and cname_records[0].proxied and qtype_name in ['A', 'AAAA', 'CNAME']:
-                # If CNAME is proxied, we return A records of Edge Nodes (CNAME Flattening-like behavior for CDN)
                 is_proxied = True
             
             if is_proxied and qtype_name in ['A', 'AAAA']:
-                # Return Edge Node IPs
                 edge_ips = self.get_edge_nodes_ips(db)
                 if not edge_ips:
-                    # Fallback to origin if no edge nodes? Or fail?
-                    # Let's fallback to configured records if no edge nodes available (safe mode)
                     logger.warning("No active edge nodes found! Returning origin records.")
                     is_proxied = False
                 else:
                     for ip in edge_ips:
-                        # Simple check for IPv4 vs IPv6 (TODO: better check)
                         if '.' in ip and qtype_name == 'A':
                             reply.add_answer(RR(qname, QTYPE.A, ttl=60, rdata=A(ip)))
                         elif ':' in ip and qtype_name == 'AAAA':
                             reply.add_answer(RR(qname, QTYPE.AAAA, ttl=60, rdata=AAAA(ip)))
+                    self._add_authority(reply, zone_qname, ns_list)
                     return reply
 
-            # If not proxied or not A/AAAA query on proxied record
             if matching_records:
                 for r in matching_records:
                     if r.type == 'A':
@@ -240,23 +215,22 @@ class DBResolver(BaseResolver):
                     elif r.type == 'MX':
                         reply.add_answer(RR(qname, QTYPE.MX, ttl=r.ttl, rdata=MX(r.content, r.priority or 10)))
                     elif r.type == 'TXT':
-                        reply.add_answer(RR(qname, QTYPE.TXT, ttl=r.ttl, rdata=TXT(r.content)))
+                        reply.add_answer(RR(qname, QTYPE.TXT, ttl=r.ttl, rdata=self._make_txt_rdata(r.content)))
                     elif r.type == 'NS':
                         reply.add_answer(RR(qname, QTYPE.NS, ttl=r.ttl, rdata=NS(r.content)))
             
             elif cname_records:
-                 # If we have a CNAME but asked for A/AAAA, return the CNAME
                  for r in cname_records:
                      reply.add_answer(RR(qname, QTYPE.CNAME, ttl=r.ttl, rdata=CNAME(r.content)))
 
-            # If no answers, it might be NXDOMAIN or just empty (NODATA)
-            if not reply.rr:
-                # If we have records for this name but not this type, it's NOERROR (NODATA)
-                # If we have no records for this name, it's NXDOMAIN
+            if reply.rr:
+                self._add_authority(reply, zone_qname, ns_list)
+            else:
                 if records:
-                     reply.header.rcode = RCODE.NOERROR
+                    reply.header.rcode = RCODE.NOERROR
                 else:
-                     reply.header.rcode = RCODE.NXDOMAIN
+                    reply.header.rcode = RCODE.NXDOMAIN
+                reply.add_auth(self._make_soa(zone_qname, ns_list))
 
         return reply
 

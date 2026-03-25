@@ -515,7 +515,7 @@ async function manageComponent(nodeId, component, action) {
 
 // Utility: Get auth token
 function getToken() {
-    return localStorage.getItem('auth_token') || '';
+    return localStorage.getItem('access_token') || '';
 }
 
 // Utility: Escape HTML

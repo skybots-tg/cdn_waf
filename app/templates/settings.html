@@ -14,19 +14,19 @@
 
     <!-- Settings Tabs -->
     <div class="tabs mb-4">
-        <button class="tab-link active" onclick="showSettingsTab('account')">
+        <button class="tab-link active" onclick="showSettingsTab('account', this)">
             <i class="fas fa-user"></i> Account
         </button>
-        <button class="tab-link" onclick="showSettingsTab('organization')">
+        <button class="tab-link" onclick="showSettingsTab('organization', this)">
             <i class="fas fa-users"></i> Organization
         </button>
-        <button class="tab-link" onclick="showSettingsTab('api')">
+        <button class="tab-link" onclick="showSettingsTab('api', this)">
             <i class="fas fa-key"></i> API Keys
         </button>
-        <button class="tab-link" onclick="showSettingsTab('security')">
+        <button class="tab-link" onclick="showSettingsTab('security', this)">
             <i class="fas fa-shield-alt"></i> Security
         </button>
-        <button class="tab-link" onclick="showSettingsTab('notifications')">
+        <button class="tab-link" onclick="showSettingsTab('notifications', this)">
             <i class="fas fa-bell"></i> Notifications
         </button>
     </div>
@@ -373,24 +373,19 @@
 </style>
 
 <script>
-function showSettingsTab(tabName) {
-    // Hide all tabs
+function showSettingsTab(tabName, btn) {
     document.querySelectorAll('.settings-tab-content').forEach(tab => {
         tab.style.display = 'none';
     });
     
-    // Remove active class from all buttons
-    document.querySelectorAll('.tab-link').forEach(btn => {
-        btn.classList.remove('active');
+    document.querySelectorAll('.tab-link').forEach(b => {
+        b.classList.remove('active');
     });
     
-    // Show selected tab
     document.getElementById(`tab-${tabName}`).style.display = 'block';
     
-    // Add active class to button
-    event.target.classList.add('active');
+    if (btn) btn.classList.add('active');
     
-    // Load tab data
     loadTabData(tabName);
 }
 
@@ -411,7 +406,9 @@ function loadTabData(tabName) {
 
 async function loadTeamMembers() {
     try {
-        const response = await fetch('/api/v1/organization/members');
+        const response = await fetch('/api/v1/organization/members', {
+            headers: { 'Authorization': `Bearer ${getToken()}` }
+        });
         const data = await response.json();
         
         const container = document.getElementById('team-members');
@@ -425,11 +422,11 @@ async function loadTeamMembers() {
             <div class="glass-card-sm mb-2">
                 <div class="flex-between">
                     <div>
-                        <div style="font-weight: 600; margin-bottom: 4px;">${member.email}</div>
-                        <span class="badge badge-primary">${member.role}</span>
+                        <div style="font-weight: 600; margin-bottom: 4px;">${escapeHtml(member.email)}</div>
+                        <span class="badge badge-primary">${escapeHtml(member.role)}</span>
                     </div>
                     ${member.role !== 'owner' ? `
-                        <button class="btn btn-error btn-sm" onclick="removeMember(${member.id})">
+                        <button class="btn btn-error btn-sm" onclick="removeMember(${Number(member.id)})">
                             <i class="fas fa-user-minus"></i> Remove
                         </button>
                     ` : ''}
@@ -1062,12 +1059,18 @@ async function removeMember(memberId) {
 // ==================== Utilities ====================
 
 function closeModal() {
-    const modals = document.querySelectorAll('.modal-overlay');
-    modals.forEach(modal => modal.remove());
+    document.querySelectorAll('.modal-overlay, .modal').forEach(el => el.remove());
 }
 
 function getToken() {
-    return localStorage.getItem('access_token') || localStorage.getItem('auth_token') || '';
+    return localStorage.getItem('access_token') || '';
+}
+
+const _settingsEscapeEl = document.createElement('div');
+function escapeHtml(text) {
+    if (text === null || text === undefined) return '';
+    _settingsEscapeEl.textContent = String(text);
+    return _settingsEscapeEl.innerHTML;
 }
 
 // Initialize
