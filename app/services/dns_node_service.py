@@ -282,10 +282,39 @@ ACME_EMAIL={settings.ACME_EMAIL}
 
     @staticmethod
     async def run_migrations(node: DNSNode) -> DNSNodeCommandResult:
-        """Run database migrations"""
-        # На этом этапе update_app_code уже положил alembic и alembic.ini в /opt/cdn_waf
-        cmd = "cd /opt/cdn_waf && ./venv/bin/alembic upgrade head"
-        return await DNSNodeService.execute_command(node, cmd, timeout=180)
+        """Run database migrations with auto-recovery for stale revision IDs."""
+        base_dir = "cd /opt/cdn_waf"
+        alembic = "./venv/bin/alembic"
+
+        res = await DNSNodeService.execute_command(
+            node, f"{base_dir} && {alembic} upgrade head", timeout=180
+        )
+        if res.success:
+            return res
+
+        if "Can't locate revision" in (res.stdout or "") + (res.stderr or ""):
+            logger.warning(f"Alembic revision mismatch on {node.name}, stamping head and retrying")
+            stamp = await DNSNodeService.execute_command(
+                node, f"{base_dir} && {alembic} stamp head", timeout=30
+            )
+            if not stamp.success:
+                return DNSNodeCommandResult(
+                    success=False,
+                    stdout=res.stdout + "\n" + stamp.stdout,
+                    stderr=f"stamp head also failed: {stamp.stderr}",
+                    exit_code=1, execution_time=0,
+                )
+            retry = await DNSNodeService.execute_command(
+                node, f"{base_dir} && {alembic} upgrade head", timeout=180
+            )
+            retry_stdout = res.stdout + "\n[auto] stamped head, retrying...\n" + retry.stdout
+            return DNSNodeCommandResult(
+                success=retry.success, stdout=retry_stdout,
+                stderr=retry.stderr, exit_code=retry.exit_code,
+                execution_time=retry.execution_time,
+            )
+
+        return res
     
     @staticmethod
     async def sync_database(node: DNSNode, db_session: AsyncSession) -> DNSNodeCommandResult:
