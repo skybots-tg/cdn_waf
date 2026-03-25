@@ -67,9 +67,29 @@ class EdgeNodeSync(BaseModel):
     created_at: datetime
     updated_at: datetime
 
+class DNSNodeSync(BaseModel):
+    id: int
+    name: str
+    hostname: str
+    ip_address: str
+    ipv6_address: Optional[str] = None
+    location_code: str
+    country_code: str = "RU"
+    city: Optional[str] = None
+    datacenter: Optional[str] = None
+    enabled: bool
+    status: str = "unknown"
+    last_heartbeat: Optional[datetime] = None
+    cpu_usage: Optional[float] = None
+    memory_usage: Optional[float] = None
+    disk_usage: Optional[float] = None
+    created_at: datetime
+    updated_at: Optional[datetime] = None
+
 class DNSSyncPayload(BaseModel):
     users: List[UserSync]
     organizations: List[OrganizationSync]
     domains: List[DomainSync]
     records: List[DNSRecordSync]
     edge_nodes: List[EdgeNodeSync]
+    dns_nodes: List[DNSNodeSync] = []

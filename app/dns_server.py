@@ -64,8 +64,9 @@ class DBResolver(BaseResolver):
             ).scalars().all()
             if nodes:
                 return [node.hostname for node in nodes]
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(f"get_nameservers failed (using defaults): {e}")
+            db.rollback()
         return [self.ns1, self.ns2]
 
     def get_edge_nodes_ips(self, db: Session) -> List[str]:
@@ -77,7 +78,9 @@ class DBResolver(BaseResolver):
                 )
             ).scalars().all()
             return [node.ip_address for node in nodes]
-        except Exception:
+        except Exception as e:
+            logger.warning(f"get_edge_nodes_ips failed: {e}")
+            db.rollback()
             return []
 
     def _make_soa(self, zone_qname, ns_list):
@@ -353,10 +356,7 @@ async def sync_data(payload: DNSSyncPayload):
                 ]
                 db.execute(stmt, filtered_rows)
 
-            # 1. Truncate tables
-            # We use TRUNCATE CASCADE to clear everything
-            # Note: We include edge_nodes and dns_nodes if we sync them
-            db.execute(text("TRUNCATE TABLE dns_records, domains, organizations, users, edge_nodes RESTART IDENTITY CASCADE"))
+            db.execute(text("TRUNCATE TABLE dns_records, domains, organizations, users, edge_nodes, dns_nodes RESTART IDENTITY CASCADE"))
             
             # 2. Insert Users
             if payload.users:
@@ -393,6 +393,20 @@ async def sync_data(payload: DNSSyncPayload):
                         "memory_usage": None,
                         "disk_usage": None,
                         "last_config_update": None,
+                        "ssh_host": None,
+                        "ssh_port": None,
+                        "ssh_user": None,
+                        "ssh_key": None,
+                        "ssh_password": None,
+                    },
+                )
+
+            # 7. Insert DNS Nodes
+            if payload.dns_nodes:
+                insert_rows(
+                    "dns_nodes",
+                    [n.dict() for n in payload.dns_nodes],
+                    defaults={
                         "ssh_host": None,
                         "ssh_port": None,
                         "ssh_user": None,

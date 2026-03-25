@@ -293,7 +293,7 @@ ACME_EMAIL={settings.ACME_EMAIL}
         import httpx
         from app.schemas.sync import (
             DNSSyncPayload, UserSync, OrganizationSync, DomainSync, 
-            DNSRecordSync, EdgeNodeSync
+            DNSRecordSync, EdgeNodeSync, DNSNodeSync
         )
         
         try:
@@ -303,9 +303,9 @@ ACME_EMAIL={settings.ACME_EMAIL}
             domains = (await db_session.execute(text("SELECT * FROM domains"))).all()
             dns_records = (await db_session.execute(text("SELECT * FROM dns_records"))).all()
             edge_nodes = (await db_session.execute(text("SELECT * FROM edge_nodes"))).all()
+            dns_nodes = (await db_session.execute(text("SELECT * FROM dns_nodes"))).all()
             
             # 2. Construct Payload
-            # Helper to safely convert row to dict handling datetime serialization
             def row_to_dict(row):
                 return dict(row._mapping)
 
@@ -314,7 +314,8 @@ ACME_EMAIL={settings.ACME_EMAIL}
                 organizations=[OrganizationSync(**row_to_dict(o)) for o in organizations],
                 domains=[DomainSync(**row_to_dict(d)) for d in domains],
                 records=[DNSRecordSync(**row_to_dict(r)) for r in dns_records],
-                edge_nodes=[EdgeNodeSync(**row_to_dict(n)) for n in edge_nodes]
+                edge_nodes=[EdgeNodeSync(**row_to_dict(n)) for n in edge_nodes],
+                dns_nodes=[DNSNodeSync(**row_to_dict(n)) for n in dns_nodes],
             )
             
             # 3. Send to Node API
