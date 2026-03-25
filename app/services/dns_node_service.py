@@ -293,25 +293,34 @@ ACME_EMAIL={settings.ACME_EMAIL}
             return res
 
         if "Can't locate revision" in (res.stdout or "") + (res.stderr or ""):
-            logger.warning(f"Alembic revision mismatch on {node.name}, stamping head and retrying")
+            logger.warning(f"Alembic revision mismatch on {node.name}, clearing alembic_version and retrying")
+            clear = await DNSNodeService.execute_command(
+                node,
+                "sudo -u postgres psql cdn_waf -c 'DELETE FROM alembic_version;'",
+                timeout=15,
+            )
+            if not clear.success:
+                return DNSNodeCommandResult(
+                    success=False,
+                    stdout=res.stdout + "\n" + clear.stdout,
+                    stderr=f"clear alembic_version failed: {clear.stderr}",
+                    exit_code=1, execution_time=0,
+                )
             stamp = await DNSNodeService.execute_command(
                 node, f"{base_dir} && {alembic} stamp head", timeout=30
             )
-            if not stamp.success:
-                return DNSNodeCommandResult(
-                    success=False,
-                    stdout=res.stdout + "\n" + stamp.stdout,
-                    stderr=f"stamp head also failed: {stamp.stderr}",
-                    exit_code=1, execution_time=0,
-                )
-            retry = await DNSNodeService.execute_command(
+            upgrade = await DNSNodeService.execute_command(
                 node, f"{base_dir} && {alembic} upgrade head", timeout=180
             )
-            retry_stdout = res.stdout + "\n[auto] stamped head, retrying...\n" + retry.stdout
+            combined_stdout = (
+                res.stdout
+                + "\n[auto] cleared stale alembic_version, stamped head\n"
+                + upgrade.stdout
+            )
             return DNSNodeCommandResult(
-                success=retry.success, stdout=retry_stdout,
-                stderr=retry.stderr, exit_code=retry.exit_code,
-                execution_time=retry.execution_time,
+                success=upgrade.success, stdout=combined_stdout,
+                stderr=upgrade.stderr, exit_code=upgrade.exit_code,
+                execution_time=upgrade.execution_time,
             )
 
         return res
