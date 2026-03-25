@@ -119,8 +119,16 @@ class DBResolver(BaseResolver):
         
         domain_name = str(qname).rstrip('.').lower()
         
-        logger.debug(f"Query: {qname} ({qtype_name})")
+        logger.info(f"DNS query: {domain_name} {qtype_name}")
         
+        try:
+            return self._do_resolve(reply, qname, qtype_name, domain_name)
+        except Exception:
+            logger.exception(f"Error resolving {domain_name} {qtype_name}")
+            reply.header.rcode = RCODE.SERVFAIL
+            return reply
+
+    def _do_resolve(self, reply, qname, qtype_name, domain_name) -> DNSRecord:
         with SessionLocal() as db:
             parts = domain_name.split('.')
             zone = None
@@ -138,10 +146,12 @@ class DBResolver(BaseResolver):
                     break
             
             if not zone:
+                logger.info(f"  -> REFUSED (no zone for {domain_name})")
                 reply.header.rcode = RCODE.REFUSED
                 return reply
 
             if zone.status not in [DomainStatus.ACTIVE, DomainStatus.PENDING]:
+                logger.info(f"  -> REFUSED (zone {zone_domain} status={zone.status})")
                 reply.header.rcode = RCODE.REFUSED
                 return reply
 
@@ -150,22 +160,21 @@ class DBResolver(BaseResolver):
             else:
                 record_name = domain_name[:-len(zone_domain)-1]
             
+            logger.info(f"  zone={zone_domain} (id={zone.id}), record_name={record_name!r}")
+
             ns_list = self.get_nameservers(db)
             zone_qname = DNSLabel(zone_domain + ".")
 
-            # --- SOA query ---
             if qtype_name == "SOA":
                 reply.add_answer(self._make_soa(zone_qname, ns_list))
                 self._add_authority(reply, zone_qname, ns_list)
                 return reply
 
-            # --- NS for apex ---
             if qtype_name == "NS" and record_name == "@":
                 for ns in ns_list:
                     reply.add_answer(RR(qname, QTYPE.NS, ttl=self.ttl, rdata=NS(ns)))
                 return reply
 
-            # --- General record lookup ---
             records = db.execute(
                 select(DNSModel).where(
                     and_(
@@ -178,6 +187,11 @@ class DBResolver(BaseResolver):
                 )
             ).scalars().all()
             
+            logger.info(
+                f"  DB returned {len(records)} records "
+                f"(names: {[r.name for r in records]}, types: {[r.type for r in records]})"
+            )
+
             matching_records = [r for r in records if r.type == qtype_name]
             cname_records = [r for r in records if r.type == 'CNAME']
 
@@ -224,18 +238,82 @@ class DBResolver(BaseResolver):
                      reply.add_answer(RR(qname, QTYPE.CNAME, ttl=r.ttl, rdata=CNAME(r.content)))
 
             if reply.rr:
+                logger.info(f"  -> NOERROR, {len(reply.rr)} answer(s)")
                 self._add_authority(reply, zone_qname, ns_list)
             else:
                 if records:
                     reply.header.rcode = RCODE.NOERROR
+                    logger.info(f"  -> NODATA (records exist but not type {qtype_name})")
                 else:
                     reply.header.rcode = RCODE.NXDOMAIN
+                    logger.info(f"  -> NXDOMAIN (no records for {record_name!r} in zone {zone_domain})")
                 reply.add_auth(self._make_soa(zone_qname, ns_list))
 
         return reply
 
 # FastAPI App for management
 app = FastAPI(title="DNS Node API")
+
+
+@app.get("/api/v1/debug/lookup")
+def debug_lookup(name: str, type: str = "TXT"):
+    """Diagnostic endpoint: show exactly what the DB contains for a given query."""
+    name = name.rstrip('.').lower()
+    qtype = type.upper()
+
+    with SessionLocal() as db:
+        parts = name.split('.')
+        zone = None
+        zone_domain = None
+
+        for i in range(len(parts)):
+            candidate = ".".join(parts[i:])
+            domain = db.execute(
+                select(Domain).where(Domain.name == candidate)
+            ).scalar_one_or_none()
+            if domain:
+                zone = domain
+                zone_domain = candidate
+                break
+
+        if not zone:
+            return {"error": "no_zone", "detail": f"No zone found for {name}"}
+
+        if name == zone_domain:
+            record_name = "@"
+        else:
+            record_name = name[:-len(zone_domain) - 1]
+
+        records = db.execute(
+            select(DNSModel).where(DNSModel.domain_id == zone.id)
+        ).scalars().all()
+
+        all_records = [
+            {"id": r.id, "name": r.name, "type": r.type, "content": r.content[:80], "ttl": r.ttl}
+            for r in records
+        ]
+
+        matched = [
+            r for r in records
+            if r.name in (record_name, name) and r.type == qtype
+        ]
+
+        return {
+            "query_name": name,
+            "query_type": qtype,
+            "zone": zone_domain,
+            "zone_id": zone.id,
+            "zone_status": str(zone.status),
+            "record_name_computed": record_name,
+            "total_records_in_zone": len(records),
+            "all_record_names": sorted(set(r.name for r in records)),
+            "matched_records": [
+                {"id": r.id, "name": r.name, "type": r.type, "content": r.content, "ttl": r.ttl}
+                for r in matched
+            ],
+            "all_records": all_records,
+        }
+
 
 @app.post("/api/v1/sync")
 async def sync_data(payload: DNSSyncPayload):

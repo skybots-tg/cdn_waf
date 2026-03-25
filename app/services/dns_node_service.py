@@ -223,7 +223,19 @@ class DNSNodeService:
                 return DNSNodeCommandResult(success=False, stdout="", stderr=f"Bundle upload failed: {error}", exit_code=1, execution_time=0)
             
             unzip_cmd = "cd /opt/cdn_waf && (apt-get install -y unzip || true) && unzip -o bundle.zip && rm bundle.zip"
-            return await DNSNodeService.execute_command(node, unzip_cmd, timeout=120)
+            upload_res = await DNSNodeService.execute_command(node, unzip_cmd, timeout=120)
+            if not upload_res.success:
+                return upload_res
+
+            restart_res = await DNSNodeService.execute_command(node, "systemctl restart cdn-waf-dns", timeout=30)
+            stdout = upload_res.stdout + "\n[auto] Service restarted" if restart_res.success else upload_res.stdout + "\n[warn] Service restart failed"
+            return DNSNodeCommandResult(
+                success=upload_res.success,
+                stdout=stdout,
+                stderr=upload_res.stderr + (restart_res.stderr or ""),
+                exit_code=upload_res.exit_code,
+                execution_time=upload_res.execution_time,
+            )
         finally:
             shutil.rmtree(tmpdir, ignore_errors=True)
 

@@ -144,9 +144,14 @@
                     <h3 style="font-size: 18px; font-weight: 600;">Components Status</h3>
                     <p style="color: var(--text-secondary); font-size: 14px;">Manage software on the node</p>
                 </div>
-                <button class="btn btn-primary" onclick="installAll()">
-                    <i class="fas fa-sync-alt"></i> Full Installation (All)
-                </button>
+                <div style="display: flex; gap: 8px;">
+                    <button class="btn btn-secondary" onclick="quickDeploy()">
+                        <i class="fas fa-rocket"></i> Quick Deploy
+                    </button>
+                    <button class="btn btn-primary" onclick="installAll()">
+                        <i class="fas fa-sync-alt"></i> Full Installation (All)
+                    </button>
+                </div>
             </div>
         </div>
 
@@ -271,6 +276,32 @@
                 <p style="font-size: 13px; color: var(--text-secondary);">
                     Synchronize domains and records from Control Panel
                 </p>
+            </div>
+
+            <!-- Debug DNS -->
+            <div class="glass-card" id="card-debug">
+                <div class="flex-between mb-3">
+                    <div style="display: flex; gap: 12px; align-items: center;">
+                        <div class="component-icon"><i class="fas fa-bug"></i></div>
+                        <div>
+                            <h4 style="font-weight: 600;">Debug DNS Lookup</h4>
+                        </div>
+                    </div>
+                </div>
+                <div style="display: flex; gap: 8px; align-items: flex-end;">
+                    <div class="form-group" style="flex: 1; margin-bottom: 0;">
+                        <label class="form-label">Query name</label>
+                        <input type="text" class="form-input" id="debug-query-name" placeholder="_dmarc.example.com" style="font-size: 13px;">
+                    </div>
+                    <div class="form-group" style="width: 80px; margin-bottom: 0;">
+                        <label class="form-label">Type</label>
+                        <input type="text" class="form-input" id="debug-query-type" value="TXT" style="font-size: 13px;">
+                    </div>
+                    <button class="btn btn-sm btn-secondary" style="margin-bottom: 0; white-space: nowrap;"
+                        onclick="debugLookup(document.getElementById('debug-query-name').value, document.getElementById('debug-query-type').value)">
+                        Lookup
+                    </button>
+                </div>
             </div>
 
             <!-- DNS Service -->
@@ -614,12 +645,16 @@ async function pollTaskStatus(taskId, interval = 2000) {
 }
 
 async function installAll() {
-    if (!confirm('This will reinstall all components. Continue?')) return;
+    if (!confirm('This will reinstall all components, sync database and restart the service. Continue?')) return;
     
     switchTab('logs');
     log('Starting full installation...', 'info');
     
-    const steps = ['install_deps', 'install_python', 'install_certbot', 'update_app', 'update_config', 'install_service'];
+    const steps = [
+        'install_deps', 'install_python', 'install_certbot',
+        'update_app', 'update_config', 'run_migrations',
+        'sync_db', 'install_service', 'restart_service'
+    ];
     
     for (const step of steps) {
         await runAction(step);
@@ -722,6 +757,41 @@ async function refreshServiceLogs() {
         term.scrollTop = term.scrollHeight;
     } catch (error) {
         term.innerText = 'Error loading logs: ' + error.message;
+    }
+}
+
+async function quickDeploy() {
+    if (!confirm('Update code → Sync DB → Restart service. Continue?')) return;
+    
+    switchTab('logs');
+    log('Quick Deploy: update code + sync DB + restart...', 'info');
+    
+    for (const step of ['update_app', 'sync_db', 'restart_service']) {
+        await runAction(step);
+    }
+    
+    log('Quick Deploy completed!', 'success');
+}
+
+async function debugLookup(queryName, queryType = 'TXT') {
+    switchTab('logs');
+    log(`Debug lookup: ${queryName} ${queryType}`, 'info');
+    try {
+        const response = await fetch(`/api/v1/dns-nodes/${NODE_ID}/command`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${localStorage.getItem('access_token')}`
+            },
+            body: JSON.stringify({
+                command: `curl -s "http://127.0.0.1:8000/api/v1/debug/lookup?name=${encodeURIComponent(queryName)}&type=${encodeURIComponent(queryType)}" | python3 -m json.tool`
+            })
+        });
+        const result = await response.json();
+        if (result.stdout) log(result.stdout, 'info');
+        if (result.stderr) log(result.stderr, 'error');
+    } catch (e) {
+        log(`Error: ${e.message}`, 'error');
     }
 }
 
