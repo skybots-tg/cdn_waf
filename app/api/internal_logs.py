@@ -59,21 +59,38 @@ async def receive_logs(
         else:
             timestamp = datetime.utcnow()
 
+        raw_request_time = log_data.get("request_time")
+        try:
+            request_time_ms = int(float(raw_request_time) * 1000) if raw_request_time is not None else None
+        except (ValueError, TypeError):
+            request_time_ms = None
+
+        raw_path = log_data.get("path") or "/"
+        if "?" in raw_path:
+            path, query_string = raw_path.split("?", 1)
+        else:
+            path, query_string = raw_path, None
+
+        cache_status = log_data.get("cache_status")
+        if cache_status in ("", "-", None):
+            cache_status = None
+
         entry = RequestLog(
             timestamp=timestamp,
             domain_id=domain_id,
             edge_node_id=node.id,
             method=log_data.get("method"),
-            path=log_data.get("path"),
+            path=path,
+            query_string=query_string,
             status_code=log_data.get("status"),
             bytes_sent=log_data.get("bytes_sent", 0),
             client_ip=log_data.get("client_ip"),
-            cache_status=log_data.get("cache_status"),
+            cache_status=cache_status,
             user_agent=log_data.get("user_agent"),
             referer=log_data.get("referer"),
-            request_time=log_data.get("request_time"),
-            country_code=log_data.get("country_code"),
-            waf_status=log_data.get("waf_status"),
+            request_time=request_time_ms,
+            country_code=log_data.get("country_code") or None,
+            waf_status=log_data.get("waf_status") or None,
             waf_rule_id=log_data.get("waf_rule_id"),
         )
         log_entries.append(entry)

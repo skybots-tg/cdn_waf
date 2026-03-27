@@ -409,7 +409,8 @@ ACME_EMAIL={settings.ACME_EMAIL}
     @staticmethod
     async def issue_certificate(node: DNSNode) -> DNSNodeCommandResult:
         """Issue SSL certificate for the node hostname"""
-        cmd = f"certbot certonly --standalone -d {node.hostname} --non-interactive --agree-tos --email admin@yourcdn.ru" # TODO: use config email
+        from app.core.config import settings
+        cmd = f"certbot certonly --standalone -d {node.hostname} --non-interactive --agree-tos --email {settings.ACME_EMAIL}"
         # Check if port 80 is free first?
         return await DNSNodeService.execute_command(node, cmd)
 

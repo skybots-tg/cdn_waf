@@ -253,7 +253,17 @@ document.addEventListener('DOMContentLoaded', () => {
     loadDomainsSecurity();
     
     document.getElementById('filter-security').addEventListener('change', (e) => {
-        // TODO: Implement filter
+        const filter = e.target.value;
+        document.querySelectorAll('.security-domain-card').forEach(card => {
+            const isVulnerable = card.classList.contains('vulnerable');
+            if (!filter) {
+                card.style.display = '';
+            } else if (filter === 'protected') {
+                card.style.display = isVulnerable ? 'none' : '';
+            } else if (filter === 'vulnerable') {
+                card.style.display = isVulnerable ? '' : 'none';
+            }
+        });
     });
 });
 </script>

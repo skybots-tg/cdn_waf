@@ -103,8 +103,8 @@ class DNSNodeComponentService:
                         component=component, installed=True,
                         running=True, status_text=f"OK ({count} domains)",
                     )
-                except Exception:
-                    pass
+                except Exception as exc:
+                    logger.debug("Failed to parse psql domain count: %s", exc)
             return DNSComponentStatus(
                 component=component, installed=False,
                 running=False, status_text="Error",

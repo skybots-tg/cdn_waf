@@ -176,9 +176,9 @@ async function loadGlobalAnalytics() {
     }
 }
 
-async function loadDomainPerformance() {
+async function loadDomainPerformance(range) {
     try {
-        const response = await fetch('/api/v1/stats/domains');
+        const response = await fetch(`/api/v1/stats/domains?range=${range}`);
         const data = await response.json();
         
         const container = document.getElementById('domain-performance');
@@ -217,9 +217,9 @@ async function loadDomainPerformance() {
     }
 }
 
-async function loadGlobalGeo() {
+async function loadGlobalGeo(range) {
     try {
-        const response = await fetch('/api/v1/stats/geo');
+        const response = await fetch(`/api/v1/stats/geo?range=${range}`);
         const data = await response.json();
         
         const container = document.getElementById('global-geo');
@@ -243,9 +243,9 @@ async function loadGlobalGeo() {
     }
 }
 
-async function loadEdgeNodesPerformance() {
+async function loadEdgeNodesPerformance(range) {
     try {
-        const response = await fetch('/api/v1/stats/edge-nodes');
+        const response = await fetch(`/api/v1/stats/edge-nodes?range=${range}`);
         const data = await response.json();
         
         const container = document.getElementById('edge-nodes-performance');
@@ -437,13 +437,20 @@ async function exportGlobalData() {
 
 // Initialize
 document.addEventListener('DOMContentLoaded', () => {
+    const range = document.getElementById('time-range').value;
     loadGlobalAnalytics();
-    loadDomainPerformance();
-    loadGlobalGeo();
-    loadEdgeNodesPerformance();
+    loadDomainPerformance(range);
+    loadGlobalGeo(range);
+    loadEdgeNodesPerformance(range);
     
     // Listen for time range changes
-    document.getElementById('time-range').addEventListener('change', loadGlobalAnalytics);
+    document.getElementById('time-range').addEventListener('change', () => {
+        const range = document.getElementById('time-range').value;
+        loadGlobalAnalytics();
+        loadDomainPerformance(range);
+        loadGlobalGeo(range);
+        loadEdgeNodesPerformance(range);
+    });
 });
 </script>
 {% endblock %}

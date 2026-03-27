@@ -1,4 +1,5 @@
 """Internal API for edge nodes to pull configuration"""
+import json
 import logging
 from typing import Dict, Any, Optional
 from fastapi import APIRouter, Depends, HTTPException, Header, status
@@ -12,13 +13,23 @@ from app.models.edge_node import EdgeNode
 from app.models.domain import Domain
 from app.models.origin import Origin
 from app.models.cache import CacheRule
-from app.models.waf import WAFRule, RateLimit
+from app.models.waf import WAFRule, RateLimit, IPAccessRule
 from app.models.certificate import Certificate
 from app.services.edge_service import EdgeNodeService
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+
+def _parse_waf_conditions(conditions_str: str) -> Optional[Dict]:
+    """Safely parse WAF rule conditions JSON string."""
+    if not conditions_str:
+        return None
+    try:
+        return json.loads(conditions_str) if isinstance(conditions_str, str) else conditions_str
+    except (json.JSONDecodeError, TypeError):
+        return None
 
 
 async def verify_edge_node(
@@ -201,7 +212,12 @@ async def get_edge_config(
             select(WAFRule).where(WAFRule.domain_id == domain.id, WAFRule.enabled == True)
         )
         waf_rules = waf_rules_result.scalars().all()
-        
+
+        rate_limits_result = await db.execute(
+            select(RateLimit).where(RateLimit.domain_id == domain.id, RateLimit.enabled == True)
+        )
+        rate_limits = rate_limits_result.scalars().all()
+
         # Load TLS settings from domain_tls_settings table
         tls_settings_result = await db.execute(
             select(DomainTLSSettings).where(DomainTLSSettings.domain_id == domain.id)
@@ -282,16 +298,31 @@ async def get_edge_config(
                     }
                     for rule in cache_rules
                 ],
+                "waf_enabled": bool(waf_rules),
                 "waf_rules": [
                     {
                         "id": rule.id,
+                        "name": rule.name,
                         "priority": rule.priority,
-                        "action": rule.action,
-                        "conditions": rule.conditions
+                        "action": rule.action.value if hasattr(rule.action, 'value') else rule.action,
+                        "conditions": rule.conditions,
+                        "conditions_parsed": _parse_waf_conditions(rule.conditions),
                     }
                     for rule in waf_rules
                 ],
-                "rate_limits": [] # Skipped for brevity
+                "rate_limits": [
+                    {
+                        "id": rl.id,
+                        "name": rl.name,
+                        "path_pattern": rl.path_pattern,
+                        "limit_value": rl.limit_value,
+                        "interval_seconds": rl.interval_seconds,
+                        "action": rl.action,
+                        "response_status": rl.response_status,
+                        "block_duration": rl.block_duration,
+                    }
+                    for rl in rate_limits
+                ]
             }
             config_domains.append(domain_config)
     
@@ -366,11 +397,14 @@ async def get_certificate(
             detail="Certificate not found"
         )
     
+    from app.services.crypto_service import CryptoService
+    key_pem = CryptoService.decrypt_if_encrypted(cert.key_pem)
+
     return {
         "id": cert.id,
         "domain_id": cert.domain_id,
         "certificate": cert.cert_pem,
-        "private_key": cert.key_pem,  # TODO: Decrypt
+        "private_key": key_pem,
         "chain": cert.chain_pem,
         "not_before": cert.not_before.isoformat() if cert.not_before else None,
         "not_after": cert.not_after.isoformat() if cert.not_after else None

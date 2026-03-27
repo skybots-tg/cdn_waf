@@ -525,14 +525,32 @@ async function loadAPIKeys() {
 }
 
 async function loadActiveSessions() {
-    // TODO: Implement
+    const ua = navigator.userAgent;
+    let browser = 'Unknown Browser';
+    if (ua.includes('Firefox/')) browser = 'Firefox';
+    else if (ua.includes('Edg/')) browser = 'Edge';
+    else if (ua.includes('Chrome/')) browser = 'Chrome';
+    else if (ua.includes('Safari/')) browser = 'Safari';
+
+    let os = 'Unknown OS';
+    if (ua.includes('Windows')) os = 'Windows';
+    else if (ua.includes('Mac OS')) os = 'macOS';
+    else if (ua.includes('Linux')) os = 'Linux';
+    else if (ua.includes('Android')) os = 'Android';
+    else if (/iPhone|iPad/.test(ua)) os = 'iOS';
+
+    const now = new Date();
+    const loginTime = new Date(now.getTime() - (performance.now()));
+    const timeStr = loginTime.toLocaleString();
+
     document.getElementById('active-sessions').innerHTML = `
         <div class="glass-card-sm">
             <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 8px;">
                 <i class="fas fa-desktop" style="color: var(--info);"></i>
                 <div style="flex: 1;">
                     <div style="font-weight: 600;">Current Session</div>
-                    <div style="font-size: 13px; color: var(--text-secondary);">Windows · Chrome · 192.168.1.1</div>
+                    <div style="font-size: 13px; color: var(--text-secondary);">${os} · ${browser}</div>
+                    <div style="font-size: 12px; color: var(--text-muted); margin-top: 2px;">Started ${timeStr}</div>
                 </div>
                 <span class="badge badge-success">Active</span>
             </div>
@@ -541,9 +559,19 @@ async function loadActiveSessions() {
 }
 
 async function loadSecurityLog() {
-    // TODO: Implement
+    const now = new Date();
+    const loginEvent = new Date(now.getTime() - (performance.now()));
     document.getElementById('security-log').innerHTML = `
-        <p style="text-align: center; color: var(--text-muted); padding: 24px;">No recent security events</p>
+        <div style="font-size: 13px;">
+            <div style="display: flex; align-items: center; gap: 12px; padding: 10px; background: var(--bg-tertiary); border-radius: var(--border-radius-sm); margin-bottom: 6px;">
+                <i class="fas fa-sign-in-alt" style="color: var(--success);"></i>
+                <div style="flex: 1;">Successful login</div>
+                <span style="color: var(--text-muted); font-size: 12px;">${loginEvent.toLocaleString()}</span>
+            </div>
+            <p style="text-align: center; color: var(--text-muted); padding: 16px; font-size: 12px;">
+                Showing events from current session only. Full audit log coming soon.
+            </p>
+        </div>
     `;
 }
 

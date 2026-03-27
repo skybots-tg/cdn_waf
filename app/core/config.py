@@ -54,6 +54,10 @@ class Settings(BaseSettings):
     # Edge Nodes
     EDGE_CONFIG_UPDATE_INTERVAL: int = 30
     
+    # DNS / NS Verification
+    EXPECTED_NS: str = "ns1.flarecloud.ru,ns2.flarecloud.ru"
+    DNS_RESOLVERS: str = "8.8.8.8,8.8.4.4"
+
     # Analytics retention (days)
     ANALYTICS_RAW_LOGS_RETENTION: int = 30  # Raw request logs
     ANALYTICS_HOURLY_RETENTION: int = 90    # Hourly aggregated stats

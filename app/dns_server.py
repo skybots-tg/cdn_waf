@@ -51,9 +51,12 @@ class DBResolver(BaseResolver):
     """
     
     def __init__(self):
-        self.ns1 = "ns1.flarecloud.ru"
-        self.ns2 = "ns2.flarecloud.ru"
-        self.admin_email = "admin.flarecloud.ru"
+        from app.core.config import settings
+        ns_list = [ns.strip() for ns in settings.EXPECTED_NS.split(",")]
+        self.ns1 = ns_list[0] if len(ns_list) > 0 else "ns1.flarecloud.ru"
+        self.ns2 = ns_list[1] if len(ns_list) > 1 else "ns2.flarecloud.ru"
+        acme_email = settings.ACME_EMAIL.replace("@", ".")
+        self.admin_email = acme_email
         self.ttl = 300
         
     def get_nameservers(self, db: Session) -> List[str]:

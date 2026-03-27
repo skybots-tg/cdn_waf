@@ -1,5 +1,6 @@
 """Origin server management service"""
 import logging
+from datetime import datetime
 from typing import List, Optional
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -96,17 +97,36 @@ class OriginService:
     
     @staticmethod
     async def check_health(db: AsyncSession, origin_id: int) -> dict:
-        """Check origin health"""
+        """Perform a real HTTP health check against the origin."""
+        import httpx
+        import time
+
         origin = await OriginService.get_origin(db, origin_id)
         if not origin:
             return {"status": "error", "message": "Origin not found"}
-        
-        # TODO: Implement actual health check
-        # For now return mock data
+
+        url = f"{origin.protocol or 'http'}://{origin.origin_host}:{origin.origin_port}"
+        if origin.health_check_url:
+            url += origin.health_check_url
+        timeout = origin.health_check_timeout or 10
+
+        start = time.monotonic()
+        try:
+            async with httpx.AsyncClient(verify=False, follow_redirects=True) as client:
+                resp = await client.get(url, timeout=timeout)
+            elapsed_ms = int((time.monotonic() - start) * 1000)
+            is_healthy = 200 <= resp.status_code < 500
+        except Exception as exc:
+            elapsed_ms = int((time.monotonic() - start) * 1000)
+            logger.warning("Health check failed for origin %s: %s", origin_id, exc)
+            is_healthy = False
+
+        await OriginService.update_health_status(db, origin_id, is_healthy, elapsed_ms)
+
         return {
-            "status": "healthy",
-            "response_time": 45,
-            "last_check": None
+            "status": "healthy" if is_healthy else "unhealthy",
+            "response_time": elapsed_ms,
+            "last_check": datetime.utcnow().isoformat(),
         }
     
     @staticmethod

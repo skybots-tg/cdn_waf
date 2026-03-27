@@ -2,7 +2,7 @@
 import logging
 from typing import Optional, Dict, Any
 from datetime import datetime, timedelta, date
-from sqlalchemy import select, func, case
+from sqlalchemy import select, func, case, union_all, literal_column
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.log import RequestLog
@@ -91,18 +91,40 @@ class AnalyticsService:
             result = await db.execute(query)
             stats = result.one()
         elif range_str == "24h":
-            query = select(
-                func.sum(HourlyStats.total_requests).label("total_requests"),
-                func.sum(HourlyStats.total_bytes_sent).label("total_bandwidth"),
-                func.sum(HourlyStats.waf_blocked).label("threats_blocked"),
-                func.sum(HourlyStats.status_2xx).label("status_2xx"),
-                func.sum(HourlyStats.status_3xx).label("status_3xx"),
-                func.sum(HourlyStats.status_4xx).label("status_4xx"),
-                func.sum(HourlyStats.status_5xx).label("status_5xx"),
-                func.sum(HourlyStats.cache_hits).label("cache_hits"),
-            ).where(HourlyStats.hour >= start_time)
-            result = await db.execute(query)
-            stats = result.one()
+            current_hour_start = datetime.utcnow().replace(minute=0, second=0, microsecond=0)
+
+            hourly_q = select(
+                func.coalesce(func.sum(HourlyStats.total_requests), 0).label("total_requests"),
+                func.coalesce(func.sum(HourlyStats.total_bytes_sent), 0).label("total_bandwidth"),
+                func.coalesce(func.sum(HourlyStats.waf_blocked), 0).label("threats_blocked"),
+                func.coalesce(func.sum(HourlyStats.status_2xx), 0).label("status_2xx"),
+                func.coalesce(func.sum(HourlyStats.status_3xx), 0).label("status_3xx"),
+                func.coalesce(func.sum(HourlyStats.status_4xx), 0).label("status_4xx"),
+                func.coalesce(func.sum(HourlyStats.status_5xx), 0).label("status_5xx"),
+                func.coalesce(func.sum(HourlyStats.cache_hits), 0).label("cache_hits"),
+            ).where(HourlyStats.hour >= start_time, HourlyStats.hour < current_hour_start)
+            h_result = await db.execute(hourly_q)
+            h_stats = h_result.one()
+
+            raw_q = select(
+                func.count(RequestLog.id).label("total_requests"),
+                func.coalesce(func.sum(RequestLog.bytes_sent), 0).label("total_bandwidth"),
+                func.count(case((RequestLog.waf_status == "blocked", 1))).label("threats_blocked"),
+                func.count(case((RequestLog.status_code.between(200, 299), 1))).label("status_2xx"),
+                func.count(case((RequestLog.status_code.between(300, 399), 1))).label("status_3xx"),
+                func.count(case((RequestLog.status_code.between(400, 499), 1))).label("status_4xx"),
+                func.count(case((RequestLog.status_code.between(500, 599), 1))).label("status_5xx"),
+                func.count(case((RequestLog.cache_status == "HIT", 1))).label("cache_hits"),
+            ).where(RequestLog.timestamp >= current_hour_start)
+            r_result = await db.execute(raw_q)
+            r_stats = r_result.one()
+
+            class _MergedStats:
+                pass
+            stats = _MergedStats()
+            for attr in ("total_requests", "total_bandwidth", "threats_blocked",
+                         "status_2xx", "status_3xx", "status_4xx", "status_5xx", "cache_hits"):
+                setattr(stats, attr, (getattr(h_stats, attr) or 0) + (getattr(r_stats, attr) or 0))
         else:
             query = select(
                 func.count(RequestLog.id).label("total_requests"),
@@ -164,11 +186,16 @@ class AnalyticsService:
                 data.append((row.bytes or 0) if metric == "bandwidth" else (row.count or 0))
 
         elif range_str == "24h":
+            current_hour_start = datetime.utcnow().replace(minute=0, second=0, microsecond=0)
+
             query = select(
                 HourlyStats.hour,
                 func.sum(HourlyStats.total_requests).label("count"),
                 func.sum(HourlyStats.total_bytes_sent).label("bytes"),
-            ).where(HourlyStats.hour >= start_time)
+            ).where(
+                HourlyStats.hour >= start_time,
+                HourlyStats.hour < current_hour_start,
+            )
             if domain_id:
                 query = query.where(HourlyStats.domain_id == domain_id)
             query = query.group_by(HourlyStats.hour).order_by(HourlyStats.hour)
@@ -176,6 +203,17 @@ class AnalyticsService:
             for row in (await db.execute(query)).all():
                 labels.append(row.hour.strftime("%H:00"))
                 data.append((row.bytes or 0) if metric == "bandwidth" else (row.count or 0))
+
+            raw_q = select(
+                func.count(RequestLog.id).label("count"),
+                func.coalesce(func.sum(RequestLog.bytes_sent), 0).label("bytes"),
+            ).where(RequestLog.timestamp >= current_hour_start)
+            if domain_id:
+                raw_q = raw_q.where(RequestLog.domain_id == domain_id)
+            raw_row = (await db.execute(raw_q)).one()
+            if raw_row.count:
+                labels.append(current_hour_start.strftime("%H:00"))
+                data.append((raw_row.bytes or 0) if metric == "bandwidth" else (raw_row.count or 0))
 
         else:
             trunc_func = func.date_trunc("minute", RequestLog.timestamp)

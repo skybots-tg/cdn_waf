@@ -62,6 +62,8 @@ async def aggregate_hourly_stats(
 
     records_processed = 0
     for row in rows:
+        if row.domain_id is None:
+            continue
         stmt = insert(HourlyStats).values(
             hour=row.hour,
             domain_id=row.domain_id,

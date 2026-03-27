@@ -52,6 +52,11 @@ celery_app.conf.beat_schedule = {
         "task": "app.tasks.certificate.check_expiring_certificates",
         "schedule": crontab(minute=0),  # Every hour at :00
     },
+    # Edge tasks
+    "health-check-origins-every-5-min": {
+        "task": "app.tasks.edge.health_check_origins",
+        "schedule": crontab(minute="*/5"),
+    },
     # Analytics tasks
     "aggregate-hourly-stats": {
         "task": "app.tasks.analytics.aggregate_hourly",

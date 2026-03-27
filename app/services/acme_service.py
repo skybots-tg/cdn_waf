@@ -251,12 +251,15 @@ class AcmeService:
     def _save_cert_result(cert, pkey, fullchain_pem: str, cert_info: dict):
         """Populate a Certificate model with the issued cert data."""
         from app.models.certificate import CertificateStatus
-        cert.cert_pem = fullchain_pem
-        cert.key_pem = pkey.private_bytes(
+        from app.services.crypto_service import CryptoService
+
+        raw_key = pkey.private_bytes(
             encoding=serialization.Encoding.PEM,
             format=serialization.PrivateFormat.TraditionalOpenSSL,
             encryption_algorithm=serialization.NoEncryption(),
         ).decode()
+        cert.cert_pem = fullchain_pem
+        cert.key_pem = CryptoService.encrypt(raw_key)
         cert.status = CertificateStatus.ISSUED
         cert.not_before = cert_info["not_before"]
         cert.not_after = cert_info["not_after"]
@@ -476,20 +479,29 @@ class AcmeService:
         db: AsyncSession,
         cert_id: int
     ) -> Optional[Certificate]:
-        """Renew certificate"""
+        """Renew certificate by creating a new PENDING cert and triggering issuance."""
         from app.models.certificate import CertificateStatus, CertificateType
         from app.services.ssl_service import SSLService
 
-        cert = await SSLService.get_certificate(db, cert_id)
-        if not cert:
+        old_cert = await SSLService.get_certificate(db, cert_id)
+        if not old_cert:
             return None
 
-        if cert.type != CertificateType.ACME:
+        if old_cert.type != CertificateType.ACME:
             raise ValueError("Only ACME certificates can be auto-renewed")
 
-        # TODO: Trigger renewal task
-        cert.status = CertificateStatus.PENDING
+        new_cert = Certificate(
+            domain_id=old_cert.domain_id,
+            type=CertificateType.ACME,
+            status=CertificateStatus.PENDING,
+            common_name=old_cert.common_name,
+            acme_challenge_type=old_cert.acme_challenge_type or "http-01",
+        )
+        db.add(new_cert)
         await db.commit()
-        await db.refresh(cert)
+        await db.refresh(new_cert)
 
-        return cert
+        from app.tasks.certificate_tasks import issue_certificate
+        issue_certificate.delay(old_cert.domain_id)
+
+        return new_cert

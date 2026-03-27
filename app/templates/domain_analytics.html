@@ -398,9 +398,9 @@ function changeChartMetric(metric) {
     loadChartData(timeRange);
 }
 
-async function loadTopPages() {
+async function loadTopPages(range) {
     try {
-        const response = await fetch(`/api/v1/domains/${DOMAIN_ID}/stats/top_paths?limit=10`);
+        const response = await fetch(`/api/v1/domains/${DOMAIN_ID}/stats/top_paths?limit=10&range=${range}`);
         const data = await response.json();
         
         const container = document.getElementById('top-pages');
@@ -424,9 +424,9 @@ async function loadTopPages() {
     }
 }
 
-async function loadGeoDistribution() {
+async function loadGeoDistribution(range) {
     try {
-        const response = await fetch(`/api/v1/domains/${DOMAIN_ID}/stats/geo`);
+        const response = await fetch(`/api/v1/domains/${DOMAIN_ID}/stats/geo?range=${range}`);
         const data = await response.json();
         
         const container = document.getElementById('geo-distribution');
@@ -453,9 +453,9 @@ async function loadGeoDistribution() {
     }
 }
 
-async function loadRecentLogs() {
+async function loadRecentLogs(range) {
     try {
-        const response = await fetch(`/api/v1/domains/${DOMAIN_ID}/logs?limit=10`);
+        const response = await fetch(`/api/v1/domains/${DOMAIN_ID}/logs?limit=10&range=${range}`);
         const data = await response.json();
         
         const container = document.getElementById('recent-logs');
@@ -595,18 +595,21 @@ async function loadTopErrors() {
 
 // Initialize
 document.addEventListener('DOMContentLoaded', () => {
+    const range = document.getElementById('time-range').value;
     loadAnalytics();
-    loadTopPages();
+    loadTopPages(range);
     loadTopErrors();
-    loadGeoDistribution();
-    loadRecentLogs();
+    loadGeoDistribution(range);
+    loadRecentLogs(range);
     
     // Listen for time range changes
     document.getElementById('time-range').addEventListener('change', () => {
+        const range = document.getElementById('time-range').value;
         loadAnalytics();
-        loadTopPages();
+        loadTopPages(range);
         loadTopErrors();
-        loadGeoDistribution();
+        loadGeoDistribution(range);
+        loadRecentLogs(range);
     });
 });
 </script>

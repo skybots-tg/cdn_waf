@@ -1,19 +1,23 @@
 """DNS node background tasks"""
 import asyncio
+import logging
 import dns.resolver
 from sqlalchemy import select
 from celery import shared_task
 from app.tasks import celery_app
 from app.tasks.utils import create_task_db_session
+from app.core.config import settings
 from app.services.dns_node_service import DNSNodeService
 from app.services.domain_service import DomainService
 from app.models.dns_node import DNSNode
 from app.models.domain import Domain, DomainStatus
 
+logger = logging.getLogger(__name__)
+
+
 @celery_app.task(name="app.tasks.dns.check_dns_health")
 def check_dns_health():
     """Check health of all enabled DNS nodes"""
-    # Since Celery tasks are sync by default, we need to run async code
     return asyncio.run(_check_dns_health_async())
 
 async def _check_dns_health_async():
@@ -21,18 +25,16 @@ async def _check_dns_health_async():
     engine, SessionLocal = create_task_db_session()
     try:
         async with SessionLocal() as db:
-            # Get all enabled nodes
             result = await db.execute(select(DNSNode).where(DNSNode.enabled == True))
             nodes = result.scalars().all()
             
             results = {}
             for node in nodes:
                 try:
-                    # We reuse the check_health method which updates DB
                     health = await DNSNodeService.check_health(node, db)
                     results[node.name] = health["status"]
                 except Exception as e:
-                    print(f"Error checking DNS node {node.name}: {e}")
+                    logger.error("Error checking DNS node %s: %s", node.name, e)
                     results[node.name] = "error"
             
             return results
@@ -49,18 +51,16 @@ async def _sync_dns_nodes_async():
     engine, SessionLocal = create_task_db_session()
     try:
         async with SessionLocal() as db:
-            # Get all enabled nodes
             result = await db.execute(select(DNSNode).where(DNSNode.enabled == True))
             nodes = result.scalars().all()
             
             results = {}
             for node in nodes:
                 try:
-                    # Sync database
                     res = await DNSNodeService.sync_database(node, db)
                     results[node.name] = "success" if res.success else f"failed: {res.stderr}"
                 except Exception as e:
-                    print(f"Error syncing DNS node {node.name}: {e}")
+                    logger.error("Error syncing DNS node %s: %s", node.name, e)
                     results[node.name] = f"error: {str(e)}"
             
             return results
@@ -77,42 +77,44 @@ async def _verify_pending_domains_async():
     engine, SessionLocal = create_task_db_session()
     try:
         async with SessionLocal() as db:
-            # Get all pending domains
             result = await db.execute(select(Domain).where(Domain.status == DomainStatus.PENDING))
             domains = result.scalars().all()
             
             domain_service = DomainService(db)
             results = {}
             
-            # Expected nameservers (should be in config, but using defaults for now)
-            EXPECTED_NS = {"ns1.flarecloud.ru", "ns2.flarecloud.ru"}
+            expected_ns = {
+                ns.strip().lower()
+                for ns in settings.EXPECTED_NS.split(",")
+            }
+            resolvers = [r.strip() for r in settings.DNS_RESOLVERS.split(",")]
             
             for domain in domains:
                 try:
-                    # Check NS records
-                    # Use Google DNS to avoid local caching issues
                     resolver = dns.resolver.Resolver()
-                    resolver.nameservers = ['8.8.8.8', '8.8.4.4']
+                    resolver.nameservers = resolvers
                     
                     try:
                         answers = resolver.resolve(domain.name, 'NS')
                         ns_records = {str(r.target).rstrip('.').lower() for r in answers}
                         
-                        # Check if any of our nameservers are present
-                        if ns_records & EXPECTED_NS:
-                            print(f"Domain {domain.name} verified! Found NS: {ns_records}")
+                        if ns_records & expected_ns:
+                            logger.info("Domain %s verified! Found NS: %s", domain.name, ns_records)
                             await domain_service.verify_ns(domain)
                             results[domain.name] = "verified"
                         else:
-                            print(f"Domain {domain.name} verification failed. Found NS: {ns_records}, Expected: {EXPECTED_NS}")
+                            logger.debug(
+                                "Domain %s verification failed. Found NS: %s, Expected: %s",
+                                domain.name, ns_records, expected_ns,
+                            )
                             results[domain.name] = "failed"
                             
                     except (dns.resolver.NXDOMAIN, dns.resolver.NoAnswer, dns.resolver.LifetimeTimeout):
-                         print(f"Domain {domain.name} verification failed: No NS records found")
+                         logger.debug("Domain %s: no NS records found", domain.name)
                          results[domain.name] = "no_records"
                          
                 except Exception as e:
-                    print(f"Error verifying domain {domain.name}: {e}")
+                    logger.error("Error verifying domain %s: %s", domain.name, e)
                     results[domain.name] = f"error: {str(e)}"
             
             await db.commit()

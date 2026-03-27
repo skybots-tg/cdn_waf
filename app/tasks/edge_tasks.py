@@ -12,26 +12,92 @@ logger = logging.getLogger(__name__)
 
 @celery_app.task(name="app.tasks.edge.update_edge_config")
 def update_edge_config(node_id: int):
-    """Update configuration for specific edge node"""
-    # TODO: Implement edge node config update
-    print(f"Updating config for edge node {node_id}")
-    return {"status": "success", "node_id": node_id}
+    """Bump config_version for a specific edge node so it pulls new config on next poll."""
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    try:
+        return loop.run_until_complete(_update_edge_config_async(node_id))
+    finally:
+        loop.close()
+
+
+async def _update_edge_config_async(node_id: int):
+    from app.models.edge_node import EdgeNode
+    engine, SessionLocal = create_task_db_session()
+    try:
+        async with SessionLocal() as db:
+            result = await db.execute(select(EdgeNode).where(EdgeNode.id == node_id))
+            node = result.scalar_one_or_none()
+            if not node:
+                logger.warning("Edge node %s not found for config update", node_id)
+                return {"status": "error", "node_id": node_id, "detail": "not found"}
+            node.config_version = (node.config_version or 0) + 1
+            await db.commit()
+            logger.info("Bumped config_version for edge node %s to %s", node_id, node.config_version)
+            return {"status": "success", "node_id": node_id, "config_version": node.config_version}
+    finally:
+        await engine.dispose()
 
 
 @celery_app.task(name="app.tasks.edge.update_all_edge_configs")
 def update_all_edge_configs():
-    """Update configuration for all edge nodes"""
-    # TODO: Implement edge node config update for all nodes
-    print("Updating config for all edge nodes")
-    return {"status": "success", "updated": 0}
+    """Bump config_version for all enabled edge nodes."""
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    try:
+        return loop.run_until_complete(_update_all_edge_configs_async())
+    finally:
+        loop.close()
+
+
+async def _update_all_edge_configs_async():
+    from app.models.edge_node import EdgeNode
+    engine, SessionLocal = create_task_db_session()
+    try:
+        async with SessionLocal() as db:
+            result = await db.execute(select(EdgeNode).where(EdgeNode.enabled == True))
+            nodes = result.scalars().all()
+            for node in nodes:
+                node.config_version = (node.config_version or 0) + 1
+            await db.commit()
+            logger.info("Bumped config_version for %d edge nodes", len(nodes))
+            return {"status": "success", "updated": len(nodes)}
+    finally:
+        await engine.dispose()
 
 
 @celery_app.task(name="app.tasks.edge.health_check_origins")
 def health_check_origins():
-    """Perform health checks on all origins"""
-    # TODO: Implement origin health checking
-    print("Checking origin health")
-    return {"status": "success", "checked": 0}
+    """Perform HTTP health checks on all origins with health_check_enabled."""
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    try:
+        return loop.run_until_complete(_health_check_origins_async())
+    finally:
+        loop.close()
+
+
+async def _health_check_origins_async():
+    from app.models.origin import Origin
+    from app.services.origin_service import OriginService
+    engine, SessionLocal = create_task_db_session()
+    try:
+        async with SessionLocal() as db:
+            result = await db.execute(
+                select(Origin).where(Origin.enabled == True, Origin.health_check_enabled == True)
+            )
+            origins = result.scalars().all()
+            checked = 0
+            for origin in origins:
+                try:
+                    await OriginService.check_health(db, origin.id)
+                    checked += 1
+                except Exception as e:
+                    logger.error("Health check failed for origin %s: %s", origin.id, e)
+            logger.info("Completed health checks for %d origins", checked)
+            return {"status": "success", "checked": checked}
+    finally:
+        await engine.dispose()
 
 
 @celery_app.task(bind=True, name="app.tasks.edge.run_node_component")

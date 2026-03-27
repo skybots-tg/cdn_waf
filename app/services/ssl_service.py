@@ -99,11 +99,14 @@ class SSLService:
         else:
             cert_type_enum = cert_data.cert_type
         
+        from app.services.crypto_service import CryptoService
+        encrypted_key = CryptoService.encrypt(cert_data.key_pem)
+
         certificate = Certificate(
             domain_id=domain_id,
             type=cert_type_enum,
             cert_pem=cert_data.cert_pem,
-            key_pem=cert_data.key_pem,  # TODO: Encrypt before storing
+            key_pem=encrypted_key,
             chain_pem=cert_data.chain_pem,
             status=CertificateStatus.ISSUED,
             common_name=domain.name,

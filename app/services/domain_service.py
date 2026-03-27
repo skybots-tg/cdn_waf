@@ -1,6 +1,8 @@
 """Domain service"""
+import logging
 from typing import Optional, List
 import secrets
+import dns.exception
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -8,6 +10,8 @@ from sqlalchemy.orm import selectinload
 from app.models.domain import Domain, DomainTLSSettings, DomainStatus
 from app.models.organization import Organization
 from app.schemas.domain import DomainCreate, DomainUpdate
+
+logger = logging.getLogger(__name__)
 
 
 class DomainService:
@@ -73,15 +77,36 @@ class DomainService:
         return domain
     
     async def verify_ns(self, domain: Domain) -> bool:
-        """Verify NS records for domain"""
-        # TODO: Implement actual DNS verification
-        # For now, just mark as verified
+        """Verify NS records point to our nameservers."""
+        import dns.resolver
         from datetime import datetime
-        domain.ns_verified = True
-        domain.ns_verified_at = datetime.utcnow()
-        domain.status = DomainStatus.ACTIVE
-        await self.db.flush()
-        return True
+        from app.core.config import settings
+
+        expected_ns = set()
+        for ns in getattr(settings, "EXPECTED_NS", "ns1.flarecloud.ru,ns2.flarecloud.ru").split(","):
+            expected_ns.add(ns.strip().lower())
+
+        resolver = dns.resolver.Resolver()
+        resolver.nameservers = ["8.8.8.8", "8.8.4.4"]
+        resolver.timeout = 5
+        resolver.lifetime = 5
+
+        try:
+            answers = resolver.resolve(domain.name, "NS")
+            found_ns = {str(r.target).rstrip(".").lower() for r in answers}
+        except (dns.resolver.NXDOMAIN, dns.resolver.NoAnswer,
+                dns.resolver.NoNameservers, dns.exception.Timeout):
+            return False
+        except Exception:
+            return False
+
+        if found_ns & expected_ns:
+            domain.ns_verified = True
+            domain.ns_verified_at = datetime.utcnow()
+            domain.status = DomainStatus.ACTIVE
+            await self.db.flush()
+            return True
+        return False
     
     async def delete(self, domain: Domain) -> None:
         """Delete domain and all related records (cascades)"""

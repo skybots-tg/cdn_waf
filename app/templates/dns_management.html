@@ -203,27 +203,42 @@ async function loadDomainRecords(domainId) {
 document.addEventListener('DOMContentLoaded', () => {
     loadDomains();
     
-    // Search functionality
-    const searchInput = document.getElementById('search-domains');
-    if (searchInput) {
-        searchInput.addEventListener('input', (e) => {
-            // TODO: Implement search
+    function applyDnsFilters() {
+        const searchTerm = document.getElementById('search-domains').value.toLowerCase();
+        const statusFilter = document.getElementById('filter-status').value;
+        const proxiedFilter = document.getElementById('filter-proxied').value;
+
+        document.querySelectorAll('.domain-card').forEach(card => {
+            const name = card.querySelector('h3') ? card.querySelector('h3').textContent.toLowerCase() : '';
+            const badge = card.querySelector('.badge');
+            const status = badge ? badge.textContent.trim().toLowerCase() : '';
+
+            let visible = true;
+            if (searchTerm && !name.includes(searchTerm)) visible = false;
+            if (statusFilter && status !== statusFilter) visible = false;
+
+            card.style.display = visible ? '' : 'none';
+
+            if (visible && proxiedFilter) {
+                card.querySelectorAll('.dns-record').forEach(record => {
+                    const hasCloud = record.querySelector('.fa-cloud') !== null;
+                    if (proxiedFilter === 'proxied') {
+                        record.style.display = hasCloud ? '' : 'none';
+                    } else if (proxiedFilter === 'dns-only') {
+                        record.style.display = hasCloud ? 'none' : '';
+                    }
+                });
+            } else if (visible) {
+                card.querySelectorAll('.dns-record').forEach(record => {
+                    record.style.display = '';
+                });
+            }
         });
     }
-    
-    const filterStatus = document.getElementById('filter-status');
-    if (filterStatus) {
-        filterStatus.addEventListener('change', (e) => {
-            // TODO: Implement filter
-        });
-    }
-    
-    const filterProxied = document.getElementById('filter-proxied');
-    if (filterProxied) {
-        filterProxied.addEventListener('change', (e) => {
-            // TODO: Implement filter
-        });
-    }
+
+    document.getElementById('search-domains').addEventListener('input', applyDnsFilters);
+    document.getElementById('filter-status').addEventListener('change', applyDnsFilters);
+    document.getElementById('filter-proxied').addEventListener('change', applyDnsFilters);
 });
 </script>
 {% endblock %}

@@ -189,14 +189,16 @@ class API {
     setToken(token, refreshToken) {
         this.token = token;
         localStorage.setItem('access_token', token);
+        document.cookie = `access_token=${token}; path=/; max-age=${60*60*48}; SameSite=Lax`;
         if (refreshToken) {
             localStorage.setItem('refresh_token', refreshToken);
         }
     }
-    
+
     clearToken() {
         this.token = null;
         localStorage.removeItem('access_token');
+        document.cookie = 'access_token=; path=/; max-age=0';
         localStorage.removeItem('refresh_token');
     }
 }

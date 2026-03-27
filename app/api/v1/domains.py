@@ -89,8 +89,8 @@ async def scan_dns_records(
     else:
         try:
             resolver.nameservers = PUBLIC_RESOLVERS
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.warning("Failed to set public resolvers: %s", exc)
 
     def add_record(data: dict):
         """Добавляет запись, избегая дублей."""
@@ -213,10 +213,14 @@ async def list_domains(
     db: AsyncSession = Depends(get_db),
 ):
     """List all domains for current user's organization"""
-    organization_id = 1  # TODO: Get from user context
+    from app.api.v1.dependencies import get_user_org_ids
+    org_ids = await get_user_org_ids(current_user, db) if current_user else {1}
 
     domain_service = DomainService(db)
-    domains = await domain_service.list_by_organization(organization_id)
+    all_domains = []
+    for org_id in org_ids:
+        all_domains.extend(await domain_service.list_by_organization(org_id))
+    domains = all_domains
     
     # Filter domains by API token restrictions if applicable
     if current_user:
@@ -235,7 +239,9 @@ async def create_domain(
     db: AsyncSession = Depends(get_db),
 ):
     """Create new domain"""
-    organization_id = 1  # TODO: Get from user context
+    from app.api.v1.dependencies import get_user_org_ids
+    org_ids = await get_user_org_ids(current_user, db) if current_user else {1}
+    organization_id = min(org_ids)
 
     domain_service = DomainService(db)
 

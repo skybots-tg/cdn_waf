@@ -192,7 +192,7 @@ async function loadDomainsCDN() {
                 const requests = stats.total_requests || 0;
                 
                 return `
-                    <div class="cdn-domain-card">
+                    <div class="cdn-domain-card" data-name="${domain.name}" data-cache-ratio="${cacheRatio}" data-bandwidth="${bandwidth}">
                         <div class="flex-between mb-3">
                             <div style="flex: 1;">
                                 <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 8px;">
@@ -333,8 +333,23 @@ document.addEventListener('DOMContentLoaded', () => {
     loadDomainsCDN();
     
     document.getElementById('sort-by').addEventListener('change', (e) => {
-        // TODO: Implement sorting
-        loadDomainsCDN();
+        const sortBy = e.target.value;
+        const container = document.getElementById('domains-cdn');
+        const cards = Array.from(container.querySelectorAll('.cdn-domain-card'));
+        if (cards.length === 0) return;
+
+        cards.sort((a, b) => {
+            if (sortBy === 'name') {
+                return (a.dataset.name || '').localeCompare(b.dataset.name || '');
+            } else if (sortBy === 'cache-ratio') {
+                return parseFloat(b.dataset.cacheRatio || 0) - parseFloat(a.dataset.cacheRatio || 0);
+            } else if (sortBy === 'bandwidth') {
+                return parseFloat(b.dataset.bandwidth || 0) - parseFloat(a.dataset.bandwidth || 0);
+            }
+            return 0;
+        });
+
+        cards.forEach(card => container.appendChild(card));
     });
 });
 </script>

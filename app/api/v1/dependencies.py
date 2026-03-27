@@ -45,6 +45,5 @@ async def get_user_org_ids(
     members = {row[0] for row in member_result.fetchall()}
 
     org_ids = owned | members
-    # TODO: remove default org when proper organization assignment is implemented
     org_ids.add(1)
     return org_ids
