@@ -269,6 +269,9 @@ async def _check_edge_nodes_health_async():
                         await db.commit()
                         disabled_any = True
                         await redis_client.delete(redis_key)
+                        await redis_client.set(
+                            f"edge:auto_disabled:{node.id}", "1", expire=86400,
+                        )
                         logger.critical(
                             "Edge node %s (%s) auto-disabled after %d failures",
                             node.name, node.ip_address, failures,
@@ -282,8 +285,7 @@ async def _check_edge_nodes_health_async():
                 sync_dns_nodes.delay()
                 logger.info("Triggered DNS sync after edge node auto-disable")
 
-            # Also check disabled-but-not-offline nodes for recovery
-            await _check_disabled_edge_recovery(db, AlertService)
+            await _check_auto_disabled_recovery(db, redis_client, AlertService)
 
             return {"status": "ok", "checked": checked, "disabled_any": disabled_any}
     finally:
@@ -324,9 +326,14 @@ def _edge_failure_reason(node) -> str:
     return "; ".join(parts)
 
 
-async def _check_disabled_edge_recovery(db, alert_svc):
-    """Check disabled nodes that may have come back online."""
+async def _check_auto_disabled_recovery(db, redis_client, alert_svc):
+    """Re-enable nodes that were auto-disabled and are now responding.
+
+    Only touches nodes marked with `edge:auto_disabled:{id}` in Redis.
+    Manually disabled nodes are never probed.
+    """
     from app.models.edge_node import EdgeNode
+    from app.tasks.dns_tasks import sync_dns_nodes
 
     result = await db.execute(
         select(EdgeNode).where(
@@ -335,17 +342,35 @@ async def _check_disabled_edge_recovery(db, alert_svc):
         )
     )
     disabled_nodes = list(result.scalars().all())
+    re_enabled_any = False
+
     for node in disabled_nodes:
+        marker = await redis_client.get(f"edge:auto_disabled:{node.id}")
+        if not marker:
+            continue
+
         try:
             async with httpx.AsyncClient(timeout=EDGE_HTTP_TIMEOUT) as client:
-                resp = await client.get(f"http://{node.ip_address}", follow_redirects=False)
+                resp = await client.get(
+                    f"http://{node.ip_address}", follow_redirects=False,
+                )
                 if resp.status_code < 600:
+                    node.enabled = True
                     node.status = "online"
                     await db.commit()
-                    logger.info("Disabled edge node %s (%s) is responding again", node.name, node.ip_address)
+                    await redis_client.delete(f"edge:auto_disabled:{node.id}")
+                    re_enabled_any = True
+                    logger.info(
+                        "Auto-disabled edge node %s (%s) recovered — re-enabled",
+                        node.name, node.ip_address,
+                    )
                     await alert_svc.edge_node_recovered(node.name, node.ip_address)
         except Exception:
             pass
+
+    if re_enabled_any:
+        sync_dns_nodes.delay()
+        logger.info("Triggered DNS sync after auto-disabled edge node recovery")
 
 
 # ---------------------------------------------------------------------------

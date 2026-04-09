@@ -35,7 +35,7 @@ class AlertService:
     @staticmethod
     async def send_telegram(text: str, parse_mode: str = "HTML") -> bool:
         if not AlertService._is_configured():
-            logger.debug("Telegram alerts not configured, skipping")
+            logger.warning("Telegram alerts not configured (TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID empty), skipping")
             return False
 
         url = f"{TELEGRAM_API}/bot{settings.TELEGRAM_BOT_TOKEN}/sendMessage"
