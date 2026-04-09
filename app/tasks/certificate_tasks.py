@@ -181,7 +181,7 @@ def check_expiring_certificates():
                         if days_until_expiry <= cert.renew_before_days:
                             logger.info(f"Certificate {cert.id} ({cert.common_name}) expires in {days_until_expiry} days, triggering renewal")
                             
-                            # Check if there's already a pending renewal
+                            # Check if there's already a pending or recent failed renewal
                             pending_result = await db.execute(
                                 select(Certificate).where(
                                     Certificate.domain_id == cert.domain_id,
@@ -191,6 +191,19 @@ def check_expiring_certificates():
                             )
                             if pending_result.scalar_one_or_none():
                                 logger.info(f"Certificate {cert.id} already has a pending renewal, skipping")
+                                skipped_count += 1
+                                continue
+                            
+                            recent_failed_result = await db.execute(
+                                select(Certificate).where(
+                                    Certificate.domain_id == cert.domain_id,
+                                    Certificate.common_name == cert.common_name,
+                                    Certificate.status == CertificateStatus.FAILED,
+                                    Certificate.created_at > now - timedelta(hours=1)
+                                )
+                            )
+                            if recent_failed_result.first():
+                                logger.info(f"Certificate {cert.id} has a recent failed renewal (< 1h ago), skipping")
                                 skipped_count += 1
                                 continue
                             
