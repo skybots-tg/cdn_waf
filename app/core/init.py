@@ -83,7 +83,18 @@ async def migrate_schema():
                 await session.execute(text("ALTER TABLE origins ADD COLUMN IF NOT EXISTS consecutive_failures INTEGER DEFAULT 0 NOT NULL"))
                 await session.commit()
             
-            # 5. Check/Add api_key to edge_nodes
+            # 5. Check/Add disabled_until to origins
+            result_disabled = await session.execute(text(
+                "SELECT column_name FROM information_schema.columns "
+                "WHERE table_name='origins' AND column_name='disabled_until'"
+            ))
+
+            if not result_disabled.scalar():
+                logger.info("Adding disabled_until column to origins...")
+                await session.execute(text("ALTER TABLE origins ADD COLUMN IF NOT EXISTS disabled_until TIMESTAMP WITHOUT TIME ZONE"))
+                await session.commit()
+
+            # 6. Check/Add api_key to edge_nodes
             result_api_key = await session.execute(text(
                 "SELECT column_name FROM information_schema.columns "
                 "WHERE table_name='edge_nodes' AND column_name='api_key'"
