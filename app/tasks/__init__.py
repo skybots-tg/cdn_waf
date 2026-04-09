@@ -12,6 +12,7 @@ celery_app = Celery(
         "app.tasks.dns_tasks",
         "app.tasks.edge_tasks",
         "app.tasks.analytics_tasks",
+        "app.tasks.health_tasks",
     ]
 )
 
@@ -52,10 +53,15 @@ celery_app.conf.beat_schedule = {
         "task": "app.tasks.certificate.check_expiring_certificates",
         "schedule": crontab(minute=0),  # Every hour at :00
     },
-    # Edge tasks
+    # Edge tasks (legacy — kept for manual invocation)
     "health-check-origins-every-5-min": {
         "task": "app.tasks.edge.health_check_origins",
         "schedule": crontab(minute="*/5"),
+    },
+    # Primary health check with alerting and failsafe (every minute)
+    "check-origins-health-every-1-min": {
+        "task": "app.tasks.health.check_origins_health",
+        "schedule": 60.0,  # every 60 seconds
     },
     # Analytics tasks
     "aggregate-hourly-stats": {

@@ -39,6 +39,7 @@ class Origin(Base):
     last_health_check_response_time = Column(Float, nullable=True)  # milliseconds
     last_check_duration = Column(Float, nullable=True)  # milliseconds
     consecutive_failures = Column(Integer, default=0, nullable=False)
+    disabled_until = Column(DateTime, nullable=True)  # Temporarily out of rotation until this time
     
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

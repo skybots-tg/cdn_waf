@@ -1,10 +1,11 @@
 """Origin server management service"""
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import List, Optional
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.models.origin import Origin
 from app.schemas.cdn import OriginCreate, OriginUpdate
 
@@ -97,13 +98,22 @@ class OriginService:
     
     @staticmethod
     async def check_health(db: AsyncSession, origin_id: int) -> dict:
-        """Perform a real HTTP health check against the origin."""
+        """
+        Perform a real HTTP health check against the origin.
+        
+        Returns dict with:
+          - status: "healthy" / "unhealthy" / "error"
+          - response_time: ms
+          - changed: whether state flipped
+          - is_healthy: current state
+          - consecutive_failures: current count
+        """
         import httpx
         import time
 
         origin = await OriginService.get_origin(db, origin_id)
         if not origin:
-            return {"status": "error", "message": "Origin not found"}
+            return {"status": "error", "message": "Origin not found", "changed": False}
 
         url = f"{origin.protocol or 'http'}://{origin.origin_host}:{origin.origin_port}"
         if origin.health_check_url:
@@ -121,12 +131,15 @@ class OriginService:
             logger.warning("Health check failed for origin %s: %s", origin_id, exc)
             is_healthy = False
 
-        await OriginService.update_health_status(db, origin_id, is_healthy, elapsed_ms)
+        transition = await OriginService.update_health_status(
+            db, origin_id, is_healthy, elapsed_ms
+        )
 
         return {
             "status": "healthy" if is_healthy else "unhealthy",
             "response_time": elapsed_ms,
             "last_check": datetime.utcnow().isoformat(),
+            **transition,
         }
     
     @staticmethod
@@ -135,21 +148,63 @@ class OriginService:
         origin_id: int,
         is_healthy: bool,
         response_time: Optional[int] = None
-    ) -> bool:
-        """Update origin health status"""
-        from datetime import datetime
+    ) -> dict:
+        """
+        Update origin health status with consecutive failure tracking.
         
+        Returns dict with transition info:
+          - "changed": whether healthy/unhealthy state flipped
+          - "is_healthy": current state after update
+          - "consecutive_failures": current failure count
+        """
         origin = await OriginService.get_origin(db, origin_id)
         if not origin:
-            return False
-        
-        origin.health_status = "healthy" if is_healthy else "unhealthy"
-        origin.is_healthy = is_healthy
-        origin.last_health_check = datetime.utcnow()
-        origin.last_check_at = datetime.utcnow()
+            return {"changed": False, "is_healthy": False, "consecutive_failures": 0}
+
+        was_healthy = origin.is_healthy
+        now = datetime.utcnow()
+
+        unhealthy_threshold = (
+            origin.health_check_unhealthy_threshold
+            or settings.ORIGIN_UNHEALTHY_THRESHOLD
+        )
+        healthy_threshold = (
+            origin.health_check_healthy_threshold
+            or settings.ORIGIN_HEALTHY_THRESHOLD
+        )
+
+        if is_healthy:
+            origin.consecutive_failures = 0
+            if not was_healthy:
+                if healthy_threshold <= 1:
+                    origin.is_healthy = True
+                    origin.health_status = "healthy"
+                    origin.disabled_until = None
+            else:
+                origin.health_status = "healthy"
+                origin.disabled_until = None
+        else:
+            origin.consecutive_failures = (origin.consecutive_failures or 0) + 1
+            if was_healthy and origin.consecutive_failures >= unhealthy_threshold:
+                origin.is_healthy = False
+                origin.health_status = "unhealthy"
+                cooldown = settings.ORIGIN_COOLDOWN_SECONDS
+                origin.disabled_until = now + timedelta(seconds=cooldown)
+            elif not was_healthy:
+                cooldown = settings.ORIGIN_COOLDOWN_SECONDS
+                origin.disabled_until = now + timedelta(seconds=cooldown)
+
+        origin.last_health_check = now
+        origin.last_check_at = now
         if response_time is not None:
             origin.last_health_check_response_time = response_time
             origin.last_check_duration = response_time
-        
+
         await db.commit()
-        return True
+
+        changed = was_healthy != origin.is_healthy
+        return {
+            "changed": changed,
+            "is_healthy": origin.is_healthy,
+            "consecutive_failures": origin.consecutive_failures,
+        }

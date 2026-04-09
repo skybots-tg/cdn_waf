@@ -154,13 +154,21 @@ async def get_edge_config(
         subdomains_map = {}
         
         # Add manually defined origins (usually root @)
+        # Filter out unhealthy origins that are still on cooldown
+        now = datetime.utcnow()
         origins_result = await db.execute(
             select(Origin).where(Origin.domain_id == domain.id, Origin.enabled == True)
         )
         manual_origins = origins_result.scalars().all()
         
-        # Use manual origins for root domain if available
-        if manual_origins:
+        healthy_origins = [
+            o for o in manual_origins
+            if o.is_healthy or (o.disabled_until and o.disabled_until <= now)
+        ]
+        if not healthy_origins and manual_origins:
+            healthy_origins = manual_origins[:1]
+
+        if healthy_origins:
             subdomains_map["@"] = [
                 {
                     "id": o.id,
@@ -169,7 +177,7 @@ async def get_edge_config(
                     "is_backup": o.is_backup,
                     "weight": o.weight,
                     "protocol": o.protocol
-                } for o in manual_origins
+                } for o in healthy_origins
             ]
             
         # Process DNS records to create virtual origins for subdomains

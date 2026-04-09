@@ -68,6 +68,17 @@ class Settings(BaseSettings):
     MAXMIND_ACCOUNT_ID: Optional[str] = None
     MAXMIND_LICENSE_KEY: Optional[str] = None
     
+    # Telegram Alerts
+    TELEGRAM_BOT_TOKEN: Optional[str] = None
+    TELEGRAM_CHAT_ID: Optional[str] = None
+    TELEGRAM_ALERT_USER_ID: Optional[str] = None  # User ID to tag on critical alerts
+
+    # Health Check
+    ORIGIN_HEALTH_CHECK_INTERVAL: int = 60  # seconds between health checks
+    ORIGIN_UNHEALTHY_THRESHOLD: int = 1  # failures before marking unhealthy
+    ORIGIN_HEALTHY_THRESHOLD: int = 1  # successes before marking healthy again
+    ORIGIN_COOLDOWN_SECONDS: int = 60  # how long to keep node out of rotation
+
     # Logging
     LOG_LEVEL: str = "INFO"
     
