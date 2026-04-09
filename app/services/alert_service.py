@@ -144,3 +144,60 @@ class AlertService:
             level=AlertLevel.CRITICAL,
             tag_user=True,
         )
+
+    # ---- edge / DNS node alerts ----
+
+    @staticmethod
+    async def edge_node_down(node_name: str, ip: str, reason: str):
+        await AlertService.send_alert(
+            title="Edge-нода недоступна",
+            message=(
+                f"<b>Нода:</b> {node_name} ({ip})\n"
+                f"<b>Причина:</b> {reason}"
+            ),
+            level=AlertLevel.WARNING,
+        )
+
+    @staticmethod
+    async def edge_node_recovered(node_name: str, ip: str):
+        await AlertService.send_alert(
+            title="Edge-нода восстановлена",
+            message=(
+                f"<b>Нода:</b> {node_name} ({ip})\n\n"
+                "Нода снова отвечает. Включение в ротацию — вручную."
+            ),
+            level=AlertLevel.INFO,
+        )
+
+    @staticmethod
+    async def edge_node_disabled(node_name: str, ip: str, reason: str):
+        await AlertService.send_alert(
+            title="Edge-нода ОТКЛЮЧЕНА автоматически",
+            message=(
+                f"<b>Нода:</b> {node_name} ({ip})\n"
+                f"<b>Причина:</b> {reason}\n\n"
+                "Нода снята с балансировки, DNS sync запущен."
+            ),
+            level=AlertLevel.CRITICAL,
+            tag_user=True,
+        )
+
+    @staticmethod
+    async def dns_node_down(node_name: str, ip: str):
+        await AlertService.send_alert(
+            title="DNS-нода недоступна",
+            message=(
+                f"<b>Нода:</b> {node_name} ({ip})\n\n"
+                "DNS-сервер не отвечает на health check."
+            ),
+            level=AlertLevel.CRITICAL,
+            tag_user=True,
+        )
+
+    @staticmethod
+    async def dns_node_recovered(node_name: str, ip: str):
+        await AlertService.send_alert(
+            title="DNS-нода восстановлена",
+            message=f"<b>Нода:</b> {node_name} ({ip})",
+            level=AlertLevel.INFO,
+        )

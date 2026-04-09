@@ -29,6 +29,8 @@ celery_app.conf.update(
     result_serializer="json",
     timezone="UTC",
     enable_utc=True,
+    task_soft_time_limit=120,
+    task_time_limit=180,
 )
 
 # Periodic tasks
@@ -53,15 +55,20 @@ celery_app.conf.beat_schedule = {
         "task": "app.tasks.certificate.check_expiring_certificates",
         "schedule": crontab(minute=0),  # Every hour at :00
     },
-    # Edge tasks (legacy — kept for manual invocation)
-    "health-check-origins-every-5-min": {
-        "task": "app.tasks.edge.health_check_origins",
-        "schedule": crontab(minute="*/5"),
-    },
     # Primary health check with alerting and failsafe (every minute)
     "check-origins-health-every-1-min": {
         "task": "app.tasks.health.check_origins_health",
-        "schedule": 60.0,  # every 60 seconds
+        "schedule": 60.0,
+    },
+    # Edge node availability check (HTTP + stale heartbeat)
+    "check-edge-nodes-every-2-min": {
+        "task": "app.tasks.health.check_edge_nodes_health",
+        "schedule": crontab(minute="*/2"),
+    },
+    # DNS node availability check (HTTP)
+    "check-dns-nodes-health-every-3-min": {
+        "task": "app.tasks.health.check_dns_nodes_health",
+        "schedule": crontab(minute="*/3"),
     },
     # Analytics tasks
     "aggregate-hourly-stats": {

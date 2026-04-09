@@ -1,9 +1,10 @@
-"""Periodic origin health check task with alerting and failsafe logic"""
+"""Periodic health check tasks: origins, edge nodes, DNS nodes"""
 import asyncio
 import logging
 from collections import defaultdict
 from datetime import datetime, timedelta
 
+import httpx
 from sqlalchemy import select
 
 from app.tasks import celery_app
@@ -12,6 +13,11 @@ from app.tasks.utils import create_task_db_session
 logger = logging.getLogger(__name__)
 
 PROLONGED_OUTAGE_MINUTES = 5
+EDGE_HTTP_TIMEOUT = 5
+EDGE_STALE_HEARTBEAT_MINUTES = 5
+EDGE_FAILURE_THRESHOLD = 3
+DNS_HTTP_TIMEOUT = 5
+DNS_FAILURE_THRESHOLD = 3
 
 
 @celery_app.task(name="app.tasks.health.check_origins_health")
@@ -195,3 +201,228 @@ async def _bump_all_edge_configs(db):
         node.config_version = (node.config_version or 0) + 1
     await db.commit()
     logger.info("Bumped config_version for %d edge nodes after health state change", len(nodes))
+
+
+# ---------------------------------------------------------------------------
+# Edge node health check
+# ---------------------------------------------------------------------------
+
+@celery_app.task(name="app.tasks.health.check_edge_nodes_health", soft_time_limit=90, time_limit=120)
+def check_edge_nodes_health():
+    """Check all enabled edge nodes: HTTP probe + stale heartbeat."""
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    try:
+        return loop.run_until_complete(_check_edge_nodes_health_async())
+    finally:
+        loop.close()
+
+
+async def _check_edge_nodes_health_async():
+    from app.models.edge_node import EdgeNode
+    from app.services.alert_service import AlertService
+    from app.core.redis import redis_client
+    from app.tasks.dns_tasks import sync_dns_nodes
+
+    await redis_client.connect()
+    engine, SessionLocal = create_task_db_session()
+    try:
+        async with SessionLocal() as db:
+            result = await db.execute(
+                select(EdgeNode).where(EdgeNode.enabled == True)
+            )
+            nodes = list(result.scalars().all())
+            if not nodes:
+                return {"status": "ok", "checked": 0}
+
+            checked = 0
+            disabled_any = False
+
+            for node in nodes:
+                checked += 1
+                healthy = await _probe_edge_node(node)
+                redis_key = f"edge:failures:{node.id}"
+
+                if healthy:
+                    old_failures = int(await redis_client.get(redis_key) or 0)
+                    if old_failures > 0:
+                        await redis_client.delete(redis_key)
+                    if node.status == "offline":
+                        node.status = "online"
+                        await db.commit()
+                        logger.info("Edge node %s (%s) recovered", node.name, node.ip_address)
+                        await AlertService.edge_node_recovered(node.name, node.ip_address)
+                else:
+                    failures = int(await redis_client.get(redis_key) or 0) + 1
+                    await redis_client.set(redis_key, str(failures), expire=600)
+
+                    reason = _edge_failure_reason(node)
+                    logger.warning(
+                        "Edge node %s (%s) failing (%d/%d): %s",
+                        node.name, node.ip_address, failures, EDGE_FAILURE_THRESHOLD, reason,
+                    )
+                    await AlertService.edge_node_down(node.name, node.ip_address, reason)
+
+                    if failures >= EDGE_FAILURE_THRESHOLD:
+                        node.enabled = False
+                        node.status = "offline"
+                        await db.commit()
+                        disabled_any = True
+                        await redis_client.delete(redis_key)
+                        logger.critical(
+                            "Edge node %s (%s) auto-disabled after %d failures",
+                            node.name, node.ip_address, failures,
+                        )
+                        await AlertService.edge_node_disabled(
+                            node.name, node.ip_address,
+                            f"{failures} неудачных проверок подряд ({reason})",
+                        )
+
+            if disabled_any:
+                sync_dns_nodes.delay()
+                logger.info("Triggered DNS sync after edge node auto-disable")
+
+            # Also check disabled-but-not-offline nodes for recovery
+            await _check_disabled_edge_recovery(db, AlertService)
+
+            return {"status": "ok", "checked": checked, "disabled_any": disabled_any}
+    finally:
+        await engine.dispose()
+        await redis_client.disconnect()
+
+
+async def _probe_edge_node(node) -> bool:
+    """HTTP probe on port 80 + stale heartbeat check."""
+    now = datetime.utcnow()
+
+    if node.last_heartbeat:
+        stale = (now - node.last_heartbeat).total_seconds() > EDGE_STALE_HEARTBEAT_MINUTES * 60
+    else:
+        stale = True
+
+    http_ok = False
+    try:
+        async with httpx.AsyncClient(timeout=EDGE_HTTP_TIMEOUT) as client:
+            resp = await client.get(f"http://{node.ip_address}", follow_redirects=False)
+            http_ok = resp.status_code < 600
+    except Exception:
+        http_ok = False
+
+    return http_ok and not stale
+
+
+def _edge_failure_reason(node) -> str:
+    parts = []
+    now = datetime.utcnow()
+    if node.last_heartbeat:
+        age = int((now - node.last_heartbeat).total_seconds())
+        if age > EDGE_STALE_HEARTBEAT_MINUTES * 60:
+            parts.append(f"heartbeat устарел ({age}s)")
+    else:
+        parts.append("heartbeat отсутствует")
+    parts.append("HTTP check failed")
+    return "; ".join(parts)
+
+
+async def _check_disabled_edge_recovery(db, alert_svc):
+    """Check disabled nodes that may have come back online."""
+    from app.models.edge_node import EdgeNode
+
+    result = await db.execute(
+        select(EdgeNode).where(
+            EdgeNode.enabled == False,
+            EdgeNode.status == "offline",
+        )
+    )
+    disabled_nodes = list(result.scalars().all())
+    for node in disabled_nodes:
+        try:
+            async with httpx.AsyncClient(timeout=EDGE_HTTP_TIMEOUT) as client:
+                resp = await client.get(f"http://{node.ip_address}", follow_redirects=False)
+                if resp.status_code < 600:
+                    node.status = "online"
+                    await db.commit()
+                    logger.info("Disabled edge node %s (%s) is responding again", node.name, node.ip_address)
+                    await alert_svc.edge_node_recovered(node.name, node.ip_address)
+        except Exception:
+            pass
+
+
+# ---------------------------------------------------------------------------
+# DNS node health check
+# ---------------------------------------------------------------------------
+
+@celery_app.task(name="app.tasks.health.check_dns_nodes_health", soft_time_limit=60, time_limit=90)
+def check_dns_nodes_health():
+    """Check all enabled DNS nodes: HTTP probe to management API."""
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    try:
+        return loop.run_until_complete(_check_dns_nodes_health_async())
+    finally:
+        loop.close()
+
+
+async def _check_dns_nodes_health_async():
+    from app.models.dns_node import DNSNode
+    from app.services.alert_service import AlertService
+    from app.core.redis import redis_client
+
+    await redis_client.connect()
+    engine, SessionLocal = create_task_db_session()
+    try:
+        async with SessionLocal() as db:
+            result = await db.execute(
+                select(DNSNode).where(DNSNode.enabled == True)
+            )
+            nodes = list(result.scalars().all())
+            if not nodes:
+                return {"status": "ok", "checked": 0}
+
+            checked = 0
+            for node in nodes:
+                checked += 1
+                healthy = await _probe_dns_node(node)
+                redis_key = f"dns:failures:{node.id}"
+
+                if healthy:
+                    old_failures = int(await redis_client.get(redis_key) or 0)
+                    if old_failures > 0:
+                        await redis_client.delete(redis_key)
+                    if node.status == "offline":
+                        node.status = "online"
+                        await db.commit()
+                        logger.info("DNS node %s (%s) recovered", node.name, node.ip_address)
+                        await AlertService.dns_node_recovered(node.name, node.ip_address)
+                else:
+                    failures = int(await redis_client.get(redis_key) or 0) + 1
+                    await redis_client.set(redis_key, str(failures), expire=600)
+
+                    logger.warning(
+                        "DNS node %s (%s) failing (%d/%d)",
+                        node.name, node.ip_address, failures, DNS_FAILURE_THRESHOLD,
+                    )
+
+                    if failures >= DNS_FAILURE_THRESHOLD:
+                        node.status = "offline"
+                        await db.commit()
+                        await AlertService.dns_node_down(node.name, node.ip_address)
+                        logger.critical(
+                            "DNS node %s (%s) marked offline after %d failures",
+                            node.name, node.ip_address, failures,
+                        )
+
+            return {"status": "ok", "checked": checked}
+    finally:
+        await engine.dispose()
+        await redis_client.disconnect()
+
+
+async def _probe_dns_node(node) -> bool:
+    """HTTP probe to the DNS node management API."""
+    try:
+        async with httpx.AsyncClient(timeout=DNS_HTTP_TIMEOUT) as client:
+            resp = await client.get(f"http://{node.ip_address}:8000/health")
+            return resp.status_code == 200
+    except Exception:
+        return False

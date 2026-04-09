@@ -100,7 +100,7 @@ async def _health_check_origins_async():
         await engine.dispose()
 
 
-@celery_app.task(bind=True, name="app.tasks.edge.run_node_component")
+@celery_app.task(bind=True, name="app.tasks.edge.run_node_component", soft_time_limit=300, time_limit=360)
 def run_node_component_task(
     self,
     node_id: int,
