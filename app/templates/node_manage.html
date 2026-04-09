@@ -217,6 +217,9 @@
                     </p>
                 </div>
                 <div style="display: flex; gap: 12px;">
+                    <button class="btn btn-secondary" onclick="showCopyNginxModal()">
+                        <i class="fas fa-copy"></i> Скопировать с другой ноды
+                    </button>
                     <button class="btn btn-secondary" onclick="resetNginxRules()">
                         <i class="fas fa-undo"></i> Сбросить
                     </button>
@@ -725,9 +728,53 @@
         </div>
     </div>
 
+    <!-- Modal: Copy Nginx Rules -->
+    <div class="modal-overlay" id="copy-nginx-modal" style="display: none;">
+        <div class="glass-card" style="max-width: 500px; width: 90%; margin: auto;">
+            <div class="flex-between mb-3">
+                <h3 style="font-size: 18px; font-weight: 600;">
+                    <i class="fas fa-copy"></i> Скопировать конфигурацию Nginx
+                </h3>
+                <button class="btn btn-icon btn-sm btn-secondary" onclick="closeCopyNginxModal()">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <p style="color: var(--text-secondary); font-size: 14px; margin-bottom: 20px;">
+                Выберите ноду, с которой хотите скопировать настройки Nginx.
+                Текущие правила на этой ноде будут заменены.
+            </p>
+            <div class="form-group">
+                <label class="form-label">Нода-источник</label>
+                <select class="form-input" id="copy-source-node" style="cursor: pointer;">
+                    <option value="">Загрузка списка нод...</option>
+                </select>
+            </div>
+            <div style="display: flex; gap: 12px; justify-content: flex-end; margin-top: 24px;">
+                <button class="btn btn-secondary" onclick="closeCopyNginxModal()">Отмена</button>
+                <button class="btn btn-primary" onclick="copyNginxFromNode()" id="copy-nginx-btn">
+                    <i class="fas fa-copy"></i> Скопировать и применить
+                </button>
+            </div>
+        </div>
+    </div>
+
 </div>
 
 <style>
+.modal-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.6);
+    backdrop-filter: blur(4px);
+    z-index: 1000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
 .tabs {
     display: flex;
     gap: 12px;

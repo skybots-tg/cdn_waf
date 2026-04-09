@@ -383,6 +383,114 @@ async function previewNginxConfig() {
 }
 
 // ============================================
+// Copy Nginx Rules from Another Node
+// ============================================
+
+/**
+ * Show the copy nginx rules modal and load available nodes
+ */
+async function showCopyNginxModal() {
+    const modal = document.getElementById('copy-nginx-modal');
+    const select = document.getElementById('copy-source-node');
+    
+    if (!modal || !select) return;
+    
+    modal.style.display = 'flex';
+    select.innerHTML = '<option value="">Загрузка...</option>';
+    
+    try {
+        const nodes = await api.get('/edge-nodes/');
+        select.innerHTML = '<option value="">— Выберите ноду —</option>';
+        
+        nodes
+            .filter(n => n.id !== NODE_ID && n.enabled)
+            .forEach(n => {
+                const opt = document.createElement('option');
+                opt.value = n.id;
+                opt.textContent = `${n.name} (${n.ip_address}) — ${n.location_code}`;
+                select.appendChild(opt);
+            });
+        
+        if (select.options.length <= 1) {
+            select.innerHTML = '<option value="">Нет доступных нод для копирования</option>';
+        }
+    } catch (error) {
+        select.innerHTML = '<option value="">Ошибка загрузки списка нод</option>';
+        console.error('Failed to load nodes for copy:', error);
+    }
+}
+
+/**
+ * Close the copy nginx rules modal
+ */
+function closeCopyNginxModal() {
+    const modal = document.getElementById('copy-nginx-modal');
+    if (modal) modal.style.display = 'none';
+}
+
+/**
+ * Execute copying nginx rules from selected source node
+ */
+async function copyNginxFromNode() {
+    const select = document.getElementById('copy-source-node');
+    const sourceNodeId = select ? select.value : '';
+    
+    if (!sourceNodeId) {
+        showNotification('Выберите ноду-источник', 'error');
+        return;
+    }
+    
+    const sourceName = select.options[select.selectedIndex].textContent;
+    
+    if (!confirm(`Скопировать конфигурацию Nginx с ноды "${sourceName}" на текущую ноду?\n\nТекущие настройки будут заменены.`)) {
+        return;
+    }
+    
+    const btn = document.getElementById('copy-nginx-btn');
+    if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Копирование...';
+    }
+    
+    try {
+        const response = await api.post(
+            `/edge-nodes/${NODE_ID}/nginx-rules/copy-from/${sourceNodeId}`
+        );
+        
+        closeCopyNginxModal();
+        
+        if (response.success) {
+            showNotification('Конфигурация Nginx скопирована и применена!', 'success');
+            await loadNginxRules();
+            if (typeof log === 'function') {
+                log(`Nginx rules copied from node ${sourceName}`, 'success');
+                if (response.config_test_output) {
+                    log(response.config_test_output);
+                }
+            }
+        } else {
+            showNotification(`Ошибка: ${response.message}`, 'error');
+            if (typeof log === 'function') {
+                log(`Failed to copy nginx rules: ${response.message}`, 'error');
+                if (response.config_test_output) {
+                    log(response.config_test_output, 'error');
+                }
+            }
+        }
+    } catch (error) {
+        showNotification(`Ошибка: ${error.message}`, 'error');
+        if (typeof log === 'function') {
+            log(`Error copying nginx rules: ${error.message}`, 'error');
+        }
+    } finally {
+        if (btn) {
+            btn.disabled = false;
+            btn.innerHTML = '<i class="fas fa-copy"></i> Скопировать и применить';
+        }
+    }
+}
+
+// ============================================
 // UI Initialization
 // ============================================
 

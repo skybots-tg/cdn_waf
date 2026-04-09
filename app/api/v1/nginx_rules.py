@@ -188,6 +188,63 @@ async def reset_nginx_rules(
     return result
 
 
+@router.post("/{node_id}/nginx-rules/copy-from/{source_node_id}", response_model=NginxApplyResult)
+async def copy_nginx_rules(
+    node_id: int,
+    source_node_id: int,
+    test_only: bool = False,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_superuser)
+):
+    """
+    Copy Nginx rules from one edge node to another.
+    
+    Reads the current nginx rules configuration from source_node_id
+    and applies it to node_id (target).
+    
+    Parameters:
+    - node_id: Target node to receive the configuration
+    - source_node_id: Source node to copy configuration from
+    - test_only: If true, only test configuration without applying
+    """
+    if node_id == source_node_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Source and target nodes must be different"
+        )
+    
+    source_node = await EdgeNodeService.get_node(db, source_node_id)
+    if not source_node:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Source edge node not found"
+        )
+    
+    if not source_node.enabled:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Source edge node is disabled"
+        )
+    
+    target_node = await EdgeNodeService.get_node(db, node_id)
+    if not target_node:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Target edge node not found"
+        )
+    
+    if not target_node.enabled:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Target edge node is disabled"
+        )
+    
+    result = await NginxRulesService.copy_rules(
+        source_node, target_node, test_only=test_only
+    )
+    return result
+
+
 @router.get("/{node_id}/nginx-status", response_model=Dict[str, Any])
 async def get_nginx_status(
     node_id: int,

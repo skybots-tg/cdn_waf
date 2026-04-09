@@ -377,6 +377,28 @@ class NginxRulesService:
             )
     
     @staticmethod
+    async def copy_rules(
+        source_node: EdgeNode,
+        target_node: EdgeNode,
+        test_only: bool = False
+    ) -> NginxApplyResult:
+        """Copy Nginx rules from source node to target node"""
+        try:
+            config = await NginxRulesService.get_rules(source_node)
+            return await NginxRulesService.apply_rules(
+                target_node, config, test_only=test_only
+            )
+        except Exception as e:
+            logger.error(
+                f"Failed to copy nginx rules from {source_node.name} "
+                f"to {target_node.name}: {e}"
+            )
+            return NginxApplyResult(
+                success=False,
+                message=f"Error copying rules: {str(e)}"
+            )
+
+    @staticmethod
     async def get_nginx_status(node: EdgeNode) -> Dict[str, Any]:
         """Get current nginx status from edge node"""
         result = await EdgeNodeService.execute_command(
