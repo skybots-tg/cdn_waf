@@ -379,7 +379,7 @@ async def _check_auto_disabled_recovery(db, redis_client, alert_svc):
 
 @celery_app.task(name="app.tasks.health.check_dns_nodes_health", soft_time_limit=60, time_limit=90)
 def check_dns_nodes_health():
-    """Check all enabled DNS nodes: HTTP probe to management API."""
+    """Check all enabled DNS nodes: real DNS query + HTTP probe."""
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
     try:
@@ -390,6 +390,7 @@ def check_dns_nodes_health():
 
 async def _check_dns_nodes_health_async():
     from app.models.dns_node import DNSNode
+    from app.models.domain import Domain, DomainStatus
     from app.services.alert_service import AlertService
     from app.core.redis import redis_client
 
@@ -404,10 +405,14 @@ async def _check_dns_nodes_health_async():
             if not nodes:
                 return {"status": "ok", "checked": 0}
 
+            test_domain = await _pick_test_domain(db)
+
             checked = 0
+            disabled_any = False
+
             for node in nodes:
                 checked += 1
-                healthy = await _probe_dns_node(node)
+                healthy = await _probe_dns_node(node, test_domain)
                 redis_key = f"dns:failures:{node.id}"
 
                 if healthy:
@@ -429,25 +434,105 @@ async def _check_dns_nodes_health_async():
                     )
 
                     if failures >= DNS_FAILURE_THRESHOLD:
+                        node.enabled = False
                         node.status = "offline"
                         await db.commit()
-                        await AlertService.dns_node_down(node.name, node.ip_address)
+                        disabled_any = True
+                        await redis_client.delete(redis_key)
+                        await redis_client.set(
+                            f"dns:auto_disabled:{node.id}", "1", expire=86400,
+                        )
                         logger.critical(
-                            "DNS node %s (%s) marked offline after %d failures",
+                            "DNS node %s (%s) auto-disabled after %d failures",
                             node.name, node.ip_address, failures,
                         )
+                        await AlertService.dns_node_down(node.name, node.ip_address)
 
-            return {"status": "ok", "checked": checked}
+            await _check_auto_disabled_dns_recovery(db, redis_client, AlertService, test_domain)
+
+            return {"status": "ok", "checked": checked, "disabled_any": disabled_any}
     finally:
         await engine.dispose()
         await redis_client.disconnect()
 
 
-async def _probe_dns_node(node) -> bool:
-    """HTTP probe to the DNS node management API."""
+async def _pick_test_domain(db) -> str | None:
+    """Pick any active domain to use as a DNS probe query."""
+    from app.models.domain import Domain, DomainStatus
+
+    result = await db.execute(
+        select(Domain.name)
+        .where(Domain.status == DomainStatus.ACTIVE)
+        .limit(1)
+    )
+    row = result.scalar_one_or_none()
+    return row if row else None
+
+
+async def _probe_dns_node(node, test_domain: str | None) -> bool:
+    """Check DNS node with a real DNS A-query, fallback to HTTP health."""
+    dns_ok = False
+    if test_domain:
+        dns_ok = await _dns_query_check(node.ip_address, test_domain)
+
+    http_ok = False
     try:
         async with httpx.AsyncClient(timeout=DNS_HTTP_TIMEOUT) as client:
             resp = await client.get(f"http://{node.ip_address}:8000/health")
-            return resp.status_code == 200
+            http_ok = resp.status_code == 200
     except Exception:
-        return False
+        http_ok = False
+
+    if test_domain:
+        return dns_ok and http_ok
+    return http_ok
+
+
+async def _dns_query_check(nameserver_ip: str, domain: str) -> bool:
+    """Send a real DNS A-query to the nameserver and check for any response."""
+    import dns.resolver
+
+    def _resolve():
+        resolver = dns.resolver.Resolver(configure=False)
+        resolver.nameservers = [nameserver_ip]
+        resolver.lifetime = DNS_HTTP_TIMEOUT
+        try:
+            answers = resolver.resolve(domain, "A")
+            return len(answers) > 0
+        except Exception:
+            return False
+
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(None, _resolve)
+
+
+async def _check_auto_disabled_dns_recovery(db, redis_client, alert_svc, test_domain):
+    """Re-enable DNS nodes that were auto-disabled and are now responding."""
+    from app.models.dns_node import DNSNode
+
+    result = await db.execute(
+        select(DNSNode).where(
+            DNSNode.enabled == False,
+            DNSNode.status == "offline",
+        )
+    )
+    disabled_nodes = list(result.scalars().all())
+    re_enabled_any = False
+
+    for node in disabled_nodes:
+        marker = await redis_client.get(f"dns:auto_disabled:{node.id}")
+        if not marker:
+            continue
+
+        healthy = await _probe_dns_node(node, test_domain)
+        if healthy:
+            node.enabled = True
+            node.status = "online"
+            await db.commit()
+            await redis_client.delete(f"dns:auto_disabled:{node.id}")
+            re_enabled_any = True
+            logger.info(
+                "Auto-disabled DNS node %s (%s) recovered — re-enabled",
+                node.name, node.ip_address,
+            )
+            await alert_svc.dns_node_recovered(node.name, node.ip_address)
