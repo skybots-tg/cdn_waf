@@ -247,7 +247,8 @@ class DNSNodeService:
     @staticmethod
     async def update_config(node: DNSNode) -> DNSNodeCommandResult:
         from app.core.config import settings
-        # Create a full .env file with all required settings
+        from urllib.parse import urlparse
+
         env_content = f"""
 DATABASE_URL={settings.DATABASE_URL}
 SECRET_KEY={settings.SECRET_KEY}
@@ -257,21 +258,47 @@ CELERY_RESULT_BACKEND={settings.CELERY_RESULT_BACKEND}
 JWT_SECRET_KEY={settings.JWT_SECRET_KEY}
 ACME_EMAIL={settings.ACME_EMAIL}
 """
-        
+
         with tempfile.NamedTemporaryFile(mode='w', delete=False) as tmp_env:
-             tmp_env.write(env_content)
-             env_path = tmp_env.name
-        
+            tmp_env.write(env_content)
+            env_path = tmp_env.name
+
         try:
-             await DNSNodeService.execute_command(node, "mkdir -p /opt/cdn_waf")
-             success, error = await DNSNodeService.upload_file(node, env_path, "/opt/cdn_waf/.env")
-             if not success:
-                  return DNSNodeCommandResult(success=False, stdout="", stderr=f"Config upload failed: {error}", exit_code=1, execution_time=0)
+            await DNSNodeService.execute_command(node, "mkdir -p /opt/cdn_waf")
+            success, error = await DNSNodeService.upload_file(node, env_path, "/opt/cdn_waf/.env")
+            if not success:
+                return DNSNodeCommandResult(success=False, stdout="", stderr=f"Config upload failed: {error}", exit_code=1, execution_time=0)
         finally:
-             if os.path.exists(env_path):
-                 os.unlink(env_path)
-        
-        return DNSNodeCommandResult(success=True, stdout="Config updated", stderr="", exit_code=0, execution_time=0)
+            if os.path.exists(env_path):
+                os.unlink(env_path)
+
+        stdout_parts = ["Config uploaded"]
+
+        db_url = str(settings.DATABASE_URL).replace("+asyncpg", "")
+        parsed = urlparse(db_url)
+        db_user = parsed.username
+        db_pass = parsed.password
+        db_name = parsed.path.lstrip("/")
+        db_host = parsed.hostname
+
+        if db_user and db_pass and db_name and db_host in ("localhost", "127.0.0.1"):
+            safe_pass = db_pass.replace("'", "'\\''")
+            pg_setup = (
+                f"sudo -u postgres psql -tc \"SELECT 1 FROM pg_roles WHERE rolname = '{db_user}'\" | grep -q 1"
+                f" || sudo -u postgres psql -c \"CREATE USER \\\"{db_user}\\\" WITH PASSWORD '{safe_pass}';\"; "
+                f"sudo -u postgres psql -c \"ALTER USER \\\"{db_user}\\\" WITH PASSWORD '{safe_pass}';\"; "
+                f"sudo -u postgres psql -tc \"SELECT 1 FROM pg_database WHERE datname = '{db_name}'\" | grep -q 1"
+                f" || sudo -u postgres psql -c \"CREATE DATABASE \\\"{db_name}\\\" OWNER \\\"{db_user}\\\";\"; "
+                f"sudo -u postgres psql -c \"GRANT ALL PRIVILEGES ON DATABASE \\\"{db_name}\\\" TO \\\"{db_user}\\\";\""
+            )
+            pg_res = await DNSNodeService.execute_command(node, pg_setup, timeout=30)
+            if pg_res.success:
+                stdout_parts.append(f"PostgreSQL configured (user={db_user}, db={db_name})")
+            else:
+                stdout_parts.append(f"PostgreSQL setup warning: {pg_res.stderr}")
+                logger.warning("PostgreSQL setup on %s: %s", node.name, pg_res.stderr)
+
+        return DNSNodeCommandResult(success=True, stdout="; ".join(stdout_parts), stderr="", exit_code=0, execution_time=0)
 
     @staticmethod
     async def install_service(node: DNSNode) -> DNSNodeCommandResult:

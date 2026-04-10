@@ -761,12 +761,12 @@ async function refreshServiceLogs() {
 }
 
 async function quickDeploy() {
-    if (!confirm('Update code → Migrations → Sync DB → Restart service. Continue?')) return;
+    if (!confirm('Config → Update code → Migrations → Sync DB → Restart service. Continue?')) return;
     
     switchTab('logs');
     log('Quick Deploy: update code + migrations + sync DB + restart...', 'info');
     
-    for (const step of ['update_app', 'run_migrations', 'sync_db', 'restart_service']) {
+    for (const step of ['update_config', 'update_app', 'run_migrations', 'sync_db', 'restart_service']) {
         await runAction(step);
     }
     
