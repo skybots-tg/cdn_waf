@@ -37,12 +37,6 @@ async def get_nginx_rules(
             detail="Edge node not found"
         )
     
-    if not node.enabled:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Edge node is disabled"
-        )
-    
     try:
         config = await NginxRulesService.get_rules(node)
         nginx_status = await NginxRulesService.get_nginx_status(node)
@@ -87,12 +81,6 @@ async def update_nginx_rules(
             detail="Edge node not found"
         )
     
-    if not node.enabled:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Edge node is disabled"
-        )
-    
     result = await NginxRulesService.apply_rules(node, rules, test_only=test_only)
     return result
 
@@ -115,12 +103,6 @@ async def patch_nginx_rules(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Edge node not found"
-        )
-    
-    if not node.enabled:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Edge node is disabled"
         )
     
     # Get current config
@@ -177,12 +159,6 @@ async def reset_nginx_rules(
             detail="Edge node not found"
         )
     
-    if not node.enabled:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Edge node is disabled"
-        )
-    
     default_config = NginxRulesConfig()
     result = await NginxRulesService.apply_rules(node, default_config)
     return result
@@ -220,23 +196,11 @@ async def copy_nginx_rules(
             detail="Source edge node not found"
         )
     
-    if not source_node.enabled:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Source edge node is disabled"
-        )
-    
     target_node = await EdgeNodeService.get_node(db, node_id)
     if not target_node:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Target edge node not found"
-        )
-    
-    if not target_node.enabled:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Target edge node is disabled"
         )
     
     result = await NginxRulesService.copy_rules(
@@ -259,12 +223,6 @@ async def get_nginx_status(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Edge node not found"
-        )
-    
-    if not node.enabled:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Edge node is disabled"
         )
     
     return await NginxRulesService.get_nginx_status(node)

@@ -344,6 +344,22 @@ a.glass-card:hover {
     transform: translateX(24px);
 }
 
+.toggle-switch.toggle-sm {
+    width: 36px;
+    height: 20px;
+}
+
+.toggle-switch.toggle-sm .toggle-slider:before {
+    height: 14px;
+    width: 14px;
+    left: 2px;
+    bottom: 2px;
+}
+
+.toggle-switch.toggle-sm input:checked + .toggle-slider:before {
+    transform: translateX(16px);
+}
+
 /* Badge */
 .badge {
     display: inline-flex;

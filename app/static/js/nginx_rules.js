@@ -403,11 +403,12 @@ async function showCopyNginxModal() {
         select.innerHTML = '<option value="">— Выберите ноду —</option>';
         
         nodes
-            .filter(n => n.id !== NODE_ID && n.enabled)
+            .filter(n => n.id !== NODE_ID)
             .forEach(n => {
                 const opt = document.createElement('option');
                 opt.value = n.id;
-                opt.textContent = `${n.name} (${n.ip_address}) — ${n.location_code}`;
+                const label = n.enabled ? '' : ' [выкл]';
+                opt.textContent = `${n.name} (${n.ip_address}) — ${n.location_code}${label}`;
                 select.appendChild(opt);
             });
         

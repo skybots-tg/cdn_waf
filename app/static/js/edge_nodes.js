@@ -58,7 +58,7 @@ function renderNodes(nodes) {
     if (nodes.length === 0) {
         tbody.innerHTML = `
             <tr>
-                <td colspan="9" style="text-align: center; padding: 32px; color: var(--text-muted);">
+                <td colspan="10" style="text-align: center; padding: 32px; color: var(--text-muted);">
                     <i class="fas fa-inbox"></i><br>
                     No edge nodes found
                 </td>
@@ -79,6 +79,12 @@ function renderNodes(nodes) {
             <td>
                 <div style="font-family: monospace; font-size: 13px;">${escapeHtml(node.ip_address)}</div>
                 ${node.ipv6_address ? `<div style="font-family: monospace; font-size: 11px; color: var(--text-muted);">${escapeHtml(node.ipv6_address)}</div>` : ''}
+            </td>
+            <td>
+                <label class="toggle-switch toggle-sm" title="${node.enabled ? 'Включена' : 'Выключена'}">
+                    <input type="checkbox" ${node.enabled ? 'checked' : ''} onchange="toggleNodeEnabled(${node.id}, this.checked)">
+                    <span class="toggle-slider"></span>
+                </label>
             </td>
             <td>${getStatusBadge(node.status)}</td>
             <td>${node.cpu_usage !== null ? `${node.cpu_usage.toFixed(1)}%` : '-'}</td>
@@ -365,6 +371,34 @@ async function deleteNode(nodeId) {
     } catch (error) {
         console.error('Error deleting node:', error);
         showNotification('Failed to delete edge node', 'error');
+    }
+}
+
+// Toggle node enabled/disabled
+async function toggleNodeEnabled(nodeId, enabled) {
+    try {
+        const response = await fetch(`/api/v1/edge-nodes/${nodeId}`, {
+            method: 'PATCH',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${getToken()}`
+            },
+            body: JSON.stringify({ enabled })
+        });
+        
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.detail || 'Failed to update node');
+        }
+        
+        showNotification(
+            enabled ? 'Нода включена' : 'Нода выключена',
+            'success'
+        );
+    } catch (error) {
+        console.error('Error toggling node:', error);
+        showNotification(error.message, 'error');
+        loadNodes();
     }
 }
 
