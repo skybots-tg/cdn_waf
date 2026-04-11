@@ -368,7 +368,7 @@ async def sync_data(payload: DNSSyncPayload):
             if payload.users:
                 insert_rows(
                     "users",
-                    [u.dict() for u in payload.users],
+                    [u.model_dump() for u in payload.users],
                     defaults={
                         "totp_enabled": False,
                         "totp_secret": None,
@@ -377,21 +377,21 @@ async def sync_data(payload: DNSSyncPayload):
             
             # 3. Insert Organizations
             if payload.organizations:
-                insert_rows("organizations", [o.dict() for o in payload.organizations])
+                insert_rows("organizations", [o.model_dump() for o in payload.organizations])
             
             # 4. Insert Domains
             if payload.domains:
-                insert_rows("domains", [d.dict() for d in payload.domains])
+                insert_rows("domains", [d.model_dump() for d in payload.domains])
             
             # 5. Insert DNS Records
             if payload.records:
-                insert_rows("dns_records", [r.dict() for r in payload.records])
+                insert_rows("dns_records", [r.model_dump() for r in payload.records])
             
             # 6. Insert Edge Nodes
             if payload.edge_nodes:
                 insert_rows(
                     "edge_nodes",
-                    [n.dict() for n in payload.edge_nodes],
+                    [n.model_dump() for n in payload.edge_nodes],
                     defaults={
                         "config_version": 0,
                         "last_heartbeat": None,
@@ -411,7 +411,7 @@ async def sync_data(payload: DNSSyncPayload):
             if payload.dns_nodes:
                 insert_rows(
                     "dns_nodes",
-                    [n.dict() for n in payload.dns_nodes],
+                    [n.model_dump() for n in payload.dns_nodes],
                     defaults={
                         "ssh_host": None,
                         "ssh_port": None,

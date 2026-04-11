@@ -7,45 +7,40 @@ Create Date: 2026-03-25
 from alembic import op
 import sqlalchemy as sa
 
-from app.models.organization import OrganizationRole
-from app.models.domain import DomainStatus, TLSMode
-from app.models.cache import CacheRuleType
-from app.models.waf import WAFAction
-from app.models.certificate import CertificateType, CertificateStatus
-from app.models.certificate_log import CertificateLogLevel
-
 revision = "0001"
 down_revision = None
 branch_labels = None
 depends_on = None
 
+ENUM_DEFINITIONS = {
+    "organizationrole": ("owner", "admin", "member", "readonly"),
+    "domainstatus": ("pending", "active", "suspended", "deleted"),
+    "tlsmode": ("flexible", "full", "strict"),
+    "cacheruletype": ("cache", "bypass", "edge_cache_ttl"),
+    "wafaction": ("allow", "block", "challenge", "log"),
+    "certificatetype": ("acme", "manual"),
+    "certificatestatus": ("pending", "issued", "expired", "revoked", "failed"),
+    "certificateloglevel": ("info", "warning", "error", "success"),
+}
+
 
 def _create_enums(bind):
-    for enum_type in (
-        sa.Enum(OrganizationRole, name="organizationrole"),
-        sa.Enum(DomainStatus, name="domainstatus"),
-        sa.Enum(TLSMode, name="tlsmode"),
-        sa.Enum(CacheRuleType, name="cacheruletype"),
-        sa.Enum(WAFAction, name="wafaction"),
-        sa.Enum(CertificateType, name="certificatetype"),
-        sa.Enum(CertificateStatus, name="certificatestatus"),
-        sa.Enum(CertificateLogLevel, name="certificateloglevel"),
-    ):
-        enum_type.create(bind, checkfirst=True)
+    for name, values in ENUM_DEFINITIONS.items():
+        sa.Enum(*values, name=name).create(bind, checkfirst=True)
 
 
 def upgrade() -> None:
     bind = op.get_bind()
     _create_enums(bind)
 
-    organization_role = sa.Enum(OrganizationRole, name="organizationrole", create_type=False)
-    domain_status = sa.Enum(DomainStatus, name="domainstatus", create_type=False)
-    tls_mode = sa.Enum(TLSMode, name="tlsmode", create_type=False)
-    cache_rule_type = sa.Enum(CacheRuleType, name="cacheruletype", create_type=False)
-    waf_action = sa.Enum(WAFAction, name="wafaction", create_type=False)
-    certificate_type = sa.Enum(CertificateType, name="certificatetype", create_type=False)
-    certificate_status = sa.Enum(CertificateStatus, name="certificatestatus", create_type=False)
-    certificate_log_level = sa.Enum(CertificateLogLevel, name="certificateloglevel", create_type=False)
+    organization_role = sa.Enum(*ENUM_DEFINITIONS["organizationrole"], name="organizationrole", create_type=False)
+    domain_status = sa.Enum(*ENUM_DEFINITIONS["domainstatus"], name="domainstatus", create_type=False)
+    tls_mode = sa.Enum(*ENUM_DEFINITIONS["tlsmode"], name="tlsmode", create_type=False)
+    cache_rule_type = sa.Enum(*ENUM_DEFINITIONS["cacheruletype"], name="cacheruletype", create_type=False)
+    waf_action = sa.Enum(*ENUM_DEFINITIONS["wafaction"], name="wafaction", create_type=False)
+    certificate_type = sa.Enum(*ENUM_DEFINITIONS["certificatetype"], name="certificatetype", create_type=False)
+    certificate_status = sa.Enum(*ENUM_DEFINITIONS["certificatestatus"], name="certificatestatus", create_type=False)
+    certificate_log_level = sa.Enum(*ENUM_DEFINITIONS["certificateloglevel"], name="certificateloglevel", create_type=False)
 
     # ── users ──
     op.create_table(
@@ -99,7 +94,7 @@ def upgrade() -> None:
         sa.Column("id", sa.Integer(), primary_key=True),
         sa.Column("organization_id", sa.Integer(), sa.ForeignKey("organizations.id"), nullable=False),
         sa.Column("user_id", sa.Integer(), sa.ForeignKey("users.id"), nullable=False),
-        sa.Column("role", organization_role, nullable=False, server_default=OrganizationRole.MEMBER.value),
+        sa.Column("role", organization_role, nullable=False, server_default="member"),
         sa.Column("invited_at", sa.DateTime(), nullable=False, server_default=sa.text("now()")),
         sa.Column("joined_at", sa.DateTime()),
     )
@@ -112,7 +107,7 @@ def upgrade() -> None:
         sa.Column("id", sa.Integer(), primary_key=True),
         sa.Column("organization_id", sa.Integer(), sa.ForeignKey("organizations.id"), nullable=False),
         sa.Column("name", sa.String(255), nullable=False),
-        sa.Column("status", domain_status, nullable=False, server_default=DomainStatus.PENDING.value),
+        sa.Column("status", domain_status, nullable=False, server_default="pending"),
         sa.Column("verification_token", sa.String(64)),
         sa.Column("ns_verified", sa.Boolean(), nullable=False, server_default=sa.text("false")),
         sa.Column("ns_verified_at", sa.DateTime()),
@@ -135,7 +130,7 @@ def upgrade() -> None:
         "domain_tls_settings",
         sa.Column("id", sa.Integer(), primary_key=True),
         sa.Column("domain_id", sa.Integer(), sa.ForeignKey("domains.id"), nullable=False, unique=True),
-        sa.Column("mode", tls_mode, nullable=False, server_default=TLSMode.FLEXIBLE.value),
+        sa.Column("mode", tls_mode, nullable=False, server_default="flexible"),
         sa.Column("force_https", sa.Boolean(), nullable=False, server_default=sa.text("true")),
         sa.Column("hsts_enabled", sa.Boolean(), nullable=False, server_default=sa.text("false")),
         sa.Column("hsts_max_age", sa.Integer(), nullable=False, server_default="31536000"),
@@ -204,7 +199,7 @@ def upgrade() -> None:
         sa.Column("domain_id", sa.Integer(), sa.ForeignKey("domains.id"), nullable=False),
         sa.Column("pattern", sa.String(255), nullable=False),
         sa.Column("priority", sa.Integer(), nullable=False, server_default="0"),
-        sa.Column("rule_type", cache_rule_type, nullable=False, server_default=CacheRuleType.CACHE.value),
+        sa.Column("rule_type", cache_rule_type, nullable=False, server_default="cache"),
         sa.Column("ttl", sa.Integer()),
         sa.Column("respect_origin_headers", sa.Boolean(), nullable=False, server_default=sa.text("true")),
         sa.Column("bypass_cookies", sa.Text()),
@@ -240,7 +235,7 @@ def upgrade() -> None:
         sa.Column("name", sa.String(255), nullable=False),
         sa.Column("description", sa.Text()),
         sa.Column("priority", sa.Integer(), nullable=False, server_default="0"),
-        sa.Column("action", waf_action, nullable=False, server_default=WAFAction.BLOCK.value),
+        sa.Column("action", waf_action, nullable=False, server_default="block"),
         sa.Column("conditions", sa.Text(), nullable=False),
         sa.Column("enabled", sa.Boolean(), nullable=False, server_default=sa.text("true")),
         sa.Column("created_at", sa.DateTime(), nullable=False, server_default=sa.text("now()")),
@@ -289,8 +284,8 @@ def upgrade() -> None:
         "certificates",
         sa.Column("id", sa.Integer(), primary_key=True),
         sa.Column("domain_id", sa.Integer(), sa.ForeignKey("domains.id"), nullable=False),
-        sa.Column("type", certificate_type, nullable=False, server_default=CertificateType.ACME.value),
-        sa.Column("status", certificate_status, nullable=False, server_default=CertificateStatus.PENDING.value),
+        sa.Column("type", certificate_type, nullable=False, server_default="acme"),
+        sa.Column("status", certificate_status, nullable=False, server_default="pending"),
         sa.Column("common_name", sa.String(255), nullable=False),
         sa.Column("san", sa.Text()),
         sa.Column("issuer", sa.String(500)),
