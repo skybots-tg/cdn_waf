@@ -1,8 +1,9 @@
 """Cache management service"""
+import json
 import logging
 from typing import List, Optional
 from datetime import datetime, timedelta
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.cache import CacheRule, CachePurge
@@ -123,8 +124,6 @@ class CacheService:
         initiated_by: int
     ) -> CachePurge:
         """Purge all cache for domain"""
-        import json
-        
         purge = CachePurge(
             domain_id=domain_id,
             purge_type="all",
@@ -136,12 +135,6 @@ class CacheService:
         await db.commit()
         await db.refresh(purge)
         
-        # Send purge command to edge nodes via Redis (JSON-serialize dict)
-        await redis_client.publish(
-            f"cache_purge:{domain_id}",
-            json.dumps({"type": "all", "purge_id": purge.id})
-        )
-        
         return purge
     
     @staticmethod
@@ -152,12 +145,10 @@ class CacheService:
         initiated_by: int
     ) -> CachePurge:
         """Purge cache by specific URLs"""
-        import json
-        
         purge = CachePurge(
             domain_id=domain_id,
             purge_type="url",
-            targets=json.dumps(urls),  # JSON-serialize list
+            targets=json.dumps(urls),
             initiated_by=initiated_by,
             status="pending"
         )
@@ -165,11 +156,6 @@ class CacheService:
         db.add(purge)
         await db.commit()
         await db.refresh(purge)
-        
-        await redis_client.publish(
-            f"cache_purge:{domain_id}",
-            json.dumps({"type": "url", "urls": urls, "purge_id": purge.id})  # JSON-serialize dict
-        )
         
         return purge
     
@@ -181,12 +167,10 @@ class CacheService:
         initiated_by: int
     ) -> CachePurge:
         """Purge cache by pattern"""
-        import json
-        
         purge = CachePurge(
             domain_id=domain_id,
             purge_type="pattern",
-            targets=json.dumps([pattern]),  # JSON-serialize list
+            targets=json.dumps([pattern]),
             initiated_by=initiated_by,
             status="pending"
         )
@@ -195,11 +179,53 @@ class CacheService:
         await db.commit()
         await db.refresh(purge)
         
-        await redis_client.publish(
-            f"cache_purge:{domain_id}",
-            json.dumps({"type": "pattern", "pattern": pattern, "purge_id": purge.id})  # JSON-serialize dict
-        )
+        return purge
+    
+    @staticmethod
+    async def get_pending_purges(
+        db: AsyncSession,
+        domain_ids: List[int]
+    ) -> List[CachePurge]:
+        """Get pending purge tasks for given domain IDs"""
+        if not domain_ids:
+            return []
         
+        query = select(CachePurge).where(
+            CachePurge.domain_id.in_(domain_ids),
+            CachePurge.status.in_(["pending", "in_progress"])
+        ).order_by(CachePurge.created_at.asc())
+        
+        result = await db.execute(query)
+        return list(result.scalars().all())
+    
+    @staticmethod
+    async def complete_purge(
+        db: AsyncSession,
+        purge_id: int,
+        node_id: int,
+        success: bool = True
+    ) -> Optional[CachePurge]:
+        """Mark purge as completed by a specific edge node"""
+        purge = await db.execute(
+            select(CachePurge).where(CachePurge.id == purge_id)
+        )
+        purge = purge.scalar_one_or_none()
+        if not purge:
+            return None
+        
+        completed_nodes = json.loads(purge.completed_by_nodes) if purge.completed_by_nodes else []
+        if node_id not in completed_nodes:
+            completed_nodes.append(node_id)
+        purge.completed_by_nodes = json.dumps(completed_nodes)
+        
+        if success:
+            purge.status = "completed"
+            purge.completed_at = datetime.utcnow()
+        else:
+            purge.status = "failed"
+        
+        await db.commit()
+        await db.refresh(purge)
         return purge
     
     @staticmethod

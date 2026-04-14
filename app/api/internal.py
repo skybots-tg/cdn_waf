@@ -423,3 +423,96 @@ async def get_certificate(
 
 from app.api.internal_logs import router as logs_router
 router.include_router(logs_router)
+
+
+# ==================== Cache Purge Tasks ====================
+
+from app.services.cache_service import CacheService
+from typing import List
+
+
+@router.get("/purge-tasks")
+async def get_purge_tasks(
+    node: EdgeNode = Depends(verify_edge_node),
+    db: AsyncSession = Depends(get_db)
+) -> List[Dict[str, Any]]:
+    """
+    Get pending cache purge tasks for domains served by this edge node.
+    Edge nodes poll this endpoint to discover purge work.
+    """
+    domains_result = await db.execute(
+        select(Domain).where(Domain.status == "active")
+    )
+    domains = domains_result.scalars().all()
+    domain_ids = [d.id for d in domains]
+    domain_names = {d.id: d.name for d in domains}
+
+    if not domain_ids:
+        return []
+
+    purges = await CacheService.get_pending_purges(db, domain_ids)
+    
+    tasks = []
+    for purge in purges:
+        targets = None
+        if purge.targets:
+            try:
+                targets = json.loads(purge.targets)
+            except (json.JSONDecodeError, TypeError):
+                targets = None
+        
+        already_done = []
+        if purge.completed_by_nodes:
+            try:
+                already_done = json.loads(purge.completed_by_nodes)
+            except (json.JSONDecodeError, TypeError):
+                already_done = []
+        
+        if node.id in already_done:
+            continue
+        
+        tasks.append({
+            "purge_id": purge.id,
+            "domain_id": purge.domain_id,
+            "domain_name": domain_names.get(purge.domain_id, "unknown"),
+            "purge_type": purge.purge_type,
+            "targets": targets,
+            "created_at": purge.created_at.isoformat(),
+        })
+    
+    return tasks
+
+
+@router.post("/purge-complete")
+async def report_purge_complete(
+    report: Dict[str, Any],
+    node: EdgeNode = Depends(verify_edge_node),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Edge node reports that a purge task has been completed.
+    
+    Body:
+    {
+        "purge_id": 123,
+        "success": true
+    }
+    """
+    purge_id = report.get("purge_id")
+    success = report.get("success", True)
+    
+    if purge_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="purge_id is required"
+        )
+    
+    purge = await CacheService.complete_purge(db, purge_id, node.id, success)
+    if not purge:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Purge task not found"
+        )
+    
+    logger.info("Purge %s completed by node %s (success=%s)", purge_id, node.id, success)
+    return {"status": "ok", "purge_id": purge_id}

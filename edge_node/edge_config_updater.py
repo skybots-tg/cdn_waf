@@ -20,6 +20,8 @@ import httpx
 import yaml
 from jinja2 import Template
 
+from edge_cache_purger import EdgeCachePurger
+
 
 logging.basicConfig(
     level=logging.INFO,
@@ -233,6 +235,7 @@ server {
     {% for rule in domain.cache_rules %}
     location ~ {{ rule.pattern }} {
         proxy_cache {{ safe_name }};
+        proxy_cache_key $scheme$host$request_uri;
         {% if rule.ttl %}
         proxy_cache_valid 200 {{ rule.ttl }}s;
         {% endif %}
@@ -331,6 +334,7 @@ server {
     {% for rule in domain.cache_rules %}
     location ~ {{ rule.pattern }} {
         proxy_cache {{ safe_name }};
+        proxy_cache_key $scheme$host$request_uri;
         {% if rule.ttl %}
         proxy_cache_valid 200 {{ rule.ttl }}s;
         {% endif %}
@@ -549,6 +553,15 @@ class EdgeConfigUpdater:
         
         # Ensure log format config exists
         self.ensure_log_format_config()
+        
+        # Cache purger for handling purge tasks from control plane
+        self.cache_purger = EdgeCachePurger(
+            control_plane_url=self.control_plane_url,
+            node_id=self.node_id,
+            api_key=self.api_key,
+            cache_base_dir="/var/cache/nginx",
+            request_timeout=self.request_timeout,
+        )
         
         logger.info("EdgeConfigUpdater initialized (node_id=%s, control_plane=%s)", 
                    self.node_id, self.control_plane_url)
@@ -973,6 +986,9 @@ class EdgeConfigUpdater:
                 
                 # Update config
                 await self.update_config()
+                
+                # Process pending cache purge tasks
+                await self.cache_purger.check_and_execute_purges()
             except Exception as e:
                 logger.error("Error in update loop: %s", e, exc_info=True)
 

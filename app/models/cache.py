@@ -58,8 +58,11 @@ class CachePurge(Base):
     purge_type = Column(String(20), nullable=False)  # all, url, pattern
     targets = Column(Text, nullable=True)  # JSON array of URLs/patterns
     
-    status = Column(String(20), default="pending", nullable=False)  # pending, completed, failed
+    status = Column(String(20), default="pending", nullable=False)  # pending, in_progress, completed, failed
     initiated_by = Column(Integer, ForeignKey("users.id"), nullable=False)
+    
+    # JSON list of node IDs that completed this purge (for multi-node environments)
+    completed_by_nodes = Column(Text, nullable=True)
     
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     completed_at = Column(DateTime, nullable=True)
