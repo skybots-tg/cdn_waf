@@ -189,7 +189,7 @@ server {
     ssl_ciphers HIGH:!aNULL:!MD5;
 
     {% if domain.tls_settings.hsts_enabled %}
-    add_header Strict-Transport-Security "max-age={{ domain.tls_settings.hsts_max_age|default(31536000) }}{% if domain.tls_settings.hsts_include_subdomains %}; includeSubDomains{% endif %}" always;
+    add_header Strict-Transport-Security "max-age={{ domain.tls_settings.hsts_max_age|default(31536000) }}{% if domain.tls_settings.hsts_include_subdomains %}; includeSubDomains{% endif %}{% if domain.tls_settings.hsts_preload %}; preload{% endif %}" always;
     {% endif %}
 
     {% if domain.waf_enabled %}

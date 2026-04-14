@@ -292,7 +292,9 @@ async def get_edge_config(
                     "mode": tls_settings.mode.lower() if tls_settings else 'flexible',
                     "force_https": tls_settings.force_https if tls_settings else False,
                     "hsts_enabled": tls_settings.hsts_enabled if tls_settings else False,
-                    "hsts_max_age": tls_settings.hsts_max_age if tls_settings else 31536000
+                    "hsts_max_age": tls_settings.hsts_max_age if tls_settings else 31536000,
+                    "hsts_include_subdomains": tls_settings.hsts_include_subdomains if tls_settings else False,
+                    "hsts_preload": tls_settings.hsts_preload if tls_settings else False
                 },
                 "origins": sub_origins,
                 "cache_rules": [
