@@ -110,7 +110,9 @@ control_plane:
   url: "https://control.yourcdn.ru"
   api_key: "your-api-key-here"
   
-update_interval: 30  # seconds
+update_interval: 30  # seconds, main config/purge loop tick
+heartbeat_interval: 30  # seconds, runs in its own task independent of the main loop
+heartbeat_timeout: 5.0  # short HTTP timeout so a slow control plane doesn't delay heartbeats
 
 nginx:
   config_path: "/usr/local/openresty/nginx/conf/cdn.conf"

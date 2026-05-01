@@ -540,6 +540,10 @@ class EdgeConfigUpdater:
         self.test_command = self.config["nginx"].get("test_command", "nginx -t")
         self.update_interval = int(self.config.get("update_interval", 30))
         self.request_timeout = float(self.config.get("request_timeout", 15.0))
+        self.heartbeat_interval = int(self.config.get("heartbeat_interval", 30))
+        # Dedicated short timeout for heartbeats so a slow control-plane
+        # never causes them to bunch up and trigger false "node down" alerts.
+        self.heartbeat_timeout = float(self.config.get("heartbeat_timeout", 5.0))
 
         # Create certs directory with proper permissions
         try:
@@ -587,13 +591,29 @@ class EdgeConfigUpdater:
             "X-Node-Id": str(self.node_id),
             "X-Node-Token": self.api_key,
         }
-        
+
         try:
-            async with httpx.AsyncClient(timeout=self.request_timeout) as client:
+            async with httpx.AsyncClient(timeout=self.heartbeat_timeout) as client:
                 await client.post(url, json=metrics, headers=headers)
                 logger.debug("Heartbeat sent")
         except Exception as e:
             logger.error(f"Failed to send heartbeat: {e}")
+
+    async def heartbeat_loop(self):
+        """Independent heartbeat loop.
+
+        Runs in its own asyncio task so that long-running operations in
+        ``update_config`` or the cache purger (e.g. scanning a large cache
+        directory for pattern-based purges) cannot delay heartbeats and
+        produce false "node unreachable" alerts on the control plane.
+        """
+        logger.info("Heartbeat loop started (interval=%ss)", self.heartbeat_interval)
+        while True:
+            try:
+                await self.send_heartbeat()
+            except Exception as e:
+                logger.error("Heartbeat loop error: %s", e, exc_info=True)
+            await asyncio.sleep(self.heartbeat_interval)
 
     def ensure_default_certificate(self):
         """Ensure a self-signed certificate exists for the HTTPS default_server"""
@@ -974,20 +994,18 @@ class EdgeConfigUpdater:
     async def run(self):
         """Main loop"""
         logger.info("Edge Config Updater started (node_id=%s, interval=%ss)", self.node_id, self.update_interval)
-        
+
         # Start log shipper in background
         log_shipper = LogShipper(self.config, self.api_key)
         asyncio.create_task(log_shipper.run())
 
+        # Heartbeat runs in its own task so it cannot be starved by config
+        # updates or long cache-purge scans.
+        asyncio.create_task(self.heartbeat_loop())
+
         while True:
             try:
-                # Send heartbeat
-                await self.send_heartbeat()
-                
-                # Update config
                 await self.update_config()
-                
-                # Process pending cache purge tasks
                 await self.cache_purger.check_and_execute_purges()
             except Exception as e:
                 logger.error("Error in update loop: %s", e, exc_info=True)

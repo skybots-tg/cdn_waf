@@ -14,8 +14,9 @@ logger = logging.getLogger(__name__)
 
 PROLONGED_OUTAGE_MINUTES = 5
 EDGE_HTTP_TIMEOUT = 5
-EDGE_STALE_HEARTBEAT_MINUTES = 5
+EDGE_STALE_HEARTBEAT_MINUTES = 8
 EDGE_FAILURE_THRESHOLD = 3
+EDGE_ALERT_COOLDOWN_SECONDS = 1800  # 30 min between repeated WARNING alerts
 DNS_HTTP_TIMEOUT = 5
 DNS_FAILURE_THRESHOLD = 3
 
@@ -240,13 +241,16 @@ async def _check_edge_nodes_health_async():
 
             for node in nodes:
                 checked += 1
-                healthy = await _probe_edge_node(node)
+                http_ok, stale, age = await _probe_edge_node(node)
+                healthy = http_ok and not stale
                 redis_key = f"edge:failures:{node.id}"
+                alert_key = f"edge:alert_sent:{node.id}"
 
                 if healthy:
                     old_failures = int(await redis_client.get(redis_key) or 0)
                     if old_failures > 0:
                         await redis_client.delete(redis_key)
+                    await redis_client.delete(alert_key)
                     if node.status == "offline":
                         node.status = "online"
                         await db.commit()
@@ -254,14 +258,13 @@ async def _check_edge_nodes_health_async():
                         await AlertService.edge_node_recovered(node.name, node.ip_address)
                 else:
                     failures = int(await redis_client.get(redis_key) or 0) + 1
-                    await redis_client.set(redis_key, str(failures), expire=600)
+                    await redis_client.set(redis_key, str(failures), expire=3600)
 
-                    reason = _edge_failure_reason(node)
+                    reason = _edge_failure_reason(http_ok, stale, age)
                     logger.warning(
                         "Edge node %s (%s) failing (%d/%d): %s",
                         node.name, node.ip_address, failures, EDGE_FAILURE_THRESHOLD, reason,
                     )
-                    await AlertService.edge_node_down(node.name, node.ip_address, reason)
 
                     if failures >= EDGE_FAILURE_THRESHOLD:
                         node.enabled = False
@@ -269,6 +272,7 @@ async def _check_edge_nodes_health_async():
                         await db.commit()
                         disabled_any = True
                         await redis_client.delete(redis_key)
+                        await redis_client.delete(alert_key)
                         await redis_client.set(
                             f"edge:auto_disabled:{node.id}", "1", expire=86400,
                         )
@@ -280,6 +284,19 @@ async def _check_edge_nodes_health_async():
                             node.name, node.ip_address,
                             f"{failures} неудачных проверок подряд ({reason})",
                         )
+                    elif not http_ok:
+                        # HTTP-нода реально не отвечает → шлём WARNING с cooldown,
+                        # чтобы не спамить однотипными сообщениями.
+                        already_alerted = await redis_client.get(alert_key)
+                        if not already_alerted:
+                            await redis_client.set(
+                                alert_key, "1", expire=EDGE_ALERT_COOLDOWN_SECONDS,
+                            )
+                            await AlertService.edge_node_down(
+                                node.name, node.ip_address, reason,
+                            )
+                    # else: только устаревший heartbeat при живом HTTP —
+                    # не спамим, ждём либо восстановления, либо порога авто-отключения.
 
             if disabled_any:
                 sync_dns_nodes.delay()
@@ -293,12 +310,17 @@ async def _check_edge_nodes_health_async():
         await redis_client.disconnect()
 
 
-async def _probe_edge_node(node) -> bool:
-    """HTTP probe on port 80 + stale heartbeat check."""
+async def _probe_edge_node(node) -> tuple[bool, bool, int | None]:
+    """HTTP probe on port 80 + stale heartbeat check.
+
+    Returns (http_ok, stale, heartbeat_age_seconds).
+    """
     now = datetime.utcnow()
 
+    age: int | None = None
     if node.last_heartbeat:
-        stale = (now - node.last_heartbeat).total_seconds() > EDGE_STALE_HEARTBEAT_MINUTES * 60
+        age = int((now - node.last_heartbeat).total_seconds())
+        stale = age > EDGE_STALE_HEARTBEAT_MINUTES * 60
     else:
         stale = True
 
@@ -310,19 +332,26 @@ async def _probe_edge_node(node) -> bool:
     except Exception:
         http_ok = False
 
-    return http_ok and not stale
+    return http_ok, stale, age
 
 
-def _edge_failure_reason(node) -> str:
-    parts = []
-    now = datetime.utcnow()
-    if node.last_heartbeat:
-        age = int((now - node.last_heartbeat).total_seconds())
-        if age > EDGE_STALE_HEARTBEAT_MINUTES * 60:
+def _edge_failure_reason(http_ok: bool, stale: bool, age: int | None) -> str:
+    """Build a truthful reason string based on the actual probe result.
+
+    Avoids the previous behaviour of always appending 'HTTP check failed',
+    which produced misleading alerts when the node was actually reachable
+    but its heartbeat had merely been delayed.
+    """
+    parts: list[str] = []
+    if stale:
+        if age is None:
+            parts.append("heartbeat отсутствует")
+        else:
             parts.append(f"heartbeat устарел ({age}s)")
-    else:
-        parts.append("heartbeat отсутствует")
-    parts.append("HTTP check failed")
+    if not http_ok:
+        parts.append("HTTP check failed")
+    if not parts:
+        parts.append("неизвестная причина")
     return "; ".join(parts)
 
 

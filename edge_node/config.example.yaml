@@ -7,8 +7,10 @@ control_plane:
   url: "https://control.yourcdn.ru"
   api_key: "your-api-key-here"
   
-update_interval: 30  # seconds
+update_interval: 30  # seconds, main config/purge loop tick
 request_timeout: 15.0  # seconds for HTTP requests to control plane
+heartbeat_interval: 30  # seconds, runs in its own task independent of update_interval
+heartbeat_timeout: 5.0  # short timeout so a slow control plane doesn't delay heartbeats
 
 nginx:
   config_path: "/etc/nginx/conf.d/cdn.conf"
