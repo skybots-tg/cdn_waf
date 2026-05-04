@@ -1,4 +1,5 @@
 """Domain endpoints"""
+import asyncio
 from typing import List, Optional, Set, Tuple
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from fastapi.concurrency import run_in_threadpool
@@ -105,9 +106,41 @@ async def scan_dns_records(
         seen.add(key)
         records.append(data)
 
-    # Root records
+    # --- Collect all queries to run in parallel ---
+
+    common_subdomains = [
+        "www", "mail", "remote", "blog", "webmail", "server",
+        "ns1", "ns2", "smtp", "secure", "vpn", "m", "shop",
+        "ftp", "api", "portal", "admin", "autodiscover", "imap",
+        "pop", "dev", "test", "staging", "app", "cdn", "dashboard",
+        "auth", "payment", "docs", "files", "static",
+    ]
+    txt_subdomains = ["_dmarc", "_domainkey", "_spf", "_mta-sts", "_smtp._tls"]
+
+    tasks: list = []
+    task_meta: list = []  # (name_label, record_type, fqdn)
+
     for record_type in BASE_RECORD_TYPES:
-        answers = await _resolve(resolver, domain, record_type)
+        tasks.append(_resolve(resolver, domain, record_type))
+        task_meta.append(("@", record_type, domain))
+
+    for subdomain in common_subdomains:
+        fqdn = f"{subdomain}.{domain}"
+        for sub_type in ["A", "AAAA", "CNAME"]:
+            tasks.append(_resolve(resolver, fqdn, sub_type))
+            task_meta.append((subdomain, sub_type, fqdn))
+
+    for subdomain in txt_subdomains:
+        fqdn = f"{subdomain}.{domain}"
+        tasks.append(_resolve(resolver, fqdn, "TXT"))
+        task_meta.append((subdomain, "TXT", fqdn))
+
+    # Run all DNS queries concurrently
+    results = await asyncio.gather(*tasks)
+
+    # --- Process results ---
+
+    for (name_label, record_type, _fqdn), answers in zip(task_meta, results):
         if not answers:
             continue
 
@@ -116,7 +149,7 @@ async def scan_dns_records(
         for rdata in answers:
             record = {
                 "type": record_type,
-                "name": "@",
+                "name": name_label,
                 "ttl": ttl,
                 "proxied": record_type in ["A", "AAAA", "CNAME"],
             }
@@ -142,67 +175,6 @@ async def scan_dns_records(
                 record["proxied"] = False
 
             add_record(record)
-
-    common_subdomains = [
-        "www", "mail", "remote", "blog", "webmail", "server",
-        "ns1", "ns2", "smtp", "secure", "vpn", "m", "shop",
-        "ftp", "api", "portal", "admin", "autodiscover", "imap",
-        "pop", "dev", "test", "staging", "app", "cdn", "dashboard",
-        "auth", "payment", "docs", "files", "static",
-    ]
-
-    # Underscore-prefixed names that carry TXT records (DMARC, DKIM, SPF, etc.)
-    txt_subdomains = ["_dmarc", "_domainkey", "_spf", "_mta-sts", "_smtp._tls"]
-
-    for subdomain in common_subdomains:
-        fqdn = f"{subdomain}.{domain}"
-
-        for sub_type in ["A", "AAAA", "CNAME"]:
-            answers = await _resolve(resolver, fqdn, sub_type)
-            if not answers:
-                continue
-
-            ttl = answers.rrset.ttl if answers.rrset is not None else None
-
-            for rdata in answers:
-                record = {
-                    "type": sub_type,
-                    "name": subdomain,
-                    "ttl": ttl,
-                    "proxied": sub_type in ["A", "AAAA", "CNAME"],
-                }
-
-                if sub_type in ("A", "AAAA"):
-                    record["content"] = str(rdata)
-                elif sub_type == "CNAME":
-                    record["content"] = str(getattr(rdata, "target", rdata)).rstrip(".")
-
-                add_record(record)
-
-    for subdomain in txt_subdomains:
-        fqdn = f"{subdomain}.{domain}"
-        answers = await _resolve(resolver, fqdn, "TXT")
-        if not answers:
-            continue
-
-        ttl = answers.rrset.ttl if answers.rrset is not None else None
-
-        for rdata in answers:
-            txt_parts = getattr(rdata, "strings", None)
-            if txt_parts:
-                content = "".join(
-                    s.decode() if isinstance(s, bytes) else s for s in txt_parts
-                )
-            else:
-                content = rdata.to_text().strip('"')
-
-            add_record({
-                "type": "TXT",
-                "name": subdomain,
-                "content": content,
-                "ttl": ttl,
-                "proxied": False,
-            })
 
     return records
 
