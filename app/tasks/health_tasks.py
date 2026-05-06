@@ -508,7 +508,12 @@ async def _pick_test_domain(db) -> str | None:
 
 
 async def _probe_dns_node(node, test_domain: str | None) -> bool:
-    """Check DNS node with a real DNS A-query, fallback to HTTP health."""
+    """Check DNS node with a real DNS A-query + HTTP liveness probe.
+
+    HTTP check accepts any non-5xx response (the node may not have a
+    dedicated /health endpoint, so 404 is fine — it proves the server
+    is running).
+    """
     dns_ok = False
     if test_domain:
         dns_ok = await _dns_query_check(node.ip_address, test_domain)
@@ -517,12 +522,12 @@ async def _probe_dns_node(node, test_domain: str | None) -> bool:
     try:
         async with httpx.AsyncClient(timeout=DNS_HTTP_TIMEOUT) as client:
             resp = await client.get(f"http://{node.ip_address}:8000/health")
-            http_ok = resp.status_code == 200
+            http_ok = resp.status_code < 500
     except Exception:
         http_ok = False
 
     if test_domain:
-        return dns_ok and http_ok
+        return dns_ok or http_ok
     return http_ok
 
 
