@@ -106,7 +106,7 @@ async def migrate_schema():
                 await session.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS ix_edge_nodes_api_key ON edge_nodes (api_key)"))
                 await session.commit()
 
-            # 7. Check/Add disabled_by to dns_nodes
+            # 7. Check/Add disabled_by and last_sync_at to dns_nodes
             result_disabled_by = await session.execute(text(
                 "SELECT column_name FROM information_schema.columns "
                 "WHERE table_name='dns_nodes' AND column_name='disabled_by'"
@@ -114,6 +114,15 @@ async def migrate_schema():
             if not result_disabled_by.scalar():
                 logger.info("Adding disabled_by column to dns_nodes...")
                 await session.execute(text("ALTER TABLE dns_nodes ADD COLUMN IF NOT EXISTS disabled_by VARCHAR(10)"))
+                await session.commit()
+
+            result_last_sync = await session.execute(text(
+                "SELECT column_name FROM information_schema.columns "
+                "WHERE table_name='dns_nodes' AND column_name='last_sync_at'"
+            ))
+            if not result_last_sync.scalar():
+                logger.info("Adding last_sync_at column to dns_nodes...")
+                await session.execute(text("ALTER TABLE dns_nodes ADD COLUMN IF NOT EXISTS last_sync_at TIMESTAMP WITHOUT TIME ZONE"))
                 await session.commit()
 
     except Exception as e:

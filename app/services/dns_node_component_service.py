@@ -98,24 +98,18 @@ class DNSNodeComponentService:
             try:
                 async with httpx.AsyncClient(timeout=10.0) as client:
                     resp = await client.get(api_url)
-                    api_ok = resp.status_code in (200, 405, 422)
+                    api_ok = resp.status_code < 500
             except Exception as exc:
                 logger.debug("Database sync API unreachable on %s: %s", node.name, exc)
                 api_ok = False
 
             if api_ok:
-                res = await execute(
-                    node, "sudo -u postgres psql cdn_waf -tAc 'SELECT count(*) FROM domains' 2>/dev/null"
-                )
-                if res.success and res.stdout.strip().isdigit():
-                    count = res.stdout.strip()
-                    return DNSComponentStatus(
-                        component=component, installed=True,
-                        running=True, status_text=f"OK ({count} domains)",
-                    )
+                sync_info = ""
+                if node.last_sync_at:
+                    sync_info = f" · Last sync: {node.last_sync_at:%Y-%m-%d %H:%M} UTC"
                 return DNSComponentStatus(
                     component=component, installed=True,
-                    running=True, status_text="API OK (DB query failed)",
+                    running=True, status_text=f"OK{sync_info}",
                 )
             return DNSComponentStatus(
                 component=component, installed=False,

@@ -424,6 +424,9 @@ ACME_EMAIL={settings.ACME_EMAIL}
                 )
                 
                 if response.status_code == 200:
+                    from datetime import datetime
+                    node.last_sync_at = datetime.utcnow()
+                    await db_session.commit()
                     return DNSNodeCommandResult(
                         success=True,
                         stdout=str(response.json()),

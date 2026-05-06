@@ -35,6 +35,9 @@ class DNSNode(Base):
     disabled_by = Column(String(10), nullable=True)  # 'auto' or 'manual'; NULL = enabled
     status = Column(String(20), default="unknown", nullable=False)  # online, offline
     
+    # Sync
+    last_sync_at = Column(DateTime, nullable=True)
+    
     # Health metrics
     last_heartbeat = Column(DateTime, nullable=True)
     cpu_usage = Column(Float, nullable=True)

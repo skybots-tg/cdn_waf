@@ -138,8 +138,8 @@ function renderNodes(nodes) {
             <td>${getStatusBadge(node.status, node.enabled, node.disabled_by)}</td>
             <td>
                 ${
-                    node.last_heartbeat
-                        ? formatDateTime(node.last_heartbeat)
+                    node.last_sync_at
+                        ? formatDateTime(node.last_sync_at)
                         : '<span style="color: var(--text-muted);">Never</span>'
                 }
             </td>
