@@ -44,6 +44,7 @@ class DNSNodeResponse(DNSNodeBase):
     """DNS node response schema"""
     id: int
     status: str
+    disabled_by: Optional[str] = None
     last_heartbeat: Optional[datetime] = None
     cpu_usage: Optional[float] = None
     memory_usage: Optional[float] = None
@@ -66,6 +67,7 @@ class DNSNodeStats(BaseModel):
     total_nodes: int
     online_nodes: int
     offline_nodes: int
+    disabled_nodes: int = 0
 
 class DNSNodeCommand(BaseModel):
     """Command to execute on DNS node"""

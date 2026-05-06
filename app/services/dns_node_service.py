@@ -88,6 +88,13 @@ class DNSNodeService:
             return None
         
         update_data = node_data.model_dump(exclude_unset=True)
+        
+        if "enabled" in update_data:
+            if update_data["enabled"]:
+                update_data["disabled_by"] = None
+            else:
+                update_data["disabled_by"] = "manual"
+        
         for field, value in update_data.items():
             if hasattr(node, field):
                 setattr(node, field, value)
@@ -114,19 +121,29 @@ class DNSNodeService:
         total = total_result.scalar() or 0
         
         online_result = await db.execute(
-            select(func.count(DNSNode.id)).where(DNSNode.status == "online")
+            select(func.count(DNSNode.id)).where(
+                DNSNode.status == "online", DNSNode.enabled == True
+            )
         )
         online = online_result.scalar() or 0
         
         offline_result = await db.execute(
-            select(func.count(DNSNode.id)).where(DNSNode.status == "offline")
+            select(func.count(DNSNode.id)).where(
+                DNSNode.status == "offline", DNSNode.enabled == True
+            )
         )
         offline = offline_result.scalar() or 0
+        
+        disabled_result = await db.execute(
+            select(func.count(DNSNode.id)).where(DNSNode.enabled == False)
+        )
+        disabled = disabled_result.scalar() or 0
         
         return DNSNodeStats(
             total_nodes=total,
             online_nodes=online,
-            offline_nodes=offline
+            offline_nodes=offline,
+            disabled_nodes=disabled,
         )
 
     @staticmethod

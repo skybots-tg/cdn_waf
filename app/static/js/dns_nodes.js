@@ -72,13 +72,14 @@ async function loadStats() {
         const totalEl = document.getElementById('stat-total');
         const onlineEl = document.getElementById('stat-online');
         const offlineEl = document.getElementById('stat-offline');
+        const disabledEl = document.getElementById('stat-disabled');
 
         if (totalEl) totalEl.textContent = stats.total_nodes ?? '0';
         if (onlineEl) onlineEl.textContent = stats.online_nodes ?? '0';
         if (offlineEl) offlineEl.textContent = stats.offline_nodes ?? '0';
+        if (disabledEl) disabledEl.textContent = stats.disabled_nodes ?? '0';
     } catch (error) {
         console.error('Error loading stats:', error);
-        // тут можно не шуметь пользователю каждый раз
     }
 }
 
@@ -134,7 +135,7 @@ function renderNodes(nodes) {
                         : ''
                 }
             </td>
-            <td>${getStatusBadge(node.status)}</td>
+            <td>${getStatusBadge(node.status, node.enabled, node.disabled_by)}</td>
             <td>
                 ${
                     node.last_heartbeat
@@ -144,6 +145,11 @@ function renderNodes(nodes) {
             </td>
             <td>
                 <div class="flex gap-1">
+                    <button class="btn btn-icon btn-sm btn-secondary"
+                            onclick="toggleNode(${Number(node.id)}, ${!node.enabled}, this)"
+                            title="${node.enabled ? 'Disable' : 'Enable'}">
+                        <i class="fas fa-${node.enabled ? 'pause' : 'play'}"></i>
+                    </button>
                     <button class="btn btn-icon btn-sm btn-secondary"
                             onclick="syncNode(${Number(node.id)}, this)"
                             title="Database Sync">
@@ -165,8 +171,15 @@ function renderNodes(nodes) {
         .join('');
 }
 
-// Get status badge HTML
-function getStatusBadge(status) {
+// Get status badge HTML (includes enabled state)
+function getStatusBadge(status, enabled, disabledBy) {
+    if (!enabled) {
+        const reason = disabledBy === 'auto' ? 'Auto-disabled' : 'Disabled';
+        const color = disabledBy === 'auto'
+            ? 'background: var(--warning); color: #000;'
+            : 'background: var(--bg-tertiary); color: var(--text-muted);';
+        return `<span class="badge" style="${color}"><i class="fas fa-ban"></i> ${reason}</span>`;
+    }
     const key = String(status || 'unknown').toLowerCase();
     return STATUS_BADGES[key] || STATUS_BADGES.unknown;
 }
@@ -277,6 +290,28 @@ async function deleteNode(nodeId) {
     } catch (error) {
         console.error('Error deleting node:', error);
         showNotification(error.message || 'Failed to delete DNS node', 'error');
+    }
+}
+
+// ---------- Enable / Disable ----------
+
+async function toggleNode(nodeId, enable, btn) {
+    const action = enable ? 'enable' : 'disable';
+    if (!enable && !confirm(`Are you sure you want to ${action} this node?`)) return;
+
+    btn.disabled = true;
+    try {
+        await apiRequest(`/api/v1/dns-nodes/${nodeId}`, {
+            method: 'PATCH',
+            body: { enabled: enable }
+        });
+        showNotification(`Node ${enable ? 'enabled' : 'disabled'}`, 'success');
+        loadNodes();
+        loadStats();
+    } catch (error) {
+        showNotification(error.message || `Failed to ${action} node`, 'error');
+    } finally {
+        btn.disabled = false;
     }
 }
 

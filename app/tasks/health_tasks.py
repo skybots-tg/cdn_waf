@@ -19,6 +19,7 @@ EDGE_FAILURE_THRESHOLD = 3
 EDGE_ALERT_COOLDOWN_SECONDS = 1800  # 30 min between repeated WARNING alerts
 DNS_HTTP_TIMEOUT = 5
 DNS_FAILURE_THRESHOLD = 3
+DNS_MIN_ENABLED_NODES = 2  # never auto-disable below this count
 
 
 @celery_app.task(name="app.tasks.health.check_origins_health")
@@ -419,7 +420,6 @@ def check_dns_nodes_health():
 
 async def _check_dns_nodes_health_async():
     from app.models.dns_node import DNSNode
-    from app.models.domain import Domain, DomainStatus
     from app.services.alert_service import AlertService
     from app.core.redis import redis_client
 
@@ -435,6 +435,7 @@ async def _check_dns_nodes_health_async():
                 return {"status": "ok", "checked": 0}
 
             test_domain = await _pick_test_domain(db)
+            enabled_count = len(nodes)
 
             checked = 0
             disabled_any = False
@@ -463,19 +464,27 @@ async def _check_dns_nodes_health_async():
                     )
 
                     if failures >= DNS_FAILURE_THRESHOLD:
-                        node.enabled = False
-                        node.status = "offline"
-                        await db.commit()
-                        disabled_any = True
-                        await redis_client.delete(redis_key)
-                        await redis_client.set(
-                            f"dns:auto_disabled:{node.id}", "1", expire=86400,
-                        )
-                        logger.critical(
-                            "DNS node %s (%s) auto-disabled after %d failures",
-                            node.name, node.ip_address, failures,
-                        )
-                        await AlertService.dns_node_down(node.name, node.ip_address)
+                        if enabled_count <= DNS_MIN_ENABLED_NODES:
+                            logger.warning(
+                                "DNS node %s would be auto-disabled but only %d enabled "
+                                "(min %d) — keeping enabled",
+                                node.name, enabled_count, DNS_MIN_ENABLED_NODES,
+                            )
+                            node.status = "offline"
+                            await db.commit()
+                        else:
+                            node.enabled = False
+                            node.disabled_by = "auto"
+                            node.status = "offline"
+                            await db.commit()
+                            disabled_any = True
+                            enabled_count -= 1
+                            await redis_client.delete(redis_key)
+                            logger.critical(
+                                "DNS node %s (%s) auto-disabled after %d failures",
+                                node.name, node.ip_address, failures,
+                            )
+                            await AlertService.dns_node_down(node.name, node.ip_address)
 
             await _check_auto_disabled_dns_recovery(db, redis_client, AlertService, test_domain)
 
@@ -536,26 +545,27 @@ async def _dns_query_check(nameserver_ip: str, domain: str) -> bool:
 
 
 async def _check_auto_disabled_dns_recovery(db, redis_client, alert_svc, test_domain):
-    """Re-enable DNS nodes that were auto-disabled and are now responding."""
+    """Re-enable DNS nodes that were auto-disabled and are now responding.
+
+    Only touches nodes with disabled_by='auto'.
+    Manually disabled nodes are never auto-recovered.
+    """
     from app.models.dns_node import DNSNode
 
     result = await db.execute(
         select(DNSNode).where(
             DNSNode.enabled == False,
-            DNSNode.status == "offline",
+            DNSNode.disabled_by == "auto",
         )
     )
     disabled_nodes = list(result.scalars().all())
     re_enabled_any = False
 
     for node in disabled_nodes:
-        marker = await redis_client.get(f"dns:auto_disabled:{node.id}")
-        if not marker:
-            continue
-
         healthy = await _probe_dns_node(node, test_domain)
         if healthy:
             node.enabled = True
+            node.disabled_by = None
             node.status = "online"
             await db.commit()
             await redis_client.delete(f"dns:auto_disabled:{node.id}")
