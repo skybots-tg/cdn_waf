@@ -91,7 +91,7 @@ function renderNodes(nodes) {
             <td>${node.memory_usage !== null ? `${node.memory_usage.toFixed(1)}%` : '-'}</td>
             <td>${node.disk_usage !== null ? `${node.disk_usage.toFixed(1)}%` : '-'}</td>
             <td>
-                ${node.last_heartbeat ? formatDateTime(node.last_heartbeat) : 
+                ${node.last_config_update ? formatDateTime(node.last_config_update) : 
                     '<span style="color: var(--text-muted);">Never</span>'}
             </td>
             <td>
@@ -559,17 +559,22 @@ function escapeHtml(text) {
     return div.innerHTML;
 }
 
-// Utility: Format date time
+// Utility: Format date time (UTC from server → browser local timezone)
 function formatDateTime(dateStr) {
-    const date = new Date(dateStr);
+    if (!dateStr) return '-';
+
+    const raw = dateStr.endsWith('Z') || dateStr.includes('+') ? dateStr : dateStr + 'Z';
+    const date = new Date(raw);
+    if (Number.isNaN(date.getTime())) return '-';
+
     const now = new Date();
     const diff = now - date;
-    
+
     if (diff < 60000) return 'Just now';
     if (diff < 3600000) return `${Math.floor(diff / 60000)}m ago`;
     if (diff < 86400000) return `${Math.floor(diff / 3600000)}h ago`;
-    
-    return date.toLocaleString('en-US', {
+
+    return date.toLocaleString(undefined, {
         month: 'short',
         day: 'numeric',
         hour: '2-digit',

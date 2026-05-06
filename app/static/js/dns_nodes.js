@@ -378,11 +378,12 @@ function escapeHtml(text) {
     return _escapeDiv.innerHTML;
 }
 
-// Utility: Format date time
+// Utility: Format date time (UTC from server → browser local timezone)
 function formatDateTime(dateStr) {
     if (!dateStr) return '-';
 
-    const date = new Date(dateStr);
+    const raw = dateStr.endsWith('Z') || dateStr.includes('+') ? dateStr : dateStr + 'Z';
+    const date = new Date(raw);
     if (Number.isNaN(date.getTime())) return '-';
 
     const now = new Date();
@@ -392,7 +393,7 @@ function formatDateTime(dateStr) {
     if (diff < 3600000) return `${Math.floor(diff / 60000)}m ago`;
     if (diff < 86400000) return `${Math.floor(diff / 3600000)}h ago`;
 
-    return date.toLocaleString('en-US', {
+    return date.toLocaleString(undefined, {
         month: 'short',
         day: 'numeric',
         hour: '2-digit',
