@@ -11,9 +11,14 @@
                 Manage Authoritative DNS servers
             </p>
         </div>
-        <button class="btn btn-primary" onclick="showAddNodeModal()">
-            <i class="fas fa-plus"></i> Add DNS Node
-        </button>
+        <div class="flex gap-2">
+            <button class="btn btn-secondary" onclick="syncAllNodes()" id="btn-sync-all">
+                <i class="fas fa-sync-alt"></i> Sync All
+            </button>
+            <button class="btn btn-primary" onclick="showAddNodeModal()">
+                <i class="fas fa-plus"></i> Add DNS Node
+            </button>
+        </div>
     </div>
 
     <!-- Stats Cards -->

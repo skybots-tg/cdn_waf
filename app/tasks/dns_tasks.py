@@ -47,18 +47,30 @@ def sync_dns_nodes():
     return asyncio.run(_sync_dns_nodes_async())
 
 async def _sync_dns_nodes_async():
-    """Async implementation of DNS sync"""
+    """Async implementation of DNS sync.
+    
+    Syncs ALL nodes regardless of the enabled flag — data replication
+    must happen even when a node is administratively disabled.
+    """
     engine, SessionLocal = create_task_db_session()
     try:
         async with SessionLocal() as db:
-            result = await db.execute(select(DNSNode).where(DNSNode.enabled == True))
+            result = await db.execute(select(DNSNode))
             nodes = result.scalars().all()
+            
+            if not nodes:
+                logger.info("No DNS nodes configured, skipping sync")
+                return {"status": "no_nodes"}
             
             results = {}
             for node in nodes:
                 try:
                     res = await DNSNodeService.sync_database(node, db)
                     results[node.name] = "success" if res.success else f"failed: {res.stderr}"
+                    if res.success:
+                        logger.info("DNS sync to %s succeeded", node.name)
+                    else:
+                        logger.warning("DNS sync to %s failed: %s", node.name, res.stderr)
                 except Exception as e:
                     logger.error("Error syncing DNS node %s: %s", node.name, e)
                     results[node.name] = f"error: {str(e)}"

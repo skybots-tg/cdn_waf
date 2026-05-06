@@ -45,6 +45,29 @@ async def get_dns_nodes_stats(
     """Get DNS nodes statistics"""
     return await DNSNodeService.get_stats(db)
 
+@router.post("/sync-all")
+async def sync_all_dns_nodes(
+    current_user: User = Depends(get_current_superuser),
+    db: AsyncSession = Depends(get_db)
+):
+    """Trigger database sync for all DNS nodes"""
+    nodes = await DNSNodeService.get_nodes(db)
+    if not nodes:
+        return {"status": "no_nodes", "results": {}}
+    
+    results = {}
+    for node in nodes:
+        try:
+            res = await DNSNodeService.sync_database(node, db)
+            results[node.name] = {
+                "success": res.success,
+                "message": res.stdout if res.success else res.stderr
+            }
+        except Exception as e:
+            results[node.name] = {"success": False, "message": str(e)}
+    
+    return {"status": "ok", "results": results}
+
 @router.post("/", response_model=DNSNodeResponse, status_code=status.HTTP_201_CREATED)
 async def create_dns_node(
     node_create: DNSNodeCreate,

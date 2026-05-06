@@ -144,6 +144,11 @@ function renderNodes(nodes) {
             </td>
             <td>
                 <div class="flex gap-1">
+                    <button class="btn btn-icon btn-sm btn-secondary"
+                            onclick="syncNode(${Number(node.id)}, this)"
+                            title="Database Sync">
+                        <i class="fas fa-sync-alt"></i>
+                    </button>
                     <a href="/dns-nodes/${node.id}" class="btn btn-icon btn-sm btn-secondary" title="Manage">
                         <i class="fas fa-edit"></i>
                     </a>
@@ -272,6 +277,54 @@ async function deleteNode(nodeId) {
     } catch (error) {
         console.error('Error deleting node:', error);
         showNotification(error.message || 'Failed to delete DNS node', 'error');
+    }
+}
+
+// ---------- Sync ----------
+
+async function syncNode(nodeId, btn) {
+    const icon = btn.querySelector('i');
+    icon.classList.add('fa-spin');
+    btn.disabled = true;
+
+    try {
+        await apiRequest(`/api/v1/dns-nodes/${nodeId}/component`, {
+            method: 'POST',
+            body: { component: 'database', action: 'sync' }
+        });
+        showNotification('Database synced successfully', 'success');
+    } catch (error) {
+        console.error('Sync error:', error);
+        showNotification(error.message || 'Sync failed', 'error');
+    } finally {
+        icon.classList.remove('fa-spin');
+        btn.disabled = false;
+    }
+}
+
+async function syncAllNodes() {
+    const btn = document.getElementById('btn-sync-all');
+    const icon = btn.querySelector('i');
+    icon.classList.add('fa-spin');
+    btn.disabled = true;
+
+    try {
+        const result = await apiRequest('/api/v1/dns-nodes/sync-all', { method: 'POST' });
+        const results = result.results || {};
+        const failed = Object.entries(results).filter(([, v]) => !v.success);
+
+        if (failed.length === 0) {
+            showNotification('All nodes synced successfully', 'success');
+        } else {
+            const names = failed.map(([n]) => n).join(', ');
+            showNotification(`Sync failed for: ${names}`, 'error');
+        }
+    } catch (error) {
+        console.error('Sync all error:', error);
+        showNotification(error.message || 'Sync all failed', 'error');
+    } finally {
+        icon.classList.remove('fa-spin');
+        btn.disabled = false;
     }
 }
 

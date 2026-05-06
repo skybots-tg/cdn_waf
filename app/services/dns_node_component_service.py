@@ -2,6 +2,7 @@
 import logging
 from typing import Dict, Any
 from datetime import datetime
+import httpx
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.dns_node import DNSNode
@@ -93,21 +94,32 @@ class DNSNodeComponentService:
             )
 
         if component == "database":
-            res = await execute(
-                node, "sudo -u postgres psql cdn_waf -c 'SELECT count(*) FROM domains'"
-            )
-            if res.success:
-                try:
-                    count = res.stdout.split('\n')[2].strip()
+            api_url = f"http://{node.ip_address}:8000/api/v1/sync"
+            try:
+                async with httpx.AsyncClient(timeout=10.0) as client:
+                    resp = await client.get(api_url)
+                    api_ok = resp.status_code in (200, 405, 422)
+            except Exception as exc:
+                logger.debug("Database sync API unreachable on %s: %s", node.name, exc)
+                api_ok = False
+
+            if api_ok:
+                res = await execute(
+                    node, "sudo -u postgres psql cdn_waf -tAc 'SELECT count(*) FROM domains' 2>/dev/null"
+                )
+                if res.success and res.stdout.strip().isdigit():
+                    count = res.stdout.strip()
                     return DNSComponentStatus(
                         component=component, installed=True,
                         running=True, status_text=f"OK ({count} domains)",
                     )
-                except Exception as exc:
-                    logger.debug("Failed to parse psql domain count: %s", exc)
+                return DNSComponentStatus(
+                    component=component, installed=True,
+                    running=True, status_text="API OK (DB query failed)",
+                )
             return DNSComponentStatus(
                 component=component, installed=False,
-                running=False, status_text="Error",
+                running=False, status_text="Sync API unreachable",
             )
 
         simple_checks = {
