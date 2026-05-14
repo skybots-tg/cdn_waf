@@ -39,28 +39,28 @@ async def verify_edge_node(
 ) -> EdgeNode:
     """Verify edge node authentication"""
     node = await EdgeNodeService.get_node(db, x_node_id)
-    
+
     if not node:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid node credentials"
         )
-    
+
     if not node.enabled:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Node is disabled"
         )
-    
+
     # Verify token
     if not x_node_token:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Missing authentication token"
         )
-        
+
     if not node.api_key or node.api_key != x_node_token:
-        # Backward compatibility for development: if node has no key set, maybe allow? 
+        # Backward compatibility for development: if node has no key set, maybe allow?
         # No, security first. But since we just added the column, existing nodes have NULL.
         # We should generate keys for them or require regeneration.
         # For now, if node.api_key is None, we block.
@@ -68,7 +68,36 @@ async def verify_edge_node(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid authentication token"
         )
-    
+
+    return node
+
+
+async def verify_edge_node_allow_disabled(
+    x_node_id: int = Header(...),
+    x_node_token: str = Header(...),
+    db: AsyncSession = Depends(get_db)
+) -> EdgeNode:
+    """Verify edge node authentication, allowing disabled nodes (for heartbeat)."""
+    node = await EdgeNodeService.get_node(db, x_node_id)
+
+    if not node:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid node credentials"
+        )
+
+    if not x_node_token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Missing authentication token"
+        )
+
+    if not node.api_key or node.api_key != x_node_token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid authentication token"
+        )
+
     return node
 
 
@@ -361,7 +390,7 @@ async def get_edge_config(
 @router.post("/heartbeat")
 async def edge_heartbeat(
     metrics: Dict[str, Any],
-    node: EdgeNode = Depends(verify_edge_node),
+    node: EdgeNode = Depends(verify_edge_node_allow_disabled),
     db: AsyncSession = Depends(get_db)
 ):
     """

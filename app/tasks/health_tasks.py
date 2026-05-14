@@ -380,21 +380,18 @@ async def _check_auto_disabled_recovery(db, redis_client, alert_svc):
             continue
 
         try:
-            async with httpx.AsyncClient(timeout=EDGE_HTTP_TIMEOUT) as client:
-                resp = await client.get(
-                    f"http://{node.ip_address}", follow_redirects=False,
+            http_ok, stale, age = await _probe_edge_node(node)
+            if http_ok and not stale:
+                node.enabled = True
+                node.status = "online"
+                await db.commit()
+                await redis_client.delete(f"edge:auto_disabled:{node.id}")
+                re_enabled_any = True
+                logger.info(
+                    "Auto-disabled edge node %s (%s) recovered — re-enabled",
+                    node.name, node.ip_address,
                 )
-                if resp.status_code < 600:
-                    node.enabled = True
-                    node.status = "online"
-                    await db.commit()
-                    await redis_client.delete(f"edge:auto_disabled:{node.id}")
-                    re_enabled_any = True
-                    logger.info(
-                        "Auto-disabled edge node %s (%s) recovered — re-enabled",
-                        node.name, node.ip_address,
-                    )
-                    await alert_svc.edge_node_recovered(node.name, node.ip_address)
+                await alert_svc.edge_node_recovered(node.name, node.ip_address)
         except Exception:
             pass
 
