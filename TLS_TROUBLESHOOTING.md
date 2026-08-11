@@ -161,3 +161,58 @@ sudo systemctl status cdn_celery.service
 sudo systemctl status cdn_celery_beat.service
 ```
 
+
+## Два центра выпуска сертификатов: панель vs certbot на origin
+
+Для одного и того же хоста сертификат могут выпускать две независимые системы, и
+какая из них способна пройти валидацию — зависит от того, включена ли хоть одна
+edge-нода.
+
+**ACME панели** (таблица `certificates`, `type=ACME`, задача
+`check_expiring_certificates`) обслуживает проксируемые домены. Токены лежат в
+Redis (`acme:challenge:<token>`), эндпоинт — `/.well-known/acme-challenge/{token}`
+в `app/main.py`. Nginx на edge (шаблон в `edge_node/edge_config_updater.py`)
+проксирует `/.well-known/acme-challenge/` на control plane `flarecloud.ru`, то
+есть этот путь существует **только при живой edge-ноде**.
+
+**certbot на origin** обслуживает локальные vhost'ы тех же хостов. Он проходит
+http-01 только пока **все** edge-ноды выключены: тогда
+`dns_server.get_edge_nodes_ips()` не находит ноды со `status=online AND
+enabled=true`, и DNS отдаёт A-запись origin. Стоит включить edge — certbot на
+origin начинает падать, потому что челлендж уходит на control plane, где его
+токена нет.
+
+### Симптом
+
+`Failed to renew certificate <domain> with error: Some challenges have failed`
+с деталью вида `Invalid response from http://<domain>/.well-known/acme-challenge/...: 404`,
+где IP в сообщении — адрес edge-ноды, а не origin.
+
+### Что должно быть настроено
+
+1. На origin — сниппет `scripts/nginx/acme-control-plane.conf`, включённый в
+   443-блок каждого проксируемого vhost'а. Это даёт ACME панели путь валидации
+   и при выключенном edge-фронте.
+2. `authenticator = nginx` (не `standalone`) во всех
+   `/etc/letsencrypt/renewal/*.conf` — `standalone` требует свободный порт 80 и
+   при живом nginx не работает никогда.
+3. Один certbot на хост. Если рядом стоят apt-версия, snap и pip в venv, старая
+   не умеет читать конфиги v5 (`Attempting to parse the version 5.x ... with
+   version 0.40.0 of Certbot. This might not work.`).
+
+### Проверка
+
+```bash
+# челлендж должен дойти до control plane, а не до приложения за vhost'ом
+curl -s --resolve $D:443:<ORIGIN_IP> https://$D/.well-known/acme-challenge/probe
+# ожидаемый ответ: {"detail":"Challenge token not found"}
+```
+
+Ответ `{"detail":"Not Found"}` значит, что запрос ушёл в приложение за
+`location /`, а не в панель.
+
+### Запрос к таблице certificates
+
+В таблице копятся FAILED-записи от прошлых попыток (на 2026-08-11 их было ~7200)
+и множество устаревших EXPIRED. `ORDER BY id LIMIT n` покажет только древние
+дубли — фильтруйте по `not_after > now()` или `status = 'ISSUED'`.
