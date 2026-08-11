@@ -16,6 +16,8 @@ PROLONGED_OUTAGE_MINUTES = 5
 EDGE_HTTP_TIMEOUT = 5
 EDGE_STALE_HEARTBEAT_MINUTES = 8
 EDGE_FAILURE_THRESHOLD = 3
+EDGE_TLS_TIMEOUT = 6
+EDGE_TLS_SAMPLE_SIZE = 3  # proxied hostnames probed per health check
 EDGE_ALERT_COOLDOWN_SECONDS = 1800  # 30 min between repeated WARNING alerts
 DNS_HTTP_TIMEOUT = 5
 DNS_FAILURE_THRESHOLD = 3
@@ -239,11 +241,14 @@ async def _check_edge_nodes_health_async():
 
             checked = 0
             disabled_any = False
+            tls_hostnames = await _edge_tls_sample(db)
 
             for node in nodes:
                 checked += 1
-                http_ok, stale, age = await _probe_edge_node(node)
-                healthy = http_ok and not stale
+                http_ok, stale, age, tls_ok, tls_detail = await _probe_edge_node(
+                    node, tls_hostnames
+                )
+                healthy = http_ok and not stale and tls_ok
                 redis_key = f"edge:failures:{node.id}"
                 alert_key = f"edge:alert_sent:{node.id}"
 
@@ -261,7 +266,7 @@ async def _check_edge_nodes_health_async():
                     failures = int(await redis_client.get(redis_key) or 0) + 1
                     await redis_client.set(redis_key, str(failures), expire=3600)
 
-                    reason = _edge_failure_reason(http_ok, stale, age)
+                    reason = _edge_failure_reason(http_ok, stale, age, tls_detail)
                     logger.warning(
                         "Edge node %s (%s) failing (%d/%d): %s",
                         node.name, node.ip_address, failures, EDGE_FAILURE_THRESHOLD, reason,
@@ -311,10 +316,80 @@ async def _check_edge_nodes_health_async():
         await redis_client.disconnect()
 
 
-async def _probe_edge_node(node) -> tuple[bool, bool, int | None]:
-    """HTTP probe on port 80 + stale heartbeat check.
+async def _edge_tls_sample(db) -> list[str]:
+    """A few currently-proxied hostnames, used to probe what an edge must serve."""
+    from app.models.dns import DNSRecord
+    from app.models.domain import Domain
 
-    Returns (http_ok, stale, heartbeat_age_seconds).
+    rows = (await db.execute(
+        select(DNSRecord.name, Domain.name)
+        .join(Domain, Domain.id == DNSRecord.domain_id)
+        .where(DNSRecord.proxied == True, DNSRecord.type == "A")
+        .order_by(DNSRecord.id)
+    )).all()
+
+    names = []
+    for sub, zone in rows:
+        fqdn = zone if sub in ("@", "", None) else f"{sub}.{zone}"
+        if fqdn not in names:
+            names.append(fqdn)
+        if len(names) >= EDGE_TLS_SAMPLE_SIZE:
+            break
+    return names
+
+
+async def _probe_edge_tls(ip: str, hostnames: list[str]) -> tuple[bool, str]:
+    """Verify the node can serve a currently-valid certificate for each hostname.
+
+    A CDN must never route traffic to an edge that cannot terminate TLS, so an
+    expired or missing certificate is a health failure, not a cosmetic issue.
+    The certificate chain itself is not verified against a trust store — we only
+    need the leaf's validity window, and the node answers for names that do not
+    match its own address.
+    """
+    import ssl
+
+    from cryptography import x509
+    from cryptography.hazmat.backends import default_backend
+
+    if not hostnames:
+        return True, ""
+
+    ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE
+
+    now = datetime.utcnow()
+    for host in hostnames:
+        writer = None
+        try:
+            reader, writer = await asyncio.wait_for(
+                asyncio.open_connection(ip, 443, ssl=ctx, server_hostname=host),
+                timeout=EDGE_TLS_TIMEOUT,
+            )
+            der = writer.get_extra_info("ssl_object").getpeercert(binary_form=True)
+            if not der:
+                return False, f"нет сертификата для {host}"
+            leaf = x509.load_der_x509_certificate(der, default_backend())
+            not_after = getattr(leaf, "not_valid_after_utc", None)
+            not_after = not_after.replace(tzinfo=None) if not_after else leaf.not_valid_after
+            if not_after <= now:
+                return False, f"сертификат {host} истёк {not_after:%Y-%m-%d}"
+        except Exception as e:
+            return False, f"TLS до {host} не установлен ({type(e).__name__})"
+        finally:
+            if writer is not None:
+                writer.close()
+
+    return True, ""
+
+
+async def _probe_edge_node(
+    node, tls_hostnames: list[str] | None = None
+) -> tuple[bool, bool, int | None, bool, str]:
+    """HTTP probe on port 80 + stale heartbeat + TLS certificate validity.
+
+    Returns (http_ok, stale, heartbeat_age_seconds, tls_ok, tls_detail).
     """
     now = datetime.utcnow()
 
@@ -333,10 +408,14 @@ async def _probe_edge_node(node) -> tuple[bool, bool, int | None]:
     except Exception:
         http_ok = False
 
-    return http_ok, stale, age
+    tls_ok, tls_detail = await _probe_edge_tls(node.ip_address, tls_hostnames or [])
+
+    return http_ok, stale, age, tls_ok, tls_detail
 
 
-def _edge_failure_reason(http_ok: bool, stale: bool, age: int | None) -> str:
+def _edge_failure_reason(
+    http_ok: bool, stale: bool, age: int | None, tls_detail: str = ""
+) -> str:
     """Build a truthful reason string based on the actual probe result.
 
     Avoids the previous behaviour of always appending 'HTTP check failed',
@@ -351,6 +430,8 @@ def _edge_failure_reason(http_ok: bool, stale: bool, age: int | None) -> str:
             parts.append(f"heartbeat устарел ({age}s)")
     if not http_ok:
         parts.append("HTTP check failed")
+    if tls_detail:
+        parts.append(tls_detail)
     if not parts:
         parts.append("неизвестная причина")
     return "; ".join(parts)
@@ -373,6 +454,7 @@ async def _check_auto_disabled_recovery(db, redis_client, alert_svc):
     )
     disabled_nodes = list(result.scalars().all())
     re_enabled_any = False
+    tls_hostnames = await _edge_tls_sample(db) if disabled_nodes else []
 
     for node in disabled_nodes:
         marker = await redis_client.get(f"edge:auto_disabled:{node.id}")
@@ -380,7 +462,15 @@ async def _check_auto_disabled_recovery(db, redis_client, alert_svc):
             continue
 
         try:
-            http_ok, stale, age = await _probe_edge_node(node)
+            http_ok, stale, age, tls_ok, tls_detail = await _probe_edge_node(
+                node, tls_hostnames
+            )
+            if not tls_ok:
+                logger.info(
+                    "Auto-disabled edge node %s (%s) still not serving TLS: %s — kept disabled",
+                    node.name, node.ip_address, tls_detail,
+                )
+                continue
             if http_ok and not stale:
                 node.enabled = True
                 node.status = "online"
