@@ -222,6 +222,202 @@ class AcmeService:
         return False, f"Authorization timeout for {authz.identifier.value}"
 
     @staticmethod
+    async def _find_zone(db, identifier: str):
+        """Longest-suffix match of an identifier against the hosted zones."""
+        zones = (await db.execute(select(Domain))).scalars().all()
+        best = None
+        for z in zones:
+            if identifier == z.name or identifier.endswith("." + z.name):
+                if best is None or len(z.name) > len(best.name):
+                    best = z
+        return best
+
+    @staticmethod
+    def _dns01_record_name(identifier: str, zone_name: str) -> str:
+        """TXT record name as dns_server.py expects it ('@'-relative to the zone)."""
+        fqdn = f"_acme-challenge.{identifier}"
+        if fqdn == zone_name:
+            return "@"
+        return fqdn[: -len(zone_name) - 1]
+
+    @staticmethod
+    async def _await_dns01_propagation(db, fqdn: str, expected: str) -> tuple[bool, str]:
+        """Wait until every enabled authoritative node serves the TXT value.
+
+        Answering the challenge before our own nameservers agree is the main way
+        dns-01 fails in a multi-node setup: Let's Encrypt may query any of them.
+        """
+        import dns.asyncresolver
+        from app.models.dns_node import DNSNode
+
+        nodes = (await db.execute(
+            select(DNSNode).where(DNSNode.enabled == True)
+        )).scalars().all()
+        targets = [n.ip_address for n in nodes]
+        if not targets:
+            return False, "no enabled DNS nodes to serve the dns-01 challenge"
+
+        for attempt in range(30):
+            pending = []
+            for ip in targets:
+                resolver = dns.asyncresolver.Resolver(configure=False)
+                resolver.nameservers = [ip]
+                resolver.lifetime = 5
+                resolver.timeout = 5
+                try:
+                    answer = await resolver.resolve(fqdn, "TXT")
+                    values = {
+                        b"".join(r.strings).decode("utf-8", "ignore")
+                        for r in answer
+                    }
+                    if expected not in values:
+                        pending.append(ip)
+                except Exception:
+                    pending.append(ip)
+
+            if not pending:
+                logger.info("dns-01 TXT %s propagated to all %d nodes", fqdn, len(targets))
+                return True, ""
+            await asyncio.sleep(2)
+
+        return False, f"dns-01 TXT {fqdn} did not propagate to {pending}"
+
+    @staticmethod
+    async def _push_zone_to_nodes(db) -> None:
+        """Replicate the zone immediately instead of waiting for the 10-min task."""
+        from app.models.dns_node import DNSNode
+        from app.services.dns_node_service import DNSNodeService
+
+        nodes = (await db.execute(
+            select(DNSNode).where(DNSNode.enabled == True)
+        )).scalars().all()
+        for node in nodes:
+            try:
+                await DNSNodeService.sync_database(node, db)
+            except Exception as e:
+                logger.warning("dns-01: sync to %s failed: %s", node.name, e)
+
+    @staticmethod
+    async def _validate_dns01(client, acc_key, authz_resource, db) -> tuple[bool, str]:
+        """Process a single DNS-01 authorization using our own authoritative DNS.
+
+        Preferred over http-01 for proxied domains: validation then depends only
+        on the nameservers we control, not on an edge node or the origin being
+        reachable over HTTP.
+        """
+        import acme.messages
+        import acme.challenges
+        from app.models.dns import DNSRecord
+
+        authz_url = authz_resource.uri if hasattr(authz_resource, "uri") else str(authz_resource)
+        response = client._post_as_get(authz_url)
+        authz = acme.messages.Authorization.from_json(response.json())
+        identifier = authz.identifier.value
+
+        challenge = None
+        for chall in authz.challenges:
+            if isinstance(chall.chall, acme.challenges.DNS01):
+                challenge = chall
+                break
+        if not challenge:
+            return False, f"No DNS-01 challenge offered for {identifier}"
+
+        zone = await AcmeService._find_zone(db, identifier)
+        if not zone:
+            return False, f"No hosted zone found for {identifier}"
+
+        resp_obj, validation = challenge.response_and_validation(acc_key)
+        if isinstance(validation, bytes):
+            validation = validation.decode("ascii")
+        record_name = AcmeService._dns01_record_name(identifier, zone.name)
+        fqdn = f"_acme-challenge.{identifier}"
+
+        existing = (await db.execute(
+            select(DNSRecord).where(
+                DNSRecord.domain_id == zone.id,
+                DNSRecord.type == "TXT",
+                DNSRecord.name == record_name,
+            )
+        )).scalars().all()
+        for r in existing:
+            await db.delete(r)
+
+        record = DNSRecord(
+            domain_id=zone.id,
+            type="TXT",
+            name=record_name,
+            content=validation,
+            ttl=60,
+            proxied=False,
+            comment="ACME dns-01 challenge (temporary)",
+        )
+        db.add(record)
+        await db.commit()
+        record_id = record.id
+
+        try:
+            await AcmeService._push_zone_to_nodes(db)
+            ok, err = await AcmeService._await_dns01_propagation(db, fqdn, validation)
+            if not ok:
+                return False, err
+
+            client.answer_challenge(challenge, resp_obj)
+
+            for attempt in range(15):
+                await asyncio.sleep(2)
+                try:
+                    resp = client._post_as_get(authz_url)
+                    status = acme.messages.Authorization.from_json(resp.json())
+                except Exception as e:
+                    logger.warning("dns-01 status check %d failed: %s", attempt + 1, e)
+                    continue
+
+                if status.status == acme.messages.STATUS_VALID:
+                    logger.info("dns-01 authorization valid for %s", identifier)
+                    return True, ""
+                if status.status == acme.messages.STATUS_INVALID:
+                    detail = ""
+                    for c in status.challenges:
+                        if getattr(c, "error", None):
+                            detail = str(c.error)
+                    return False, f"dns-01 INVALID for {identifier}: {detail}"
+
+            return False, f"dns-01 timeout for {identifier}"
+        finally:
+            try:
+                obj = await db.get(DNSRecord, record_id)
+                if obj:
+                    await db.delete(obj)
+                    await db.commit()
+                    await AcmeService._push_zone_to_nodes(db)
+            except Exception as e:
+                logger.warning("dns-01: failed to clean up TXT %s: %s", fqdn, e)
+
+    @staticmethod
+    async def _validate_authz(client, acc_key, authz_resource, db) -> tuple[bool, str]:
+        """Validate one authorization, preferring dns-01 for zones we host.
+
+        dns-01 keeps issuance independent of HTTP reachability; http-01 stays as
+        the fallback for identifiers whose DNS we do not serve.
+        """
+        import acme.messages
+
+        authz_url = authz_resource.uri if hasattr(authz_resource, "uri") else str(authz_resource)
+        try:
+            response = client._post_as_get(authz_url)
+            identifier = acme.messages.Authorization.from_json(response.json()).identifier.value
+        except Exception:
+            identifier = None
+
+        if identifier and await AcmeService._find_zone(db, identifier):
+            ok, err = await AcmeService._validate_dns01(client, acc_key, authz_resource, db)
+            if ok:
+                return True, ""
+            logger.warning("dns-01 failed for %s (%s) — falling back to http-01", identifier, err)
+
+        return await AcmeService._validate_http01(client, acc_key, authz_resource)
+
+    @staticmethod
     def _parse_fullchain_pem(fullchain_pem: str) -> dict:
         """Extract validity/issuer/subject from the leaf certificate of a fullchain PEM."""
         try:
@@ -313,7 +509,7 @@ class AcmeService:
         order = client.new_order(csr_pem)
 
         for authz_resource in order.authorizations:
-            ok, err = await AcmeService._validate_http01(client, acc_key, authz_resource)
+            ok, err = await AcmeService._validate_authz(client, acc_key, authz_resource, db)
             if not ok:
                 logger.error(err)
                 cert.status = CertificateStatus.FAILED
@@ -403,7 +599,7 @@ class AcmeService:
 
         await log(CertificateLogLevel.INFO, f"Processing authorization for {fqdn}")
         for authz_resource in order.authorizations:
-            ok, err = await AcmeService._validate_http01(client, acc_key, authz_resource)
+            ok, err = await AcmeService._validate_authz(client, acc_key, authz_resource, db)
             if ok:
                 await log(CertificateLogLevel.SUCCESS, f"Authorization validated for {fqdn}")
             else:
