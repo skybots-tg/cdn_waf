@@ -51,11 +51,17 @@ async def _sync_dns_nodes_async():
     
     Syncs ALL nodes regardless of the enabled flag — data replication
     must happen even when a node is administratively disabled.
+
+    Enabled nodes are synced first: they are the ones actually answering
+    queries, so they must never be starved by a dead node burning through
+    the task time limit ahead of them.
     """
     engine, SessionLocal = create_task_db_session()
     try:
         async with SessionLocal() as db:
-            result = await db.execute(select(DNSNode))
+            result = await db.execute(
+                select(DNSNode).order_by(DNSNode.enabled.desc(), DNSNode.id)
+            )
             nodes = result.scalars().all()
             
             if not nodes:

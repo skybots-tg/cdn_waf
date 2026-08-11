@@ -22,6 +22,12 @@ from app.services.ssh_utils import SSHCredentials, ssh_execute, ssh_upload
 
 logger = logging.getLogger(__name__)
 
+# Per-node sync timeout. Kept well below the Celery soft time limit (120s) so a
+# single unreachable node cannot eat the whole task budget and starve the
+# remaining nodes — a stale replica keeps serving dead edge IPs.
+SYNC_TIMEOUT_SECONDS = 20.0
+
+
 class DNSNodeService:
     """Service for managing DNS nodes"""
     
@@ -418,9 +424,9 @@ ACME_EMAIL={settings.ACME_EMAIL}
             
             async with httpx.AsyncClient() as client:
                 response = await client.post(
-                    api_url, 
+                    api_url,
                     json=payload.model_dump(mode='json'),
-                    timeout=60.0
+                    timeout=SYNC_TIMEOUT_SECONDS
                 )
                 
                 if response.status_code == 200:
