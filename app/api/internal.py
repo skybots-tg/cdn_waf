@@ -162,8 +162,12 @@ async def get_edge_config(
     # agent rewrote nginx.conf and reloaded Nginx every 30 seconds. Requests
     # arriving during those reloads were dropped. Accept both spellings so old
     # and new agents alike get a proper 'not modified' answer.
+    # Версия 0 у клиента означает «у меня ещё ничего не применено» (агент
+    # держит её в памяти и обнуляет при перезапуске). Такому агенту конфиг
+    # нужно отдать всегда: у новой ноды config_version тоже 0, и сравнение
+    # 0 <= 0 оставляло её без первого конфига навсегда.
     client_version = since_version if since_version is not None else version
-    if client_version is not None and node.config_version <= client_version:
+    if client_version is not None and client_version > 0 and node.config_version <= client_version:
         return {
             "version": node.config_version,
             "changed": False
