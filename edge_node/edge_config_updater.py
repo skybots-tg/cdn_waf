@@ -812,16 +812,35 @@ class EdgeConfigUpdater:
                         "key_path": str(key_path),
                     }
                 else:
-                    logger.warning(
-                        "Could not fetch certificate %s for %s, disabling TLS for this domain",
-                        cert_id,
-                        domain.get("name"),
-                    )
-                    tls["enabled"] = False
-                    # Если TLS отвалился — не пытаемся форсить HTTPS
-                    if "force_https" in tls:
-                        tls["force_https"] = False
-                    domain.pop("tls_certificate", None)
+                    # Не смогли забрать сертификат из панели — это почти всегда
+                    # временная причина (перезапуск control plane, сетевой сбой).
+                    # Если рабочая копия уже лежит на диске, продолжаем с ней:
+                    # иначе один перезапуск панели выключает HTTPS у всех
+                    # проксируемых домов сразу, и сайты становятся недоступны.
+                    cert_path = self.certs_dir / f"{domain['name']}.crt"
+                    key_path = self.certs_dir / f"{domain['name']}.key"
+
+                    if cert_path.exists() and key_path.exists():
+                        logger.warning(
+                            "Could not fetch certificate %s for %s, keeping the copy already on disk",
+                            cert_id,
+                            domain.get("name"),
+                        )
+                        domain["tls_certificate"] = {
+                            "cert_path": str(cert_path),
+                            "key_path": str(key_path),
+                        }
+                    else:
+                        logger.warning(
+                            "Could not fetch certificate %s for %s and no copy on disk, disabling TLS",
+                            cert_id,
+                            domain.get("name"),
+                        )
+                        tls["enabled"] = False
+                        # Если TLS отвалился — не пытаемся форсить HTTPS
+                        if "force_https" in tls:
+                            tls["force_https"] = False
+                        domain.pop("tls_certificate", None)
             else:
                 # На всякий случай сбрасываем tls_certificate если TLS выключен
                 domain.pop("tls_certificate", None)
