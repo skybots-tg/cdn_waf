@@ -988,9 +988,17 @@ class EdgeConfigUpdater:
         # Идентичный конфиг не переписываем и не перезагружаем Nginx: лишний
         # reload рвёт запросы, которые пришли в этот момент, а при сбое сверки
         # версий такие reload'ы идут непрерывно.
+        def _without_header(text):
+            # Шапка содержит время генерации, оно меняется всегда.
+            return "\n".join(
+                line for line in text.splitlines()
+                if not line.startswith(("# Version:", "# Generated at:"))
+            )
+
         if (
             self.nginx_config_path.exists()
-            and self.nginx_config_path.read_text() == nginx_config
+            and _without_header(self.nginx_config_path.read_text())
+            == _without_header(nginx_config)
         ):
             self.current_version = version
             logger.info("Config identical to running one, reload skipped (version %s)", version)
