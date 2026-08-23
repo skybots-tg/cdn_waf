@@ -711,6 +711,9 @@ class EdgeConfigUpdater:
         url = f"{self.control_plane_url}/internal/edge/config"
         params = {
             "node_id": self.node_id,
+            # Панель читает since_version; version оставлен для совместимости
+            # со старыми сборками control plane.
+            "since_version": self.current_version,
             "version": self.current_version,
         }
         headers = {
@@ -962,6 +965,17 @@ class EdgeConfigUpdater:
                         pass  # Running as non-root or user doesn't exist
                 except Exception as e:
                     logger.warning("Failed to create cache dir %s: %s", cache_path, e)
+
+        # Идентичный конфиг не переписываем и не перезагружаем Nginx: лишний
+        # reload рвёт запросы, которые пришли в этот момент, а при сбое сверки
+        # версий такие reload'ы идут непрерывно.
+        if (
+            self.nginx_config_path.exists()
+            and self.nginx_config_path.read_text() == nginx_config
+        ):
+            self.current_version = version
+            logger.info("Config identical to running one, reload skipped (version %s)", version)
+            return
 
         # Backup existing config before overwriting
         backup_path = self.backup_config()

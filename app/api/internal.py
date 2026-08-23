@@ -140,6 +140,7 @@ from app.models.domain import DomainTLSSettings
 @router.get("/config")
 async def get_edge_config(
     since_version: Optional[int] = None,
+    version: Optional[int] = None,
     node: EdgeNode = Depends(verify_edge_node),
     db: AsyncSession = Depends(get_db)
 ) -> Dict[str, Any]:
@@ -153,8 +154,16 @@ async def get_edge_config(
     Query params:
     - since_version: Only return config if version is newer
     """
-    # Check if config version changed
-    if since_version is not None and node.config_version <= since_version:
+    # Check if config version changed.
+    #
+    # Deployed agents send the parameter as `version` (see edge_node/
+    # edge_config_updater.py: fetch_config), so accepting only `since_version`
+    # meant this check never fired: every poll answered `changed: True`, the
+    # agent rewrote nginx.conf and reloaded Nginx every 30 seconds. Requests
+    # arriving during those reloads were dropped. Accept both spellings so old
+    # and new agents alike get a proper 'not modified' answer.
+    client_version = since_version if since_version is not None else version
+    if client_version is not None and node.config_version <= client_version:
         return {
             "version": node.config_version,
             "changed": False
