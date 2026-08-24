@@ -437,20 +437,41 @@ def _edge_failure_reason(
     return "; ".join(parts)
 
 
+def _heartbeat_is_fresh(node, max_age_seconds: int = 300) -> bool:
+    """Отчитывалась ли нода в последние минуты.
+
+    Признак того, что нода жива и выключена автоматикой, а не человеком:
+    выключенная руками нода обычно погашена целиком и heartbeat не шлёт.
+    """
+    last = getattr(node, "last_heartbeat", None)
+    if last is None:
+        return False
+    from datetime import datetime, timezone
+
+    if last.tzinfo is None:
+        last = last.replace(tzinfo=timezone.utc)
+    age = (datetime.now(timezone.utc) - last).total_seconds()
+    return 0 <= age <= max_age_seconds
+
+
 async def _check_auto_disabled_recovery(db, redis_client, alert_svc):
     """Re-enable nodes that were auto-disabled and are now responding.
 
-    Only touches nodes marked with `edge:auto_disabled:{id}` in Redis.
-    Manually disabled nodes are never probed.
+    Возврат срабатывает по метке `edge:auto_disabled:{id}` в Redis, а если она
+    истекла — по свежему heartbeat: нода, которая продолжает отчитываться,
+    очевидно жива и выключена не руками. Без этого запаса три ноды провисели
+    выключенными и не вернулись: метка живёт сутки, а сбой был раньше.
+
+    Выборка идёт по всем выключенным нодам, без условия на статус. Обработчик
+    heartbeat переводит статус в "online", поэтому ожившая нода почти сразу
+    переставала подходить под старое условие `status == "offline"` и выпадала
+    из проверки навсегда.
     """
     from app.models.edge_node import EdgeNode
     from app.tasks.dns_tasks import sync_dns_nodes
 
     result = await db.execute(
-        select(EdgeNode).where(
-            EdgeNode.enabled == False,
-            EdgeNode.status == "offline",
-        )
+        select(EdgeNode).where(EdgeNode.enabled == False)
     )
     disabled_nodes = list(result.scalars().all())
     re_enabled_any = False
@@ -458,7 +479,9 @@ async def _check_auto_disabled_recovery(db, redis_client, alert_svc):
 
     for node in disabled_nodes:
         marker = await redis_client.get(f"edge:auto_disabled:{node.id}")
-        if not marker:
+        if not marker and not _heartbeat_is_fresh(node):
+            # Ни метки автовыключения, ни признаков жизни — значит ноду
+            # выключили руками, и трогать её мы не вправе.
             continue
 
         try:

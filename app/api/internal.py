@@ -141,7 +141,13 @@ from app.models.domain import DomainTLSSettings
 async def get_edge_config(
     since_version: Optional[int] = None,
     version: Optional[int] = None,
-    node: EdgeNode = Depends(verify_edge_node),
+    # Конфиг отдаём и выключенной ноде. Иначе авто-выключение становится
+    # необратимым: чтобы вернуться, нода должна пройти health-check по TLS, для
+    # TLS ей нужен конфиг, а конфиг ей не дают, потому что она выключена. Так
+    # три ноды и провисели выключенными, продолжая слать heartbeat.
+    # Флаг enabled решает, попадёт ли нода в DNS-ответ (см. app/dns_server.py),
+    # и этого достаточно: трафик на неё не пойдёт, пока она не оживёт.
+    node: EdgeNode = Depends(verify_edge_node_allow_disabled),
     db: AsyncSession = Depends(get_db)
 ) -> Dict[str, Any]:
     """

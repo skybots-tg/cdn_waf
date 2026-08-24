@@ -19,6 +19,23 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
+def _as_int(value, default=None):
+    """Целое из того, что прислала нода, или default.
+
+    Nginx подставляет в лог пустую строку или дефис там, где переменной нет:
+    так в status и waf_rule_id приходило "", и вставка партии логов
+    падала целиком с 'str' object cannot be interpreted as an integer.
+    Партия — это сотни строк от всех нод сразу, поэтому одна пустая переменная
+    роняла приём логов у всех.
+    """
+    if value is None or value == "" or value == "-":
+        return default
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
 # verify_edge_node is defined in internal.py which imports us at the bottom,
 # so by the time our endpoints are called, the function is fully available.
 from app.api.internal import verify_edge_node
@@ -82,8 +99,8 @@ async def receive_logs(
             method=log_data.get("method"),
             path=path,
             query_string=query_string,
-            status_code=log_data.get("status"),
-            bytes_sent=log_data.get("bytes_sent", 0),
+            status_code=_as_int(log_data.get("status")),
+            bytes_sent=_as_int(log_data.get("bytes_sent"), 0),
             client_ip=log_data.get("client_ip"),
             cache_status=cache_status,
             user_agent=log_data.get("user_agent"),
@@ -91,7 +108,7 @@ async def receive_logs(
             request_time=request_time_ms,
             country_code=log_data.get("country_code") or None,
             waf_status=log_data.get("waf_status") or None,
-            waf_rule_id=log_data.get("waf_rule_id"),
+            waf_rule_id=_as_int(log_data.get("waf_rule_id")),
         )
         log_entries.append(entry)
 
