@@ -431,6 +431,9 @@ class LogShipper:
         self.control_plane_url = config["control_plane"]["url"].rstrip("/")
         self.log_file = Path("/var/log/nginx/cdn_access.json.log")
         self.batch_size = 100
+        # Больше этого в памяти не держим. Когда панель отвечала ошибкой на
+        # каждую партию, батч рос без предела вместе с потреблением памяти.
+        self.max_batch = 5000
         self.poll_interval = 1.0
         self.request_timeout = 10.0
         self.geoip = GeoIPLookup()
@@ -468,21 +471,28 @@ class LogShipper:
 
     async def run(self):
         logger.info("Log Shipper started (file=%s)", self.log_file)
-        
+
+        # При первом запуске начинаем с конца: тянуть сутки истории незачем.
+        # После ротации, наоборот, читаем новый файл с начала, иначе потеряем
+        # всё, что nginx записал туда до того, как мы заметили подмену.
+        from_end = True
+
         while True:
             if not self.log_file.exists():
                 await asyncio.sleep(5)
                 continue
-                
+
             try:
                 # Open file and tail it
                 async with aiofiles.open(self.log_file, mode='r') as f:
-                    # Seek to end initially
-                    await f.seek(0, 2)
-                    
+                    if from_end:
+                        await f.seek(0, 2)
+                    from_end = False
+                    opened_inode = self._inode()
+
                     batch = []
                     last_send = datetime.now()
-                    
+
                     while True:
                         line = await f.readline()
                         if line:
@@ -495,8 +505,15 @@ class LogShipper:
                                 logger.warning("Invalid JSON in log line")
                                 continue
                         else:
+                            if self._rotated(opened_inode, await f.tell()):
+                                if batch:
+                                    await self.send_logs(batch)
+                                logger.info(
+                                    "Лог ротирован, переоткрываю %s", self.log_file
+                                )
+                                break
                             await asyncio.sleep(self.poll_interval)
-                        
+
                         # Send if batch full or time elapsed (every 5 seconds)
                         now = datetime.now()
                         if len(batch) >= self.batch_size or (batch and (now - last_send).total_seconds() > 5):
@@ -506,10 +523,44 @@ class LogShipper:
                             else:
                                 # Keep batch and retry next loop
                                 await asyncio.sleep(2)
-                                
+                                if len(batch) > self.max_batch:
+                                    dropped = len(batch) - self.max_batch
+                                    batch = batch[-self.max_batch:]
+                                    logger.warning(
+                                        "Панель не принимает логи, отбросил "
+                                        "%s самых старых строк", dropped
+                                    )
+
             except Exception as e:
                 logger.error("Error in log shipper loop: %s", e)
+                # Позиция потеряна — начинаем с конца, дубли хуже пропусков.
+                from_end = True
                 await asyncio.sleep(5)
+
+    def _inode(self):
+        """Номер inode лог-файла или None, если файла нет."""
+        try:
+            return self.log_file.stat().st_ino
+        except OSError:
+            return None
+
+    def _rotated(self, opened_inode, position: int) -> bool:
+        """Файл под нами подменили или обрезали.
+
+        logrotate раз в сутки переименовывает cdn_access.json.log в .log.1 и
+        создаёт новый; nginx переоткрывает свои дескрипторы по сигналу, а мы
+        держим старый. Без этой проверки readline вечно возвращает пустоту, и
+        нода молча перестаёт слать логи до перезапуска агента — именно так три
+        ноды из четырёх замолчали, оставаясь при этом полностью живыми.
+        """
+        try:
+            on_disk = self.log_file.stat()
+        except OSError:
+            return False
+        if opened_inode is not None and on_disk.st_ino != opened_inode:
+            return True
+        # copytruncate оставляет тот же inode, но обнуляет длину.
+        return on_disk.st_size < position
 
 
 class EdgeConfigUpdater:
