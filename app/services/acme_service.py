@@ -462,6 +462,32 @@ class AcmeService:
         cert.issuer = cert_info["issuer"]
         cert.subject = cert_info["subject"]
 
+    @staticmethod
+    async def _bump_edge_configs(db: AsyncSession) -> None:
+        """
+        Просит edge-ноды перечитать конфигурацию после выпуска сертификата.
+
+        Агент на ноде ходит за конфигом с `since_version` и получает 304, пока
+        версия ноды не выросла. Без этого шага свежий сертификат остаётся
+        лежать в базе: ноды о нём не узнают и продолжают отдавать старый —
+        а при автопродлении это значит просроченный сертификат на живом
+        домене.
+        """
+        from app.models.edge_node import EdgeNode
+
+        try:
+            result = await db.execute(select(EdgeNode).where(EdgeNode.enabled == True))  # noqa: E712
+            nodes = list(result.scalars().all())
+            for node in nodes:
+                node.config_version = (node.config_version or 0) + 1
+            await db.commit()
+            logger.info("Bumped config_version for %d edge nodes after certificate change", len(nodes))
+        except Exception as e:
+            # Сертификат уже выпущен и сохранён — ронять весь заказ из-за
+            # неудачного уведомления нод нельзя. Ноды подхватят его при
+            # следующем изменении конфига, а в логе останется причина.
+            logger.error("Failed to bump edge config_version after issuance: %s", e)
+
     # ── public order methods ──────────────────────────────────────────
 
     @staticmethod
@@ -532,6 +558,7 @@ class AcmeService:
 
         await db.commit()
         logger.info(f"Certificate issued successfully for {domain.name}")
+        await AcmeService._bump_edge_configs(db)
 
     @staticmethod
     async def process_single_acme_order(
@@ -637,6 +664,7 @@ class AcmeService:
             f"Valid until: {cert_info['not_after']}",
         )
         logger.info(f"Certificate issued successfully for {fqdn}")
+        await AcmeService._bump_edge_configs(db)
 
     @staticmethod
     async def request_acme_certificate(

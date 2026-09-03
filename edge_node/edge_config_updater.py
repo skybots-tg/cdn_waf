@@ -584,6 +584,10 @@ class EdgeConfigUpdater:
         self.control_plane_url = self.config["control_plane"]["url"].rstrip("/")
         self.api_key = self.config["control_plane"]["api_key"]
         self.current_version = 0
+        # Сертификаты сменились на диске в текущем цикле обновления. Отдельный
+        # признак нужен потому, что при продлении меняется только содержимое
+        # файлов, а сам nginx-конфиг остаётся байт в байт прежним.
+        self.certificates_changed = False
 
         self.nginx_config_path = Path(self.config["nginx"]["config_path"])
         self.certs_dir = Path(self.config["nginx"].get("certs_dir", "/etc/nginx/ssl/cdn"))
@@ -817,10 +821,42 @@ class EdgeConfigUpdater:
             logger.error("Failed to fetch certificate %s: %s", cert_id, e)
             return None
 
+    def _write_if_changed(self, path: Path, content: str, mode: int = 0o644) -> bool:
+        """
+        Пишет файл и говорит, изменилось ли его содержимое.
+
+        Нужен именно ответ «изменилось»: nginx читает сертификаты один раз, при
+        загрузке конфигурации, и держит их в памяти. Перезаписать файл на диске
+        мало — без reload домен продолжит отдавать прежний сертификат.
+        """
+        unchanged = False
+        try:
+            unchanged = path.exists() and path.read_text() == content
+        except Exception:
+            # Нечитаемый файл считаем изменившимся: перезапишем и перезагрузим.
+            unchanged = False
+
+        if not unchanged:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(content)
+
+        # Права выставляем и когда содержимое совпало: файл мог приехать сюда
+        # из бэкапа или прошлой версии агента с чужой маской, и приватный ключ
+        # остался бы читаемым для всех.
+        try:
+            os.chmod(path, mode)
+        except Exception as e:
+            logger.warning("Failed to chmod %s: %s", path, e)
+
+        return not unchanged
+
     async def process_certificates(self, config: Dict[str, Any]) -> Dict[str, Any]:
         """Process certificates for domains and normalize domain structures"""
         domains: List[Dict[str, Any]] = config.get("domains") or []
         processed: List[Dict[str, Any]] = []
+        # Взводится в _write_if_changed; читается в update_config, чтобы
+        # обновлённый сертификат доехал до nginx даже при неизменном конфиге.
+        self.certificates_changed = False
 
         for domain in domains:
             # Нормализуем структуру домена, чтобы шаблон не падал
@@ -842,20 +878,17 @@ class EdgeConfigUpdater:
                     cert_path = self.certs_dir / f"{domain['name']}.crt"
                     key_path = self.certs_dir / f"{domain['name']}.key"
 
-                    # Write certificate (full chain)
-                    with open(cert_path, "w") as f:
-                        f.write(cert_data["certificate"])
-                        chain = cert_data.get("chain")
-                        if chain:
-                            f.write("\n")
-                            f.write(chain)
+                    # Full chain одним файлом — как его ждёт ssl_certificate.
+                    fullchain = cert_data["certificate"]
+                    chain = cert_data.get("chain")
+                    if chain:
+                        fullchain = f"{fullchain}\n{chain}"
 
-                    # Write private key
-                    with open(key_path, "w") as f:
-                        f.write(cert_data["private_key"])
-
-                    # Set permission for key file
-                    os.chmod(key_path, 0o600)
+                    if self._write_if_changed(cert_path, fullchain):
+                        self.certificates_changed = True
+                        logger.info("Certificate for %s changed on disk", domain.get("name"))
+                    if self._write_if_changed(key_path, cert_data["private_key"], mode=0o600):
+                        self.certificates_changed = True
 
                     # Update domain config with paths
                     domain["tls_certificate"] = {
@@ -1046,13 +1079,29 @@ class EdgeConfigUpdater:
                 if not line.startswith(("# Version:", "# Generated at:"))
             )
 
-        if (
+        config_identical = (
             self.nginx_config_path.exists()
             and _without_header(self.nginx_config_path.read_text())
             == _without_header(nginx_config)
-        ):
+        )
+
+        if config_identical and not self.certificates_changed:
             self.current_version = version
             logger.info("Config identical to running one, reload skipped (version %s)", version)
+            return
+
+        if config_identical:
+            # Пути к сертификатам в конфиге те же, а содержимое файлов новое:
+            # так выглядит любое продление. Nginx держит старый сертификат в
+            # памяти до reload, поэтому перезагружаем, ничего не переписывая.
+            logger.info(
+                "Config unchanged, but certificates were updated — reloading nginx (version %s)",
+                version,
+            )
+            if self.reload_nginx():
+                self.current_version = version
+            else:
+                logger.error("Failed to reload nginx after certificate update")
             return
 
         # Backup existing config before overwriting
