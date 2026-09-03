@@ -9,11 +9,25 @@ reload — и nginx продолжал отдавать из памяти ста
 """
 
 import sys
+import types
 from pathlib import Path
+from unittest.mock import MagicMock
 
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "edge_node"))
+
+# Агент живёт на edge-нодах и тянет их зависимости (aiofiles, psutil); на
+# control plane, где гоняются тесты, их нет и быть не должно. Проверяемая
+# логика — запись файлов и решение о reload — ни одну из них не трогает,
+# поэтому недостающие подменяем заглушками, а установленные оставляем как есть.
+for _name in ("aiofiles", "psutil"):
+    try:
+        __import__(_name)
+    except ImportError:
+        _stub = types.ModuleType(_name)
+        _stub.__getattr__ = lambda attr: MagicMock()  # noqa: B023
+        sys.modules[_name] = _stub
 
 from edge_config_updater import EdgeConfigUpdater  # noqa: E402
 
