@@ -269,8 +269,13 @@ class EdgeComponentService:
 
         update_config = action != "update"
 
+        # Агент — это не один файл: edge_config_updater импортирует
+        # edge_cache_purger на первой строке. Пока сюда заливали только сам
+        # updater, обновление на ноде без этого модуля роняло сервис в цикл
+        # перезапусков с ModuleNotFoundError — и нода выпадала из ротации.
         files_to_upload = [
             ("edge_node/edge_config_updater.py", "/opt/cdn_waf/edge_config_updater.py"),
+            ("edge_node/edge_cache_purger.py", "/opt/cdn_waf/edge_cache_purger.py"),
             ("edge_node/requirements.txt", "/opt/cdn_waf/requirements.txt"),
         ]
         tmp_config_path = None
