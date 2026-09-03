@@ -1,10 +1,10 @@
 """Internal API — log ingestion, ACME challenges, and file download for edge nodes."""
 import logging
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import PlainTextResponse
-from sqlalchemy import select
+from sqlalchemy import String, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
@@ -34,6 +34,30 @@ def _as_int(value, default=None):
         return int(value)
     except (TypeError, ValueError):
         return default
+
+
+# Максимальные длины строковых колонок request_logs. Nginx присылает path,
+# query_string, referer и user_agent любой длины (сканеры шлют URL на десятки
+# килобайт), а колонки — VARCHAR(2048)/VARCHAR(512). Одна такая строка роняла
+# INSERT всей партии (сотни записей от всех нод), нода повторяла отправку,
+# а PostgreSQL на каждую попытку писал в лог полный текст запроса — ~2.5 ГБ/сутки.
+_STR_LIMITS: Dict[str, int] = {
+    col.name: col.type.length
+    for col in RequestLog.__table__.columns
+    if isinstance(col.type, String) and col.type.length
+}
+
+
+def _fit(value: Any, column: str) -> Optional[str]:
+    """Приводит значение к строке и обрезает по длине колонки request_logs."""
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        value = str(value)
+    limit = _STR_LIMITS.get(column)
+    if limit and len(value) > limit:
+        return value[:limit]
+    return value
 
 
 # verify_edge_node is defined in internal.py which imports us at the bottom,
@@ -96,18 +120,18 @@ async def receive_logs(
             timestamp=timestamp,
             domain_id=domain_id,
             edge_node_id=node.id,
-            method=log_data.get("method"),
-            path=path,
-            query_string=query_string,
+            method=_fit(log_data.get("method"), "method"),
+            path=_fit(path, "path"),
+            query_string=_fit(query_string, "query_string"),
             status_code=_as_int(log_data.get("status")),
             bytes_sent=_as_int(log_data.get("bytes_sent"), 0),
-            client_ip=log_data.get("client_ip"),
-            cache_status=cache_status,
-            user_agent=log_data.get("user_agent"),
-            referer=log_data.get("referer"),
+            client_ip=_fit(log_data.get("client_ip"), "client_ip"),
+            cache_status=_fit(cache_status, "cache_status"),
+            user_agent=_fit(log_data.get("user_agent"), "user_agent"),
+            referer=_fit(log_data.get("referer"), "referer"),
             request_time=request_time_ms,
-            country_code=log_data.get("country_code") or None,
-            waf_status=log_data.get("waf_status") or None,
+            country_code=_fit(log_data.get("country_code") or None, "country_code"),
+            waf_status=_fit(log_data.get("waf_status") or None, "waf_status"),
             waf_rule_id=_as_int(log_data.get("waf_rule_id")),
         )
         log_entries.append(entry)
