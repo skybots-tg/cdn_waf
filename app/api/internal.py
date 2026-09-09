@@ -137,6 +137,58 @@ async def debug_db_state(
 from app.models.dns import DNSRecord
 from app.models.domain import DomainTLSSettings
 
+
+def _dns_origin(record):
+    """Preserve the existing A-record fallback, including its weight."""
+    return {
+        "id": -(record.id * 10 + hash(record.name) % 10),
+        "host": record.content,
+        "port": 80,
+        "is_backup": False,
+        "weight": record.weight or 100,
+        "protocol": "http",
+    }
+
+
+def _resolve_cname_origins(record, domain_name, dns_records, origins_by_name):
+    """Resolve same-zone aliases without looking up public CDN addresses.
+
+    A hostname used directly as an upstream may resolve back to the edge and
+    loop forever. Follow only this zone's stored records, preserving explicit
+    origins (ports, health filtering and weights). External, missing, cyclic or
+    excessively long chains fail closed; they must not break the whole config.
+    """
+    zone = domain_name.lower().rstrip(".")
+    records_by_name = {}
+    for item in dns_records:
+        records_by_name.setdefault(item.name.lower(), []).append(item)
+    seen = {record.name.lower()}
+    current = record
+    for _ in range(16):
+        target = current.content.strip().lower().rstrip(".")
+        if target in (zone, "@"):
+            name = "@"
+        elif target.endswith("." + zone):
+            name = target[:-(len(zone) + 1)]
+        else:
+            return []
+        if name in seen:
+            return []
+        seen.add(name)
+        if name in origins_by_name:
+            return [dict(origin) for origin in origins_by_name[name]]
+        targets = records_by_name.get(name, [])
+        addresses = [item for item in targets if item.type == "A" and item.content]
+        if addresses:
+            # A DNS-only target may still be the origin of a proxied alias.
+            return [_dns_origin(item) for item in addresses]
+        aliases = [item for item in targets if item.type == "CNAME" and item.content]
+        if len(aliases) != 1:
+            return []
+        current = aliases[0]
+    return []
+
+
 @router.get("/config")
 async def get_edge_config(
     since_version: Optional[int] = None,
@@ -188,11 +240,11 @@ async def get_edge_config(
     config_domains = []
     
     for domain in domains:
-        # Get all A records for this domain (including root and subdomains)
+        # Include aliases, but never pass their public hostname as an upstream.
         dns_records_result = await db.execute(
             select(DNSRecord).where(
                 DNSRecord.domain_id == domain.id,
-                DNSRecord.type == "A"
+                DNSRecord.type.in_(["A", "CNAME"])
             )
         )
         dns_records = dns_records_result.scalars().all()
@@ -230,7 +282,7 @@ async def get_edge_config(
             
         # Process DNS records to create virtual origins for subdomains
         for record in dns_records:
-            if not record.content or record.proxied is False: 
+            if record.type != "A" or not record.content or record.proxied is False:
                 continue
                 
             # Determine subdomain name ("@" or "sub")
@@ -249,14 +301,23 @@ async def get_edge_config(
                 subdomains_map[sub_name] = []
             
             # Add this IP as an origin for this subdomain
-            subdomains_map[sub_name].append({
-                "id": -(record.id * 10 + hash(sub_name) % 10),
-                "host": record.content,
-                "port": 80,
-                "is_backup": False,
-                "weight": record.weight or 100,
-                "protocol": "http"
-            })
+            subdomains_map[sub_name].append(_dns_origin(record))
+
+        for record in dns_records:
+            if record.type != "CNAME" or not record.content or not record.proxied:
+                continue
+            if record.name in subdomains_map:
+                continue  # Preserve an explicitly configured origin/A record.
+            origins = _resolve_cname_origins(
+                record, domain.name, dns_records, subdomains_map
+            )
+            if origins:
+                subdomains_map[record.name] = origins
+            else:
+                logger.warning(
+                    "Skipping unresolved proxied CNAME id=%s in zone %s",
+                    record.id, domain.name,
+                )
 
         # Get other rules (shared across all subdomains for now)
         cache_rules_result = await db.execute(
