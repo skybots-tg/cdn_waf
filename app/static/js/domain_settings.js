@@ -1250,9 +1250,5 @@ function getToken() {
     return localStorage.getItem('access_token') || localStorage.getItem('auth_token') || '';
 }
 
-function escapeHtml(text) {
-    if (!text) return '';
-    const div = document.createElement('div');
-    div.textContent = text;
-    return div.innerHTML;
-}
+// escapeHtml is provided globally by main.js (loaded before this file in base.html);
+// using that single correct implementation avoids the incomplete quote-unsafe copy.

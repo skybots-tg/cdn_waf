@@ -1,16 +1,31 @@
 """Application configuration"""
+import logging
 from typing import List, Optional
 from pydantic_settings import BaseSettings
 from pydantic import validator, PostgresDsn
 
+logger = logging.getLogger(__name__)
+
+# Placeholder values shipped in .env.example. Booting a production instance with
+# any of these means anyone can forge tokens / decrypt data, so we refuse.
+_INSECURE_SECRET_PREFIXES = ("change-me", "changeme", "test_", "test-", "secret")
+_MIN_SECRET_LENGTH = 32
+
+
+def _is_insecure_secret(value: str) -> bool:
+    if not value or len(value) < _MIN_SECRET_LENGTH:
+        return True
+    lowered = value.lower()
+    return any(lowered.startswith(prefix) for prefix in _INSECURE_SECRET_PREFIXES)
+
 
 class Settings(BaseSettings):
     """Application settings"""
-    
+
     # Application
     APP_NAME: str = "FlareCloud"
     APP_ENV: str = "development"
-    DEBUG: bool = True
+    DEBUG: bool = False
     SECRET_KEY: str
     
     # Server
@@ -36,6 +51,9 @@ class Settings(BaseSettings):
     JWT_ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 2880  # 48 hours
     REFRESH_TOKEN_EXPIRE_DAYS: int = 30  # 30 days
+
+    # Internal node-to-control-plane shared secret (DNS/edge sync endpoints).
+    NODE_SYNC_TOKEN: Optional[str] = None
     
     # CORS
     CORS_ORIGINS: List[str] = ["http://localhost:3000", "http://localhost:8000"]
@@ -82,11 +100,38 @@ class Settings(BaseSettings):
     # Logging
     LOG_LEVEL: str = "INFO"
     
+    @property
+    def is_production(self) -> bool:
+        return self.APP_ENV.lower() in ("production", "prod") or not self.DEBUG
+
+    @validator("JWT_SECRET_KEY")
+    def _validate_jwt_secret(cls, v, values):
+        # A predictable JWT secret lets anyone mint a superuser token, so this is
+        # a hard failure in production. Rotating it only logs users out.
+        env = (values.get("APP_ENV") or "").lower()
+        is_prod = env in ("production", "prod") or values.get("DEBUG") is False
+        if is_prod and _is_insecure_secret(v):
+            raise ValueError(
+                "JWT_SECRET_KEY is a default/weak value; set a strong random secret "
+                "(e.g. `openssl rand -hex 48`) before running in production."
+            )
+        return v
+
     class Config:
         env_file = ".env"
         case_sensitive = True
 
 
 settings = Settings()
+
+# SECRET_KEY derives the Fernet key that encrypts certificate private keys, so it
+# cannot be rotated without a decrypt-then-re-encrypt migration. We therefore warn
+# loudly instead of hard-failing, to avoid bricking an instance mid-migration.
+if settings.is_production and _is_insecure_secret(settings.SECRET_KEY):
+    logger.critical(
+        "SECRET_KEY is a default/weak value in production. It encrypts certificate "
+        "private keys — rotate it with the re-encryption migration (see "
+        "scripts/rotate_secret_key.py) as soon as possible."
+    )
 
 

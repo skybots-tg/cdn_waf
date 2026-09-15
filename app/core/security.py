@@ -8,7 +8,6 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 import hashlib
-import json
 
 from app.core.config import settings
 from app.core.database import get_db
@@ -71,20 +70,14 @@ async def get_current_user(
     Supports two authentication methods:
     1. JWT tokens (standard user login)
     2. API keys (for programmatic access, starts with 'fck_')
-    
-    In DEBUG mode, falls back to admin user if no credentials provided.
+
+    Authentication is always required — there is no DEBUG/anonymous fallback, so
+    a missing or invalid credential is a hard 401 in every environment.
     """
     # Import here to avoid circular dependency
     from app.services.user_service import UserService
-    
+
     if not credentials:
-        # In DEBUG mode, allow access as default admin if no token provided
-        if settings.DEBUG:
-            user_service = UserService(db)
-            user = await user_service.get_by_id(1)
-            if user:
-                return user
-        
         raise HTTPException(
             status_code=401,
             detail="Not authenticated",
@@ -254,41 +247,13 @@ async def get_optional_current_user(
     credentials: Optional[HTTPAuthorizationCredentials] = Security(security),
     db: AsyncSession = Depends(get_db)
 ):
-    """Get current user if authenticated, None otherwise (for optional auth endpoints)
-    
-    This function is used for endpoints that work both with and without authentication.
-    In DEBUG mode, returns admin user for convenience.
-    In production, returns None if no valid credentials provided.
+    """Deprecated alias that now REQUIRES authentication.
+
+    Historically this returned ``None`` for anonymous callers, which left
+    analytics, request logs, certificate issue/renew/delete and domain
+    list/create reachable with no token (the handlers guarded their access
+    checks behind ``if current_user:``). It now delegates to
+    ``get_current_user`` so every caller is authenticated; the remaining
+    references are being migrated to ``get_current_active_user`` directly.
     """
-    from app.services.user_service import UserService
-    
-    if not credentials:
-        # In DEBUG mode, return admin user for convenience
-        if settings.DEBUG:
-            user_service = UserService(db)
-            user = await user_service.get_by_id(1)
-            return user
-        return None
-    
-    try:
-        token = credentials.credentials
-        
-        # Check if this is an API key
-        if token.startswith('fck_'):
-            return await authenticate_api_key(token, db)
-        
-        # JWT token
-        payload = decode_token(token)
-        
-        if payload.get("type") != "access":
-            return None
-        
-        user_id = int(payload.get("sub"))
-        user_service = UserService(db)
-        user = await user_service.get_by_id(user_id)
-        
-        if user and user.is_active:
-            return user
-        return None
-    except Exception:
-        return None
+    return await get_current_user(credentials=credentials, db=db)

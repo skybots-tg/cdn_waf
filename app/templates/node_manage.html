@@ -114,7 +114,14 @@
                 <div class="form-group">
                     <label class="form-label">API Key</label>
                     <div class="input-group">
-                        <input type="text" class="form-input" value="{{ node.api_key or '' }}" readonly id="api-key" style="font-family: monospace;">
+                        {# Rendered masked (type=password) so the edge-node shared token is not shown in
+                           plaintext on screen. The value is still present in the DOM because copy /
+                           regenerate read it client-side; fully removing the secret from the page would
+                           require a server-side "reveal" endpoint, which is out of scope for this frontend fix. #}
+                        <input type="password" class="form-input" value="{{ node.api_key or '' }}" readonly id="api-key" style="font-family: monospace;">
+                        <button class="btn btn-secondary" onclick="toggleApiKeyVisibility()" type="button" id="api-key-toggle" title="Показать/скрыть ключ">
+                            <i class="fas fa-eye"></i>
+                        </button>
                         <button class="btn btn-secondary" onclick="copyToClipboard('api-key')" type="button">
                             <i class="fas fa-copy"></i>
                         </button>
@@ -1129,6 +1136,19 @@ function copyToClipboard(elementId) {
     });
 }
 
+function toggleApiKeyVisibility() {
+    const el = document.getElementById('api-key');
+    const icon = document.querySelector('#api-key-toggle i');
+    if (!el) return;
+    if (el.type === 'password') {
+        el.type = 'text';
+        if (icon) icon.className = 'fas fa-eye-slash';
+    } else {
+        el.type = 'password';
+        if (icon) icon.className = 'fas fa-eye';
+    }
+}
+
 async function regenerateApiKey() {
     if (!confirm('Вы уверены, что хотите сгенерировать новый API ключ? Старый ключ перестанет работать, и вам придется обновить конфигурацию на ноде.')) {
         return;
@@ -1268,15 +1288,8 @@ function log(message, type = 'normal') {
     term.scrollTop = term.scrollHeight;
 }
 
-function escapeHtml(text) {
-    if (!text) return '';
-    return text
-        .replace(/&/g, "&amp;")
-        .replace(/</g, "&lt;")
-        .replace(/>/g, "&gt;")
-        .replace(/"/g, "&quot;")
-        .replace(/'/g, "&#039;");
-}
+// escapeHtml is provided globally by main.js (loaded via base.html before this script runs);
+// using that single correct implementation avoids a divergent copy.
 
 function clearLogs() {
     document.getElementById('install-logs').innerHTML = '<div class="terminal-line"><span class="terminal-prompt">$</span> cleared</div>';

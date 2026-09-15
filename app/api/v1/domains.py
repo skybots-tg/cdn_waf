@@ -1,5 +1,6 @@
 """Domain endpoints"""
 import asyncio
+import re
 from typing import List, Optional, Set, Tuple
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from fastapi.concurrency import run_in_threadpool
@@ -7,13 +8,17 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 import logging
 
-from app.core.config import settings
 
 import dns.resolver
 import dns.exception
 
 from app.core.database import get_db
-from app.core.security import get_current_active_user, get_optional_current_user, require_domain_access, get_allowed_domain_ids
+from app.core.security import get_current_active_user, get_allowed_domain_ids
+from app.api.v1.dependencies import (
+    get_domain_for_user,
+    get_user_org_ids,
+    get_or_create_primary_org,
+)
 from app.schemas.domain import (
     DomainCreate,
     DomainUpdate,
@@ -21,7 +26,7 @@ from app.schemas.domain import (
 )
 from app.services.domain_service import DomainService
 from app.models.user import User
-from app.models.domain import Domain
+from app.models.domain import Domain, DomainStatus
 from app.models.dns import DNSRecord
 from app.models.certificate import Certificate, CertificateStatus
 from app.tasks.dns_tasks import sync_dns_nodes
@@ -31,6 +36,11 @@ logger = logging.getLogger(__name__)
 
 PUBLIC_RESOLVERS = ["1.1.1.1", "8.8.8.8", "9.9.9.9"]
 BASE_RECORD_TYPES = ["A", "AAAA", "MX", "TXT", "CNAME", "NS"]
+
+# A conservative hostname matcher (labels of a-z0-9-, dots between them).
+_HOSTNAME_RE = re.compile(
+    r"^(?=.{1,253}$)(?!-)[A-Za-z0-9-]{1,63}(?<!-)(\.(?!-)[A-Za-z0-9-]{1,63}(?<!-))+$"
+)
 
 
 async def _resolve(
@@ -66,18 +76,22 @@ async def _resolve(
 @router.get("/scan-dns", tags=["dns"])
 async def scan_dns_records(
     domain: str = Query(..., description="Domain name to scan"),
-    nameservers: Optional[List[str]] = Query(
-        None,
-        description="Опциональный список nameservers для прямого запроса",
-    ),
-    current_user: User = Depends(get_optional_current_user),
+    current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db),
 ):
     """
     # Сканировать существующие DNS записи домена
-    
-    Сканирует DNS записи используя публичные DNS серверы или указанные nameservers.
+
+    Сканирует DNS записи через фиксированный список публичных резолверов.
     """
+    # Reject anything that isn't a bare hostname so this can't be turned into an
+    # arbitrary-target DNS query engine (the caller no longer picks nameservers).
+    if not _HOSTNAME_RE.match(domain or ""):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid domain name",
+        )
+
     records: List[dict] = []
     seen: Set[Tuple[str, str, str, Optional[int]]] = set()
 
@@ -85,13 +99,12 @@ async def scan_dns_records(
     resolver.timeout = 3
     resolver.lifetime = 3
 
-    if nameservers:
-        resolver.nameservers = nameservers
-    else:
-        try:
-            resolver.nameservers = PUBLIC_RESOLVERS
-        except Exception as exc:
-            logger.warning("Failed to set public resolvers: %s", exc)
+    # Always use our fixed public resolvers; a caller-supplied nameserver list
+    # would let this endpoint reflect DNS traffic at (or probe) arbitrary hosts.
+    try:
+        resolver.nameservers = PUBLIC_RESOLVERS
+    except Exception as exc:
+        logger.warning("Failed to set public resolvers: %s", exc)
 
     def add_record(data: dict):
         """Добавляет запись, избегая дублей."""
@@ -181,39 +194,36 @@ async def scan_dns_records(
 
 @router.get("/", response_model=List[DomainResponse])
 async def list_domains(
-    current_user: User = Depends(get_optional_current_user),
+    current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """List all domains for current user's organization"""
-    from app.api.v1.dependencies import get_user_org_ids
-    org_ids = await get_user_org_ids(current_user, db) if current_user else {1}
-
+    """List domains the caller may see (their organizations; all, for superusers)."""
     domain_service = DomainService(db)
-    all_domains = []
-    for org_id in org_ids:
-        all_domains.extend(await domain_service.list_by_organization(org_id))
-    domains = all_domains
-    
-    # Filter domains by API token restrictions if applicable
-    if current_user:
-        allowed_domain_ids = get_allowed_domain_ids(current_user)
-        if allowed_domain_ids is not None:
-            # API token has domain restrictions - filter the list
-            domains = [d for d in domains if d.id in allowed_domain_ids]
-    
+
+    if current_user.is_superuser:
+        domains = await domain_service.list_all()
+    else:
+        org_ids = await get_user_org_ids(current_user, db)
+        domains = []
+        for org_id in org_ids:
+            domains.extend(await domain_service.list_by_organization(org_id))
+
+    # Filter by API-token domain scoping if applicable.
+    allowed_domain_ids = get_allowed_domain_ids(current_user)
+    if allowed_domain_ids is not None:
+        domains = [d for d in domains if d.id in allowed_domain_ids]
+
     return domains
 
 
 @router.post("/", response_model=DomainResponse, status_code=status.HTTP_201_CREATED)
 async def create_domain(
     domain_create: DomainCreate,
-    current_user: User = Depends(get_optional_current_user),
+    current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Create new domain"""
-    from app.api.v1.dependencies import get_user_org_ids
-    org_ids = await get_user_org_ids(current_user, db) if current_user else {1}
-    organization_id = min(org_ids)
+    """Create a new domain inside the caller's own organization."""
+    organization_id = await get_or_create_primary_org(current_user, db)
 
     domain_service = DomainService(db)
 
@@ -233,50 +243,24 @@ async def create_domain(
 
 @router.get("/{domain_id}", response_model=DomainResponse)
 async def get_domain(
-    domain_id: int,
-    current_user: User = Depends(get_current_active_user),
-    db: AsyncSession = Depends(get_db),
+    domain: Domain = Depends(get_domain_for_user),
 ):
-    """Get domain by ID"""
-    # Check if user has access to this domain
-    require_domain_access(current_user, domain_id)
-    
-    domain_service = DomainService(db)
-    domain = await domain_service.get_by_id(domain_id)
-
-    if not domain:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Domain not found",
-        )
-
+    """Get domain by ID (ownership enforced by the dependency)."""
     return domain
 
 
 @router.get("/{domain_id}/info", tags=["domains"])
 async def get_domain_info(
-    domain_id: int,
-    current_user: User = Depends(get_optional_current_user),
+    domain: Domain = Depends(get_domain_for_user),
     db: AsyncSession = Depends(get_db),
 ):
     """
     # Получить полную информацию о домене
-    
+
     Возвращает домен, DNS записи, сертификаты и статистику.
     """
-    # Check if user has access to this domain
-    if current_user:
-        require_domain_access(current_user, domain_id)
-    
-    domain_service = DomainService(db)
-    domain = await domain_service.get_by_id(domain_id)
-    
-    if not domain:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Domain not found",
-        )
-    
+    domain_id = domain.id
+
     # Get DNS records
     dns_result = await db.execute(
         select(DNSRecord)
@@ -351,24 +335,23 @@ async def get_domain_info(
 
 @router.patch("/{domain_id}", response_model=DomainResponse)
 async def update_domain(
-    domain_id: int,
     domain_update: DomainUpdate,
+    domain: Domain = Depends(get_domain_for_user),
     current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Update domain"""
-    # Check if user has access to this domain
-    require_domain_access(current_user, domain_id)
-    
+    """Update domain (ownership enforced by the dependency)."""
+    # Going "active" is what publishes a domain to the edge fleet; don't let a
+    # tenant flip that on for a domain whose NS ownership hasn't been verified.
+    new_status = getattr(domain_update, "status", None)
+    if new_status is not None and str(getattr(new_status, "value", new_status)) == DomainStatus.ACTIVE.value:
+        if not domain.ns_verified and not current_user.is_superuser:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Domain NS must be verified before it can be activated",
+            )
+
     domain_service = DomainService(db)
-    domain = await domain_service.get_by_id(domain_id)
-
-    if not domain:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Domain not found",
-        )
-
     domain = await domain_service.update(domain, domain_update)
     await db.commit()
 
@@ -378,49 +361,25 @@ async def update_domain(
 
 @router.post("/{domain_id}/verify-ns")
 async def verify_ns(
-    domain_id: int,
-    current_user: User = Depends(get_current_active_user),
+    domain: Domain = Depends(get_domain_for_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Verify NS records for domain"""
-    # Check if user has access to this domain
-    require_domain_access(current_user, domain_id)
-    
+    """Verify NS records for domain (ownership enforced by the dependency)."""
     domain_service = DomainService(db)
-    domain = await domain_service.get_by_id(domain_id)
-
-    if not domain:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Domain not found",
-        )
-
     verified = await domain_service.verify_ns(domain)
     await db.commit()
 
-    return {"verified": verified, "domain_id": domain_id}
+    return {"verified": verified, "domain_id": domain.id}
 
 
 @router.delete("/{domain_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_domain(
-    domain_id: int,
-    current_user: User = Depends(get_current_active_user),
+    domain: Domain = Depends(get_domain_for_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Delete domain"""
-    # Check if user has access to this domain
-    require_domain_access(current_user, domain_id)
-    
+    """Delete domain (ownership enforced by the dependency)."""
     domain_service = DomainService(db)
-    domain = await domain_service.get_by_id(domain_id)
-
-    if not domain:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Domain not found",
-        )
-
     await domain_service.delete(domain)
     await db.commit()
-    
+
     sync_dns_nodes.delay()

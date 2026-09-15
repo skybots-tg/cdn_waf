@@ -1,5 +1,7 @@
 """Origin server management service"""
+import ipaddress
 import logging
+import socket
 from datetime import datetime, timedelta
 from typing import List, Optional
 from sqlalchemy import select
@@ -10,6 +12,31 @@ from app.models.origin import Origin
 from app.schemas.cdn import OriginCreate, OriginUpdate
 
 logger = logging.getLogger(__name__)
+
+
+def _host_is_public(host: str, port: int) -> bool:
+    """Return True only if every address ``host`` resolves to is a public IP.
+
+    Guards the on-demand/periodic health check against SSRF: without this a
+    tenant could point an origin at 127.0.0.1, 169.254.169.254 (cloud metadata)
+    or an internal 10.x host and use the healthy/unhealthy + timing signal as a
+    port-scanning oracle for the control plane's network.
+    """
+    try:
+        infos = socket.getaddrinfo(host, port, proto=socket.IPPROTO_TCP)
+    except (socket.gaierror, UnicodeError, ValueError):
+        return False
+    if not infos:
+        return False
+    for info in infos:
+        ip = info[4][0]
+        try:
+            addr = ipaddress.ip_address(ip)
+        except ValueError:
+            return False
+        if not addr.is_global or addr.is_reserved or addr.is_multicast:
+            return False
+    return True
 
 
 class OriginService:
@@ -115,6 +142,27 @@ class OriginService:
         if not origin:
             return {"status": "error", "message": "Origin not found", "changed": False}
 
+        from fastapi.concurrency import run_in_threadpool
+
+        # SSRF guard: refuse to probe a private/loopback/link-local/reserved
+        # address, and don't follow redirects that could reach one.
+        if not await run_in_threadpool(
+            _host_is_public, origin.origin_host, origin.origin_port
+        ):
+            logger.warning(
+                "Health check blocked for origin %s: host %s is not a public address",
+                origin_id,
+                origin.origin_host,
+            )
+            transition = await OriginService.update_health_status(db, origin_id, False, None)
+            return {
+                "status": "error",
+                "message": "origin host must be a public address",
+                "response_time": None,
+                "last_check": datetime.utcnow().isoformat(),
+                **transition,
+            }
+
         url = f"{origin.protocol or 'http'}://{origin.origin_host}:{origin.origin_port}"
         if origin.health_check_url:
             url += origin.health_check_url
@@ -122,7 +170,7 @@ class OriginService:
 
         start = time.monotonic()
         try:
-            async with httpx.AsyncClient(verify=False, follow_redirects=True) as client:
+            async with httpx.AsyncClient(verify=False, follow_redirects=False) as client:
                 resp = await client.get(url, timeout=timeout)
             elapsed_ms = int((time.monotonic() - start) * 1000)
             is_healthy = 200 <= resp.status_code < 500

@@ -2,11 +2,15 @@
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, desc
-from typing import Optional
 from datetime import datetime, timedelta
 
 from app.core.database import get_db
-from app.core.security import get_optional_current_user, get_allowed_domain_ids
+from app.core.security import (
+    get_current_active_user,
+    get_current_superuser,
+    get_allowed_domain_ids,
+)
+from app.api.v1.dependencies import get_user_org_ids
 from app.models.user import User
 from app.models.domain import Domain
 from app.models.edge_node import EdgeNode
@@ -20,7 +24,7 @@ router = APIRouter()
 @router.get("/stats/global")
 async def get_global_stats(
     range: str = Query("24h", regex="^(1h|24h|7d|30d|90d|6m)$"),
-    current_user: Optional[User] = Depends(get_optional_current_user),
+    current_user: User = Depends(get_current_superuser),
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -34,7 +38,7 @@ async def get_global_stats(
 async def get_global_timeseries(
     range: str = Query("24h", regex="^(1h|24h|7d|30d|90d|6m)$"),
     metric: str = Query("requests", regex="^(requests|bandwidth)$"),
-    current_user: Optional[User] = Depends(get_optional_current_user),
+    current_user: User = Depends(get_current_superuser),
     db: AsyncSession = Depends(get_db)
 ):
     """Get global statistics timeseries using aggregated data"""
@@ -44,19 +48,28 @@ async def get_global_timeseries(
 @router.get("/stats/domains")
 async def get_domains_stats(
     range: str = Query("24h", regex="^(1h|24h|7d|30d)$"),
-    current_user: Optional[User] = Depends(get_optional_current_user),
+    current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db)
 ):
-    """Get statistics for all domains from aggregated data"""
+    """Get statistics for the caller's domains from aggregated data"""
     start_time = AnalyticsService.get_time_range_start(range)
 
-    domains_result = await db.execute(select(Domain))
-    domains = list(domains_result.scalars().all())
+    if current_user.is_superuser:
+        domains_result = await db.execute(select(Domain))
+        domains = list(domains_result.scalars().all())
+    else:
+        org_ids = await get_user_org_ids(current_user, db)
+        if org_ids:
+            domains_result = await db.execute(
+                select(Domain).where(Domain.organization_id.in_(org_ids))
+            )
+            domains = list(domains_result.scalars().all())
+        else:
+            domains = []
 
-    if current_user:
-        allowed_domain_ids = get_allowed_domain_ids(current_user)
-        if allowed_domain_ids is not None:
-            domains = [d for d in domains if d.id in allowed_domain_ids]
+    allowed_domain_ids = get_allowed_domain_ids(current_user)
+    if allowed_domain_ids is not None:
+        domains = [d for d in domains if d.id in allowed_domain_ids]
 
     if range in ["7d", "30d"]:
         start_date = start_time.date()
@@ -110,7 +123,7 @@ async def get_domains_stats(
 @router.get("/stats/geo")
 async def get_geo_stats(
     range: str = Query("24h", regex="^(1h|24h|7d|30d)$"),
-    current_user: Optional[User] = Depends(get_optional_current_user),
+    current_user: User = Depends(get_current_superuser),
     db: AsyncSession = Depends(get_db)
 ):
     """Get geographic distribution statistics from aggregated data"""
@@ -152,7 +165,7 @@ async def get_geo_stats(
 
 @router.get("/stats/edge-nodes")
 async def get_edge_nodes_stats(
-    current_user: Optional[User] = Depends(get_optional_current_user),
+    current_user: User = Depends(get_current_superuser),
     db: AsyncSession = Depends(get_db)
 ):
     """Get edge nodes performance statistics"""

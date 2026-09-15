@@ -233,7 +233,7 @@ async function loadGlobalGeo(range) {
             <div class="flex-between mb-2" style="padding: 4px 0;">
                 <span style="font-size: 13px;">
                     <span style="color: var(--text-muted);">${index + 1}.</span>
-                    ${item.country}
+                    ${escapeHtml(item.country)}
                 </span>
                 <span style="font-weight: 600; font-size: 13px;">${formatNumber(item.requests)}</span>
             </div>
@@ -260,12 +260,12 @@ async function loadEdgeNodesPerformance(range) {
                 <div class="flex-between">
                     <div style="flex: 1;">
                         <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 8px;">
-                            <span style="font-weight: 600;">${node.name}</span>
+                            <span style="font-weight: 600;">${escapeHtml(node.name)}</span>
                             <span class="badge ${node.status === 'active' ? 'badge-success' : 'badge-error'}">
                                 ${node.status}
                             </span>
                             <span style="font-size: 13px; color: var(--text-muted);">
-                                <i class="fas fa-map-marker-alt"></i> ${node.location}
+                                <i class="fas fa-map-marker-alt"></i> ${escapeHtml(node.location)}
                             </span>
                         </div>
                         <div style="display: flex; gap: 24px; font-size: 13px; color: var(--text-secondary);">

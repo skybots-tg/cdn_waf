@@ -195,16 +195,16 @@ function renderLogs(logs) {
                     <tr class="log-row">
                         <td style="padding: 10px 8px; color: var(--text-muted); white-space: nowrap;">${formatTime(log.timestamp)}</td>
                         <td style="padding: 10px 8px;">
-                            <span class="badge ${getMethodBadgeClass(log.method)}">${log.method}</span>
+                            <span class="badge ${getMethodBadgeClass(log.method)}">${escapeHtml(log.method)}</span>
                         </td>
                         <td style="padding: 10px 8px; font-family: monospace;" class="log-path" title="${escapeHtml(log.path)}">${escapeHtml(log.path)}</td>
                         <td style="padding: 10px 8px; text-align: center;">
                             <span class="badge ${getStatusBadgeClass(log.status)}">${log.status}</span>
                         </td>
-                        <td style="padding: 10px 8px; font-family: monospace; font-size: 12px;">${log.client_ip}</td>
-                        <td style="padding: 10px 8px;">${log.country_code || '-'}</td>
+                        <td style="padding: 10px 8px; font-family: monospace; font-size: 12px;">${escapeHtml(log.client_ip)}</td>
+                        <td style="padding: 10px 8px;">${escapeHtml(log.country_code || '-')}</td>
                         <td style="padding: 10px 8px; text-align: center;">
-                            <span class="badge ${getCacheBadgeClass(log.cache_status)}">${log.cache_status || '-'}</span>
+                            <span class="badge ${getCacheBadgeClass(log.cache_status)}">${escapeHtml(log.cache_status || '-')}</span>
                         </td>
                         <td style="padding: 10px 8px; text-align: right; color: var(--text-secondary);">${formatBytes(log.bytes_sent)}</td>
                         <td style="padding: 10px 8px; text-align: right; color: var(--text-secondary);">${log.request_time ? log.request_time + 'ms' : '-'}</td>
@@ -228,12 +228,8 @@ function formatBytes(bytes) {
     return bytes + ' B';
 }
 
-function escapeHtml(text) {
-    if (!text) return '';
-    const div = document.createElement('div');
-    div.textContent = text;
-    return div.innerHTML;
-}
+// escapeHtml is provided globally by main.js (loaded via base.html before this script runs);
+// using that single correct implementation also escapes quotes, which this copy did not.
 
 function getStatusBadgeClass(status) {
     if (status >= 200 && status < 300) return 'badge-success';

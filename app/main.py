@@ -50,8 +50,11 @@ Authorization: Bearer YOUR_ACCESS_TOKEN
     """,
     debug=settings.DEBUG,
     lifespan=lifespan,
-    docs_url="/docs",
-    redoc_url="/redoc",
+    # Interactive API docs enumerate every endpoint and schema; keep them off in
+    # production so they are not a reconnaissance aid for anonymous visitors.
+    docs_url="/docs" if settings.DEBUG else None,
+    redoc_url="/redoc" if settings.DEBUG else None,
+    openapi_url="/openapi.json" if settings.DEBUG else None,
     openapi_tags=[
         {"name": "auth", "description": "Аутентификация и управление пользователями"},
         {"name": "domains", "description": "Управление доменами"},
@@ -146,7 +149,7 @@ async def acme_challenge(token: str, request: Request):
         logger.warning(f"Challenge token '{token}' not found in Redis")
         raise HTTPException(
             status_code=404,
-            detail=f"Challenge token not found"
+            detail="Challenge token not found"
         )
     
     # Return plain text (required by ACME spec)

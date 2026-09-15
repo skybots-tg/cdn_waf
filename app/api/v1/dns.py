@@ -5,13 +5,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
 from app.core.database import get_db
-from app.core.security import get_current_active_user, require_domain_access
+from app.core.security import get_current_active_user
 from app.schemas.dns import DNSRecordCreate, DNSRecordUpdate, DNSRecordResponse, DNSRecordImport
 from app.models.user import User
 from app.models.dns import DNSRecord
 from app.models.domain import Domain
 from app.tasks.dns_tasks import sync_dns_nodes
-from app.api.v1.dependencies import get_domain_or_404
+from app.api.v1.dependencies import get_domain_or_404, get_domain_for_user, get_dns_record_for_user
 
 router = APIRouter()
 
@@ -20,12 +20,10 @@ router = APIRouter()
 async def list_dns_records(
     domain_id: int,
     current_user: User = Depends(get_current_active_user),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    domain: Domain = Depends(get_domain_for_user)
 ):
     """List all DNS records for domain"""
-    # Check if user has access to this domain
-    require_domain_access(current_user, domain_id)
-    
     result = await db.execute(
         select(DNSRecord)
         .where(DNSRecord.domain_id == domain_id)
@@ -40,12 +38,10 @@ async def create_dns_record(
     domain_id: int,
     record_create: DNSRecordCreate,
     current_user: User = Depends(get_current_active_user),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    domain: Domain = Depends(get_domain_for_user)
 ):
     """Create DNS record"""
-    # Check if user has access to this domain
-    require_domain_access(current_user, domain_id)
-    
     # Verify domain exists
     domain = await get_domain_or_404(domain_id, db)
     
@@ -82,12 +78,10 @@ async def import_dns_records(
     domain_id: int,
     import_data: DNSRecordImport,
     current_user: User = Depends(get_current_active_user),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    domain: Domain = Depends(get_domain_for_user)
 ):
     """Import DNS records"""
-    # Check if user has access to this domain
-    require_domain_access(current_user, domain_id)
-    
     # Verify domain exists
     domain = await get_domain_or_404(domain_id, db)
     
@@ -125,23 +119,21 @@ async def import_dns_records(
 async def get_dns_record(
     record_id: int,
     current_user: User = Depends(get_current_active_user),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    record: DNSRecord = Depends(get_dns_record_for_user)
 ):
     """Get DNS record by ID"""
     result = await db.execute(
         select(DNSRecord).where(DNSRecord.id == record_id)
     )
     record = result.scalar_one_or_none()
-    
+
     if not record:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="DNS record not found"
         )
-    
-    # Check if user has access to this record's domain
-    require_domain_access(current_user, record.domain_id)
-    
+
     return record
 
 
@@ -150,23 +142,21 @@ async def update_dns_record(
     record_id: int,
     record_update: DNSRecordUpdate,
     current_user: User = Depends(get_current_active_user),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    record: DNSRecord = Depends(get_dns_record_for_user)
 ):
     """Update DNS record"""
     result = await db.execute(
         select(DNSRecord).where(DNSRecord.id == record_id)
     )
     record = result.scalar_one_or_none()
-    
+
     if not record:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="DNS record not found"
         )
-    
-    # Check if user has access to this record's domain
-    require_domain_access(current_user, record.domain_id)
-    
+
     # Update fields
     update_data = record_update.model_dump(exclude_unset=True)
     
@@ -205,23 +195,21 @@ async def update_dns_record(
 async def delete_dns_record(
     record_id: int,
     current_user: User = Depends(get_current_active_user),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    record: DNSRecord = Depends(get_dns_record_for_user)
 ):
     """Delete DNS record"""
     result = await db.execute(
         select(DNSRecord).where(DNSRecord.id == record_id)
     )
     record = result.scalar_one_or_none()
-    
+
     if not record:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="DNS record not found"
         )
-    
-    # Check if user has access to this record's domain
-    require_domain_access(current_user, record.domain_id)
-    
+
     await db.delete(record)
     await db.commit()
     

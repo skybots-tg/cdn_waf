@@ -2,13 +2,11 @@
 import logging
 from typing import Optional, List
 import secrets
-import dns.exception
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.models.domain import Domain, DomainTLSSettings, DomainStatus
-from app.models.organization import Organization
 from app.schemas.domain import DomainCreate, DomainUpdate
 
 logger = logging.getLogger(__name__)
@@ -44,7 +42,14 @@ class DomainService:
             .order_by(Domain.created_at.desc())
         )
         return list(result.scalars().all())
-    
+
+    async def list_all(self) -> List[Domain]:
+        """List every domain (superuser scope)."""
+        result = await self.db.execute(
+            select(Domain).order_by(Domain.created_at.desc())
+        )
+        return list(result.scalars().all())
+
     async def create(self, organization_id: int, domain_create: DomainCreate) -> Domain:
         """Create new domain"""
         # Generate verification token

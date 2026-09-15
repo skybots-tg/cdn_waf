@@ -47,6 +47,9 @@ async function silentRefresh() {
             const data = await resp.json();
             localStorage.setItem('access_token', data.access_token);
             localStorage.setItem('refresh_token', data.refresh_token);
+            // Re-write the access_token cookie so server-rendered pages stay authenticated
+            // (mirrors how login sets it in API.setToken). HTTPS-only in production -> Secure.
+            document.cookie = `access_token=${data.access_token}; path=/; max-age=${60*60*48}; SameSite=Lax; Secure`;
             if (typeof api !== 'undefined') {
                 api.token = data.access_token;
             }
@@ -223,12 +226,12 @@ function showNotification(message, type = 'info') {
     }, 3000);
 }
 
-// HTML Escape
-const _escapeEl = document.createElement('div');
-function escapeHtml(text) {
-    if (text === null || text === undefined) return '';
-    _escapeEl.textContent = String(text);
-    return _escapeEl.innerHTML;
+// HTML Escape (escapes all five HTML-sensitive characters, incl. both quotes)
+function escapeHtml(str) {
+    if (str === null || str === undefined) return '';
+    return String(str)
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }
 
 // Form Validation
@@ -355,7 +358,17 @@ async function loadDNSRecords(domainId) {
 function renderDNSRecords(records) {
     const tbody = document.querySelector('#dns-table tbody');
     if (!tbody) return;
-    
+
+    // Attach delegated click handler once, so we never interpolate the
+    // (attacker-influenceable) record name into an inline onclick JS string.
+    if (!tbody.dataset.certListenerAttached) {
+        tbody.dataset.certListenerAttached = 'true';
+        tbody.addEventListener('click', (e) => {
+            const btn = e.target.closest('[data-issue-cert]');
+            if (btn) issueCertificate(btn.dataset.issueCert);
+        });
+    }
+
     if (records.length === 0) {
         tbody.innerHTML = `
             <tr>
@@ -367,16 +380,16 @@ function renderDNSRecords(records) {
     
     tbody.innerHTML = records.map(record => `
         <tr>
-            <td><strong>${record.type}</strong></td>
-            <td title="${record.name}">${record.name}</td>
-            <td title="${record.content}">${record.content}</td>
+            <td><strong>${escapeHtml(record.type)}</strong></td>
+            <td title="${escapeHtml(record.name)}">${escapeHtml(record.name)}</td>
+            <td title="${escapeHtml(record.content)}">${escapeHtml(record.content)}</td>
             <td>${record.ttl}</td>
             <td>
                 ${record.proxied ? '<span class="badge badge-orange">Proxied</span>' : '<span class="badge">DNS Only</span>'}
             </td>
             <td>
                 ${record.type === 'A' || record.type === 'AAAA' ? `
-                    <button onclick="issueCertificate('${record.name}')" class="btn btn-sm btn-primary" title="Issue Let's Encrypt Certificate">
+                    <button data-issue-cert="${escapeHtml(record.name)}" class="btn btn-sm btn-primary" title="Issue Let's Encrypt Certificate">
                         <i class="fas fa-certificate"></i>
                     </button>
                 ` : '<span class="text-secondary">-</span>'}

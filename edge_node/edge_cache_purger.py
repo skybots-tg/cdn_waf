@@ -85,11 +85,66 @@ class EdgeCachePurger:
             "X-Node-Token": self.api_key,
         }
 
-    def _safe_name(self, domain_name: str) -> str:
-        return domain_name.replace(".", "_")
+    def _safe_name(self, domain_name: str) -> Optional[str]:
+        """Безопасное имя каталога кэша для домена или None.
 
-    def _cache_dir(self, domain_name: str) -> Path:
-        return self.cache_base_dir / self._safe_name(domain_name)
+        ``domain_name`` подконтролен тенанту и без санитизации попадает на
+        файловую систему. Абсолютный путь, разделитель пути (``/`` или ``\\``),
+        ``..`` или нулевой байт позволили бы ``cache_base_dir / name``
+        вырваться из базового каталога, после чего ``rmtree`` под root удалил
+        бы произвольный путь. Такие имена отвергаем — вызывающий код пропускает
+        задачу.
+        """
+        if not domain_name or not isinstance(domain_name, str):
+            return None
+        if "\x00" in domain_name:
+            return None
+        if ".." in domain_name:
+            return None
+        if "/" in domain_name or "\\" in domain_name:
+            return None
+        if os.path.isabs(domain_name):
+            return None
+        safe = domain_name.replace(".", "_")
+        if not safe or "/" in safe or "\\" in safe:
+            return None
+        return safe
+
+    def _within_base(self, target: Path) -> bool:
+        """True, если ``target`` после resolve лежит строго внутри cache_base_dir.
+
+        Путь, равный базовому каталогу или расположенный выше него, даёт False,
+        чтобы никогда не удалить сам ``cache_base_dir`` или что-либо над ним.
+        Использует ``Path.is_relative_to`` (3.9+) с запасным ``commonpath``.
+        """
+        try:
+            resolved = target.resolve()
+            base = self.cache_base_dir.resolve()
+        except Exception:
+            return False
+        if resolved == base:
+            return False
+        try:
+            return resolved.is_relative_to(base)
+        except AttributeError:
+            try:
+                return os.path.commonpath([str(resolved), str(base)]) == str(base)
+            except ValueError:
+                return False
+
+    def _cache_dir(self, domain_name: str) -> Optional[Path]:
+        safe = self._safe_name(domain_name)
+        if safe is None:
+            logger.warning("Unsafe domain name for cache dir: %r, skipping", domain_name)
+            return None
+        cache_dir = self.cache_base_dir / safe
+        # Итоговый путь обязан оставаться внутри cache_base_dir.
+        if not self._within_base(cache_dir):
+            logger.warning(
+                "Cache dir %s escapes base %s, skipping", cache_dir, self.cache_base_dir
+            )
+            return None
+        return cache_dir
 
     # ------------------------------------------------------------------
     # Networking: fetch tasks & report results
@@ -170,8 +225,15 @@ class EdgeCachePurger:
     def _purge_all(self, domain_name: str) -> int:
         """Remove all cached files for a domain and recreate the directory."""
         cache_dir = self._cache_dir(domain_name)
+        if cache_dir is None:
+            return 0
         if not cache_dir.exists():
             logger.debug("Cache dir does not exist: %s", cache_dir)
+            return 0
+
+        # Никогда не rmtree путь, равный cache_base_dir или выше него.
+        if not self._within_base(cache_dir):
+            logger.error("Refusing to rmtree path outside cache base: %s", cache_dir)
             return 0
 
         count = sum(1 for _ in cache_dir.rglob("*") if _.is_file())
@@ -187,7 +249,7 @@ class EdgeCachePurger:
         We try both http and https schemes.
         """
         cache_dir = self._cache_dir(domain_name)
-        if not cache_dir.exists():
+        if cache_dir is None or not cache_dir.exists():
             return 0
 
         deleted = 0
@@ -216,7 +278,7 @@ class EdgeCachePurger:
         (e.g. "*.jpg", "/static/*") which are converted to regex.
         """
         cache_dir = self._cache_dir(domain_name)
-        if not cache_dir.exists():
+        if cache_dir is None or not cache_dir.exists():
             return 0
 
         compiled = []

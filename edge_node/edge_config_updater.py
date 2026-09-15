@@ -9,6 +9,7 @@ import json
 import logging
 import subprocess
 import os
+import re
 from pathlib import Path
 from typing import Dict, Any, Optional, List
 from datetime import datetime
@@ -28,6 +29,59 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+
+
+# Строгий набор символов для имени файла сертификата/ключа: буквы, цифры,
+# подчёркивание, точка и дефис. Никаких разделителей путей и '..'.
+_CERT_STEM_RE = re.compile(r"^[A-Za-z0-9_.-]{1,255}$")
+
+
+def _safe_cert_stem(name: str) -> Optional[str]:
+    """Строит безопасное имя-стем для файла сертификата/ключа или возвращает None.
+
+    ``name`` формируется из подконтрольных тенанту данных (``dns_record.name``
+    + имя домена) и без санитизации попадает на файловую систему. Значение
+    вроде ``../../ssl/cdn/victim`` или содержащее ``/`` вырвалось бы из
+    ``certs_dir`` и перезаписало сертификат/ключ другого домена. Берём только
+    последний компонент пути, срезаем ведущие точки и принимаем результат лишь
+    если он подходит под строгий шаблон имени хоста без ``..``.
+    """
+    if not name:
+        return None
+    # Только последний компонент пути: защищает от '/abs/path', '../', 'a/b'.
+    base = os.path.basename(name)
+    base = Path(base).name
+    # Срезаем ведущие точки, чтобы '.', '..' и '...x' не проскочили.
+    base = base.lstrip(".")
+    if not base or ".." in base:
+        return None
+    if not _CERT_STEM_RE.match(base):
+        return None
+    return base
+
+
+def _is_within_dir(path: Optional[Path], base: Path) -> bool:
+    """True, если ``path`` после resolve лежит строго внутри ``base``.
+
+    Использует ``Path.is_relative_to`` на Python 3.9+, с запасным вариантом
+    через ``os.path.commonpath`` для более старых версий.
+    """
+    if path is None:
+        return False
+    try:
+        resolved = Path(path).resolve()
+        resolved_base = Path(base).resolve()
+    except Exception:
+        return False
+    if resolved == resolved_base:
+        return False
+    try:
+        return resolved.is_relative_to(resolved_base)
+    except AttributeError:
+        try:
+            return os.path.commonpath([str(resolved), str(resolved_base)]) == str(resolved_base)
+        except ValueError:
+            return False
 
 
 LOG_FORMAT_CONF = """
@@ -872,59 +926,79 @@ class EdgeConfigUpdater:
             # TLS / сертификаты
             if tls.get("enabled") and tls.get("certificate_id"):
                 cert_id = tls["certificate_id"]
-                cert_data = await self.fetch_certificate(cert_id)
 
-                if cert_data:
-                    cert_path = self.certs_dir / f"{domain['name']}.crt"
-                    key_path = self.certs_dir / f"{domain['name']}.key"
+                # Имя файла сертификата/ключа строится из подконтрольного
+                # тенанту domain['name'] (dns_record.name + имя домена) и без
+                # санитизации попадает на файловую систему. Значение вроде
+                # '../../ssl/cdn/victim' или содержащее '/' вырвалось бы из
+                # certs_dir и перезаписало чужой сертификат/ключ. Разрешаем
+                # только строгое имя-стем и пишем строго внутрь certs_dir.
+                stem = _safe_cert_stem(domain.get("name") or "")
+                cert_path = self.certs_dir / f"{stem}.crt" if stem else None
+                key_path = self.certs_dir / f"{stem}.key" if stem else None
 
-                    # Full chain одним файлом — как его ждёт ssl_certificate.
-                    fullchain = cert_data["certificate"]
-                    chain = cert_data.get("chain")
-                    if chain:
-                        fullchain = f"{fullchain}\n{chain}"
-
-                    if self._write_if_changed(cert_path, fullchain):
-                        self.certificates_changed = True
-                        logger.info("Certificate for %s changed on disk", domain.get("name"))
-                    if self._write_if_changed(key_path, cert_data["private_key"], mode=0o600):
-                        self.certificates_changed = True
-
-                    # Update domain config with paths
-                    domain["tls_certificate"] = {
-                        "cert_path": str(cert_path),
-                        "key_path": str(key_path),
-                    }
+                if (
+                    stem is None
+                    or not _is_within_dir(cert_path, self.certs_dir)
+                    or not _is_within_dir(key_path, self.certs_dir)
+                ):
+                    logger.warning(
+                        "Unsafe certificate name for domain %r, skipping cert write and disabling TLS",
+                        domain.get("name"),
+                    )
+                    tls["enabled"] = False
+                    # Если TLS отвалился — не пытаемся форсить HTTPS
+                    if "force_https" in tls:
+                        tls["force_https"] = False
+                    domain.pop("tls_certificate", None)
                 else:
-                    # Не смогли забрать сертификат из панели — это почти всегда
-                    # временная причина (перезапуск control plane, сетевой сбой).
-                    # Если рабочая копия уже лежит на диске, продолжаем с ней:
-                    # иначе один перезапуск панели выключает HTTPS у всех
-                    # проксируемых домов сразу, и сайты становятся недоступны.
-                    cert_path = self.certs_dir / f"{domain['name']}.crt"
-                    key_path = self.certs_dir / f"{domain['name']}.key"
+                    cert_data = await self.fetch_certificate(cert_id)
 
-                    if cert_path.exists() and key_path.exists():
-                        logger.warning(
-                            "Could not fetch certificate %s for %s, keeping the copy already on disk",
-                            cert_id,
-                            domain.get("name"),
-                        )
+                    if cert_data:
+                        # Full chain одним файлом — как его ждёт ssl_certificate.
+                        fullchain = cert_data["certificate"]
+                        chain = cert_data.get("chain")
+                        if chain:
+                            fullchain = f"{fullchain}\n{chain}"
+
+                        if self._write_if_changed(cert_path, fullchain):
+                            self.certificates_changed = True
+                            logger.info("Certificate for %s changed on disk", domain.get("name"))
+                        if self._write_if_changed(key_path, cert_data["private_key"], mode=0o600):
+                            self.certificates_changed = True
+
+                        # Update domain config with paths
                         domain["tls_certificate"] = {
                             "cert_path": str(cert_path),
                             "key_path": str(key_path),
                         }
                     else:
-                        logger.warning(
-                            "Could not fetch certificate %s for %s and no copy on disk, disabling TLS",
-                            cert_id,
-                            domain.get("name"),
-                        )
-                        tls["enabled"] = False
-                        # Если TLS отвалился — не пытаемся форсить HTTPS
-                        if "force_https" in tls:
-                            tls["force_https"] = False
-                        domain.pop("tls_certificate", None)
+                        # Не смогли забрать сертификат из панели — это почти всегда
+                        # временная причина (перезапуск control plane, сетевой сбой).
+                        # Если рабочая копия уже лежит на диске, продолжаем с ней:
+                        # иначе один перезапуск панели выключает HTTPS у всех
+                        # проксируемых домов сразу, и сайты становятся недоступны.
+                        if cert_path.exists() and key_path.exists():
+                            logger.warning(
+                                "Could not fetch certificate %s for %s, keeping the copy already on disk",
+                                cert_id,
+                                domain.get("name"),
+                            )
+                            domain["tls_certificate"] = {
+                                "cert_path": str(cert_path),
+                                "key_path": str(key_path),
+                            }
+                        else:
+                            logger.warning(
+                                "Could not fetch certificate %s for %s and no copy on disk, disabling TLS",
+                                cert_id,
+                                domain.get("name"),
+                            )
+                            tls["enabled"] = False
+                            # Если TLS отвалился — не пытаемся форсить HTTPS
+                            if "force_https" in tls:
+                                tls["force_https"] = False
+                            domain.pop("tls_certificate", None)
             else:
                 # На всякий случай сбрасываем tls_certificate если TLS выключен
                 domain.pop("tls_certificate", None)

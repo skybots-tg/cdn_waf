@@ -1,7 +1,9 @@
 """DNS schemas"""
 from datetime import datetime
 from typing import Optional, List
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
+
+from app.schemas.validators import validate_dns_name, validate_dns_content
 
 
 class DNSRecordCreate(BaseModel):
@@ -14,6 +16,16 @@ class DNSRecordCreate(BaseModel):
     weight: Optional[int] = Field(None, ge=0, le=65535)
     proxied: bool = Field(default=False)
     comment: Optional[str] = Field(None, max_length=255)
+
+    @field_validator('name')
+    @classmethod
+    def _v_name(cls, v):
+        return validate_dns_name(v)
+
+    @field_validator('content')
+    @classmethod
+    def _v_content(cls, v):
+        return validate_dns_content(v)
 
 
 class DNSRecordImport(BaseModel):
@@ -31,6 +43,16 @@ class DNSRecordUpdate(BaseModel):
     weight: Optional[int] = Field(None, ge=0, le=65535)
     proxied: Optional[bool] = None
     comment: Optional[str] = Field(None, max_length=255)
+
+    @field_validator('name')
+    @classmethod
+    def _v_name(cls, v):
+        return v if v is None else validate_dns_name(v)
+
+    @field_validator('content')
+    @classmethod
+    def _v_content(cls, v):
+        return v if v is None else validate_dns_content(v)
 
 
 class DNSRecordResponse(BaseModel):

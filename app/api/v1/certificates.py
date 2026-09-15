@@ -1,19 +1,21 @@
 """Certificate management API endpoints"""
 from typing import Optional
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
 from app.core.database import get_db
 from app.core.config import settings
-from app.core.security import get_optional_current_user, require_domain_access
-from app.models.user import User
 from app.models.domain import Domain
 from app.models.dns import DNSRecord
 from app.models.certificate import Certificate, CertificateStatus, CertificateType
 from app.models.certificate_log import CertificateLog, CertificateLogLevel
-from app.api.v1.dependencies import get_domain_or_404
+from app.api.v1.dependencies import (
+    get_domain_or_404,
+    get_domain_for_user,
+    get_certificate_for_user,
+)
 
 router = APIRouter()
 
@@ -22,13 +24,13 @@ router = APIRouter()
 async def list_domain_certificates(
     domain_id: int,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_optional_current_user)
+    domain: Domain = Depends(get_domain_for_user),
 ):
     """
     # Получить список всех сертификатов домена
-    
+
     Возвращает все SSL/TLS сертификаты (активные, pending, failed) для указанного домена.
-    
+
     ## Статусы сертификатов:
     - `pending` - в процессе выпуска
     - `issued` - активный сертификат
@@ -36,17 +38,12 @@ async def list_domain_certificates(
     - `revoked` - отозван
     - `failed` - ошибка при выпуске
     """
-    if current_user:
-        require_domain_access(current_user, domain_id)
-    
-    domain = await get_domain_or_404(domain_id, db)
-    
     certs_result = await db.execute(
         select(Certificate).where(Certificate.domain_id == domain_id)
         .order_by(Certificate.created_at.desc())
     )
     certificates = certs_result.scalars().all()
-    
+
     return [
         {
             "id": cert.id,
@@ -65,18 +62,13 @@ async def list_domain_certificates(
 async def get_available_certificates(
     domain_id: int,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_optional_current_user)
+    domain: Domain = Depends(get_domain_for_user),
 ):
     """
     # Получить список поддоменов доступных для выпуска сертификата
-    
+
     Возвращает все DNS A-записи домена, для которых еще не выпущен SSL сертификат.
     """
-    if current_user:
-        require_domain_access(current_user, domain_id)
-    
-    domain = await get_domain_or_404(domain_id, db)
-    
     dns_result = await db.execute(
         select(DNSRecord).where(
             DNSRecord.domain_id == domain_id,
@@ -84,7 +76,7 @@ async def get_available_certificates(
         )
     )
     dns_records = dns_result.scalars().all()
-    
+
     # Get active/pending certificates
     certs_result = await db.execute(
         select(Certificate).where(
@@ -93,9 +85,9 @@ async def get_available_certificates(
         )
     )
     active_certs = certs_result.scalars().all()
-    
+
     covered_domains = {cert.common_name for cert in active_certs if cert.common_name}
-    
+
     # Group by subdomain
     subdomains_map = {}
     for record in dns_records:
@@ -109,11 +101,11 @@ async def get_available_certificates(
             if record.proxied:
                 subdomains_map[record.name]["proxied"] = True
             subdomains_map[record.name]["count"] += 1
-    
+
     available = []
     for subdomain, info in subdomains_map.items():
         fqdn = domain.name if subdomain == "@" else f"{subdomain}.{domain.name}"
-        
+
         if fqdn not in covered_domains:
             available.append({
                 "subdomain": subdomain,
@@ -122,7 +114,7 @@ async def get_available_certificates(
                 "proxied": info["proxied"],
                 "records_count": info["count"]
             })
-    
+
     available.sort(key=lambda x: (x["subdomain"] != "@", x["subdomain"]))
     return available
 
@@ -133,22 +125,17 @@ async def issue_certificate_for_subdomain(
     subdomain: str,
     email: Optional[str] = None,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_optional_current_user)
+    domain: Domain = Depends(get_domain_for_user),
 ):
     """
     # Выпустить Let's Encrypt SSL сертификат
-    
+
     Автоматически выпускает бесплатный SSL сертификат от Let's Encrypt.
-    
+
     ## Параметры:
     - `subdomain`: `@` для основного домена, или имя поддомена (www, api, etc.)
     - `email`: Email для уведомлений от Let's Encrypt (опционально)
     """
-    if current_user:
-        require_domain_access(current_user, domain_id)
-    
-    domain = await get_domain_or_404(domain_id, db)
-    
     if subdomain == "@":
         fqdn = domain.name
     else:
@@ -163,11 +150,11 @@ async def issue_certificate_for_subdomain(
         dns_record = dns_result.scalar_one_or_none()
         if not dns_record:
             raise HTTPException(
-                status_code=404, 
+                status_code=404,
                 detail=f"DNS A record '{subdomain}' not found"
             )
         fqdn = f"{subdomain}.{domain.name}"
-    
+
     # Check for existing certificate
     existing_cert = await db.execute(
         select(Certificate).where(
@@ -178,10 +165,10 @@ async def issue_certificate_for_subdomain(
     )
     if existing_cert.scalar_one_or_none():
         raise HTTPException(
-            status_code=400, 
+            status_code=400,
             detail=f"Certificate for {fqdn} already exists or is being issued"
         )
-    
+
     # Create pending certificate
     cert = Certificate(
         domain_id=domain_id,
@@ -194,7 +181,7 @@ async def issue_certificate_for_subdomain(
     db.add(cert)
     await db.commit()
     await db.refresh(cert)
-    
+
     # Add initial log
     log_entry = CertificateLog(
         certificate_id=cert.id,
@@ -204,11 +191,11 @@ async def issue_certificate_for_subdomain(
     )
     db.add(log_entry)
     await db.commit()
-    
+
     # Start background task
     from app.tasks.certificate_tasks import issue_single_certificate
     issue_single_certificate.delay(cert.id, email)
-    
+
     return JSONResponse({
         "status": "pending",
         "message": f"Certificate issuance started for {fqdn}",
@@ -222,15 +209,11 @@ async def get_certificate(
     domain_id: int,
     cert_id: int,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_optional_current_user)
+    certificate: Certificate = Depends(get_certificate_for_user),
 ):
     """
     # Получить детальную информацию о сертификате
     """
-    # Check if user has access to this domain
-    if current_user:
-        require_domain_access(current_user, domain_id)
-    
     cert_result = await db.execute(
         select(Certificate).where(
             Certificate.id == cert_id,
@@ -238,10 +221,10 @@ async def get_certificate(
         )
     )
     cert = cert_result.scalar_one_or_none()
-    
+
     if not cert:
         raise HTTPException(status_code=404, detail="Certificate not found")
-    
+
     return {
         "id": cert.id,
         "common_name": cert.common_name,
@@ -263,15 +246,11 @@ async def get_certificate_logs(
     domain_id: int,
     cert_id: int,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_optional_current_user)
+    certificate: Certificate = Depends(get_certificate_for_user),
 ):
     """
     # Получить логи выпуска/обновления сертификата
     """
-    # Check if user has access to this domain
-    if current_user:
-        require_domain_access(current_user, domain_id)
-    
     cert_result = await db.execute(
         select(Certificate).where(
             Certificate.id == cert_id,
@@ -279,17 +258,17 @@ async def get_certificate_logs(
         )
     )
     cert = cert_result.scalar_one_or_none()
-    
+
     if not cert:
         raise HTTPException(status_code=404, detail="Certificate not found")
-    
+
     logs_result = await db.execute(
         select(CertificateLog)
         .where(CertificateLog.certificate_id == cert_id)
         .order_by(CertificateLog.created_at.asc())
     )
     logs = logs_result.scalars().all()
-    
+
     return [
         {
             "id": log.id,
@@ -308,18 +287,14 @@ async def renew_certificate(
     cert_id: int,
     force: bool = True,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_optional_current_user)
+    certificate: Certificate = Depends(get_certificate_for_user),
 ):
     """
     # Перевыпустить (обновить) SSL сертификат
-    
+
     ## Параметры:
     - `force`: При `true` перевыпускает независимо от срока действия
     """
-    # Check if user has access to this domain
-    if current_user:
-        require_domain_access(current_user, domain_id)
-    
     cert_result = await db.execute(
         select(Certificate).where(
             Certificate.id == cert_id,
@@ -327,22 +302,22 @@ async def renew_certificate(
         )
     )
     cert = cert_result.scalar_one_or_none()
-    
+
     if not cert:
         raise HTTPException(status_code=404, detail="Certificate not found")
-    
+
     if cert.type != CertificateType.ACME:
         raise HTTPException(
-            status_code=400, 
+            status_code=400,
             detail="Only ACME certificates can be renewed automatically"
         )
-    
+
     if cert.status != CertificateStatus.ISSUED:
         raise HTTPException(
-            status_code=400, 
+            status_code=400,
             detail=f"Cannot renew certificate with status '{cert.status.value}'"
         )
-    
+
     # Check for pending renewal
     pending_result = await db.execute(
         select(Certificate).where(
@@ -356,7 +331,7 @@ async def renew_certificate(
             status_code=400,
             detail="Certificate renewal already in progress"
         )
-    
+
     # Create new certificate for renewal
     new_cert = Certificate(
         domain_id=cert.domain_id,
@@ -370,7 +345,7 @@ async def renew_certificate(
     db.add(new_cert)
     await db.commit()
     await db.refresh(new_cert)
-    
+
     # Add log
     log_entry = CertificateLog(
         certificate_id=new_cert.id,
@@ -380,11 +355,11 @@ async def renew_certificate(
     )
     db.add(log_entry)
     await db.commit()
-    
+
     # Start background task
     from app.tasks.certificate_tasks import issue_single_certificate
     issue_single_certificate.delay(new_cert.id)
-    
+
     return JSONResponse({
         "status": "pending",
         "message": f"Certificate renewal started for {cert.common_name}",
@@ -399,19 +374,16 @@ async def delete_certificate(
     domain_id: int,
     cert_id: int,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_optional_current_user)
+    certificate: Certificate = Depends(get_certificate_for_user),
 ):
     """
     # Удалить сертификат
-    
+
     **Важно:** Если это единственный активный сертификат для домена,
     HTTPS перестанет работать.
     """
-    if current_user:
-        require_domain_access(current_user, domain_id)
-    
     await get_domain_or_404(domain_id, db)
-    
+
     cert_result = await db.execute(
         select(Certificate).where(
             Certificate.id == cert_id,
@@ -419,11 +391,11 @@ async def delete_certificate(
         )
     )
     cert = cert_result.scalar_one_or_none()
-    
+
     if not cert:
         raise HTTPException(status_code=404, detail="Certificate not found")
-    
+
     await db.delete(cert)
     await db.commit()
-    
+
     return {"status": "deleted", "certificate_id": cert_id}
