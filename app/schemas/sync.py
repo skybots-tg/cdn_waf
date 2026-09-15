@@ -5,7 +5,9 @@ from pydantic import BaseModel, Field
 class UserSync(BaseModel):
     id: int
     email: str
-    password_hash: str
+    # Blanked by the control plane before sending — the DNS node never
+    # authenticates users, so real password hashes are not shipped to nodes.
+    password_hash: str = ""
     full_name: Optional[str] = None
     is_active: bool
     is_superuser: bool

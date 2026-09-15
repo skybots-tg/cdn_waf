@@ -63,7 +63,13 @@ async def main() -> int:
     new_f = _fernet(args.new)
 
     async with AsyncSessionLocal() as session:
-        rows = (await session.execute(select(Certificate))).scalars().all()
+        # Only encrypted keys need rotating; there may be tens of thousands of
+        # historical cert rows, so filter in SQL rather than loading them all.
+        rows = (
+            await session.execute(
+                select(Certificate).where(Certificate.key_pem.like(f"{ENCRYPTED_PREFIX}%"))
+            )
+        ).scalars().all()
         pending = []
         for cert in rows:
             val = cert.key_pem

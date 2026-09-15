@@ -279,6 +279,7 @@ REDIS_URL={settings.REDIS_URL}
 CELERY_BROKER_URL={settings.CELERY_BROKER_URL}
 CELERY_RESULT_BACKEND={settings.CELERY_RESULT_BACKEND}
 JWT_SECRET_KEY={settings.JWT_SECRET_KEY}
+NODE_SYNC_TOKEN={settings.NODE_SYNC_TOKEN or ''}
 ACME_EMAIL={settings.ACME_EMAIL}
 """
 
@@ -391,11 +392,12 @@ ACME_EMAIL={settings.ACME_EMAIL}
     async def sync_database(node: DNSNode, db_session: AsyncSession) -> DNSNodeCommandResult:
         """Sync domains and records from central DB to node DB via API"""
         import httpx
+        from app.core.config import settings
         from app.schemas.sync import (
-            DNSSyncPayload, UserSync, OrganizationSync, DomainSync, 
+            DNSSyncPayload, UserSync, OrganizationSync, DomainSync,
             DNSRecordSync, EdgeNodeSync, DNSNodeSync
         )
-        
+
         try:
             # 1. Fetch data from central DB
             users = (await db_session.execute(text("SELECT * FROM users"))).all()
@@ -404,28 +406,40 @@ ACME_EMAIL={settings.ACME_EMAIL}
             dns_records = (await db_session.execute(text("SELECT * FROM dns_records"))).all()
             edge_nodes = (await db_session.execute(text("SELECT * FROM edge_nodes"))).all()
             dns_nodes = (await db_session.execute(text("SELECT * FROM dns_nodes"))).all()
-            
+
             # 2. Construct Payload
             def row_to_dict(row):
                 return dict(row._mapping)
 
+            def user_row(row):
+                # The DNS node never authenticates users — it only serves DNS —
+                # so never ship password hashes / TOTP secrets over the wire.
+                d = row_to_dict(row)
+                d["password_hash"] = ""
+                d["totp_secret"] = None
+                return d
+
             payload = DNSSyncPayload(
-                users=[UserSync(**row_to_dict(u)) for u in users],
+                users=[UserSync(**user_row(u)) for u in users],
                 organizations=[OrganizationSync(**row_to_dict(o)) for o in organizations],
                 domains=[DomainSync(**row_to_dict(d)) for d in domains],
                 records=[DNSRecordSync(**row_to_dict(r)) for r in dns_records],
                 edge_nodes=[EdgeNodeSync(**row_to_dict(n)) for n in edge_nodes],
                 dns_nodes=[DNSNodeSync(**row_to_dict(n)) for n in dns_nodes],
             )
-            
+
             # 3. Send to Node API
             # Need to determine port, assuming 8000 for now
             api_url = f"http://{node.ip_address}:8000/api/v1/sync"
-            
+            headers = {}
+            if settings.NODE_SYNC_TOKEN:
+                headers["X-Node-Token"] = settings.NODE_SYNC_TOKEN
+
             async with httpx.AsyncClient() as client:
                 response = await client.post(
                     api_url,
                     json=payload.model_dump(mode='json'),
+                    headers=headers,
                     timeout=SYNC_TIMEOUT_SECONDS
                 )
                 

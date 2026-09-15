@@ -14,7 +14,7 @@ from dnslib import (
 from dnslib.server import DNSServer, BaseResolver
 from sqlalchemy import create_engine, select, and_, or_, text
 from sqlalchemy.orm import sessionmaker, Session
-from fastapi import FastAPI, HTTPException, BackgroundTasks
+from fastapi import FastAPI, HTTPException, BackgroundTasks, Depends, Header
 import uvicorn
 
 from app.core.config import settings
@@ -261,8 +261,27 @@ class DBResolver(BaseResolver):
 app = FastAPI(title="DNS Node API")
 
 
+def require_node_token(x_node_token: Optional[str] = Header(default=None)):
+    """Authenticate control-plane -> node requests with a shared token.
+
+    Soft during rollout: if NODE_SYNC_TOKEN is not set in this node's env, we log
+    a warning and allow the request, so sync keeps working until the token is
+    distributed to every node. Once the token is set, a missing/wrong token is
+    rejected with 401. Combined with the firewall that limits :8000 to the
+    control-plane IP, this closes the unauthenticated sync/debug endpoints.
+    """
+    expected = getattr(settings, "NODE_SYNC_TOKEN", None)
+    if not expected:
+        logger.warning(
+            "NODE_SYNC_TOKEN not configured on this node — accepting request without token auth"
+        )
+        return
+    if x_node_token != expected:
+        raise HTTPException(status_code=401, detail="Invalid or missing node token")
+
+
 @app.get("/api/v1/debug/lookup")
-def debug_lookup(name: str, type: str = "TXT"):
+def debug_lookup(name: str, type: str = "TXT", _auth: None = Depends(require_node_token)):
     """Diagnostic endpoint: show exactly what the DB contains for a given query."""
     name = name.rstrip('.').lower()
     qtype = type.upper()
@@ -322,7 +341,7 @@ def debug_lookup(name: str, type: str = "TXT"):
 
 
 @app.post("/api/v1/sync")
-async def sync_data(payload: DNSSyncPayload):
+async def sync_data(payload: DNSSyncPayload, _auth: None = Depends(require_node_token)):
     """Sync data from central server"""
     logger.info("Received sync request")
     try:
