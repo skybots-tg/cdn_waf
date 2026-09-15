@@ -1,7 +1,13 @@
 """WAF and security schemas"""
 from datetime import datetime
 from typing import Optional, Dict, Any
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
+
+from app.schemas.validators import (
+    sanitize_condition_values,
+    validate_url_pattern,
+    validate_ip_or_cidr,
+)
 from enum import Enum
 
 
@@ -22,6 +28,11 @@ class WAFRuleCreate(BaseModel):
     conditions: Dict[str, Any] = Field(...)
     enabled: bool = Field(default=True)
 
+    @field_validator('conditions')
+    @classmethod
+    def _v_conditions(cls, v):
+        return sanitize_condition_values(v)
+
 
 class WAFRuleUpdate(BaseModel):
     """Schema for WAF rule update"""
@@ -31,6 +42,11 @@ class WAFRuleUpdate(BaseModel):
     action: Optional[WAFActionEnum] = None
     conditions: Optional[Dict[str, Any]] = None
     enabled: Optional[bool] = None
+
+    @field_validator('conditions')
+    @classmethod
+    def _v_conditions(cls, v):
+        return v if v is None else sanitize_condition_values(v)
 
 
 class WAFRuleResponse(BaseModel):
@@ -57,6 +73,11 @@ class RateLimitCreate(BaseModel):
     key_type: str = Field(default="ip")
     custom_key: Optional[str] = None
     path_pattern: Optional[str] = None
+
+    @field_validator('path_pattern')
+    @classmethod
+    def _v_path_pattern(cls, v):
+        return v if v is None else validate_url_pattern(v)
     limit_value: int = Field(..., ge=1)
     interval_seconds: int = Field(..., ge=1)
     action: str = Field(default="block")
@@ -73,6 +94,11 @@ class RateLimitUpdate(BaseModel):
     key_type: Optional[str] = None
     custom_key: Optional[str] = None
     path_pattern: Optional[str] = None
+
+    @field_validator('path_pattern')
+    @classmethod
+    def _v_path_pattern(cls, v):
+        return v if v is None else validate_url_pattern(v)
     limit_value: Optional[int] = Field(None, ge=1)
     interval_seconds: Optional[int] = Field(None, ge=1)
     action: Optional[str] = None
@@ -107,6 +133,11 @@ class IPAccessRuleCreate(BaseModel):
     """Schema for IP access rule creation"""
     rule_type: str = Field(..., pattern="^(whitelist|blacklist)$")
     ip_address: str = Field(..., min_length=1, max_length=45)
+
+    @field_validator('ip_address')
+    @classmethod
+    def _v_ip(cls, v):
+        return validate_ip_or_cidr(v)
     description: Optional[str] = None
     enabled: bool = Field(default=True)
 
@@ -115,6 +146,11 @@ class IPAccessRuleUpdate(BaseModel):
     """Schema for IP access rule update"""
     rule_type: Optional[str] = Field(None, pattern="^(whitelist|blacklist)$")
     ip_address: Optional[str] = Field(None, min_length=1, max_length=45)
+
+    @field_validator('ip_address')
+    @classmethod
+    def _v_ip(cls, v):
+        return v if v is None else validate_ip_or_cidr(v)
     description: Optional[str] = None
     enabled: Optional[bool] = None
 

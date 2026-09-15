@@ -1,10 +1,12 @@
 """Web routes for HTML pages"""
 import logging
-from fastapi import APIRouter, Request, Depends, HTTPException
+from fastapi import APIRouter, Request, Depends
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.ext.asyncio import AsyncSession
 from jose import JWTError, jwt
+
+from sqlalchemy import select
 
 from app.core.database import get_db
 from app.core.config import settings
@@ -47,6 +49,38 @@ def _require_user_or_redirect(user):
     if user is None:
         return RedirectResponse(url="/login", status_code=302)
     return None
+
+
+def _require_superuser_or_redirect(user):
+    """Redirect anonymous users to /login and non-superusers to /dashboard.
+
+    Node-management pages render infrastructure secrets (edge-node API tokens,
+    SSH keys) and must never be shown to ordinary tenants.
+    """
+    if user is None:
+        return RedirectResponse(url="/login", status_code=302)
+    if not user.get("is_superuser"):
+        return RedirectResponse(url="/dashboard", status_code=302)
+    return None
+
+
+async def _domain_visible_to(user, domain, db: AsyncSession) -> bool:
+    """True if the web user may view ``domain`` (own org, or superuser)."""
+    if user.get("is_superuser"):
+        return True
+    from app.models.organization import Organization, OrganizationMember
+
+    owned = await db.execute(
+        select(Organization.id).where(Organization.owner_id == user["id"])
+    )
+    org_ids = {r[0] for r in owned.fetchall()}
+    member = await db.execute(
+        select(OrganizationMember.organization_id).where(
+            OrganizationMember.user_id == user["id"]
+        )
+    )
+    org_ids |= {r[0] for r in member.fetchall()}
+    return domain.organization_id in org_ids
 
 
 @router.get("/", response_class=HTMLResponse)
@@ -124,7 +158,7 @@ async def domain_dns_page(request: Request, domain_id: int, db: AsyncSession = D
     from app.services.dns_node_service import DNSNodeService
     domain_service = DomainService(db)
     domain = await domain_service.get_by_id(domain_id)
-    if not domain:
+    if not domain or not await _domain_visible_to(user, domain, db):
         return templates.TemplateResponse("404.html", {"request": request}, status_code=404)
 
     nodes = await DNSNodeService.get_nodes(db, limit=100)
@@ -139,7 +173,7 @@ async def domain_dns_page(request: Request, domain_id: int, db: AsyncSession = D
 async def edge_nodes_page(request: Request, db: AsyncSession = Depends(get_db)):
     """Edge nodes management page (superuser only)"""
     user = await get_current_web_user(request, db)
-    redirect = _require_user_or_redirect(user)
+    redirect = _require_superuser_or_redirect(user)
     if redirect:
         return redirect
     return templates.TemplateResponse("edge_nodes.html", {"request": request, "user": user})
@@ -149,7 +183,7 @@ async def edge_nodes_page(request: Request, db: AsyncSession = Depends(get_db)):
 async def dns_nodes_page(request: Request, db: AsyncSession = Depends(get_db)):
     """DNS nodes management page (superuser only)"""
     user = await get_current_web_user(request, db)
-    redirect = _require_user_or_redirect(user)
+    redirect = _require_superuser_or_redirect(user)
     if redirect:
         return redirect
     return templates.TemplateResponse("dns_nodes.html", {"request": request, "user": user})
@@ -159,7 +193,7 @@ async def dns_nodes_page(request: Request, db: AsyncSession = Depends(get_db)):
 async def edge_node_manage_page(request: Request, node_id: int, db: AsyncSession = Depends(get_db)):
     """Edge node management page"""
     user = await get_current_web_user(request, db)
-    redirect = _require_user_or_redirect(user)
+    redirect = _require_superuser_or_redirect(user)
     if redirect:
         return redirect
 
@@ -177,7 +211,7 @@ async def edge_node_manage_page(request: Request, node_id: int, db: AsyncSession
 async def dns_node_manage_page(request: Request, node_id: int, db: AsyncSession = Depends(get_db)):
     """DNS node management page"""
     user = await get_current_web_user(request, db)
-    redirect = _require_user_or_redirect(user)
+    redirect = _require_superuser_or_redirect(user)
     if redirect:
         return redirect
 
@@ -202,7 +236,7 @@ async def domain_settings_page(request: Request, domain_id: int, db: AsyncSessio
     from app.services.dns_node_service import DNSNodeService
     domain_service = DomainService(db)
     domain = await domain_service.get_by_id(domain_id)
-    if not domain:
+    if not domain or not await _domain_visible_to(user, domain, db):
         return templates.TemplateResponse("404.html", {"request": request}, status_code=404)
 
     nodes = await DNSNodeService.get_nodes(db, limit=100)
@@ -223,7 +257,7 @@ async def domain_waf_page(request: Request, domain_id: int, db: AsyncSession = D
 
     domain_service = DomainService(db)
     domain = await domain_service.get_by_id(domain_id)
-    if not domain:
+    if not domain or not await _domain_visible_to(user, domain, db):
         return templates.TemplateResponse("404.html", {"request": request}, status_code=404)
 
     return templates.TemplateResponse("domain_waf.html", {
@@ -241,7 +275,7 @@ async def domain_analytics_page(request: Request, domain_id: int, db: AsyncSessi
 
     domain_service = DomainService(db)
     domain = await domain_service.get_by_id(domain_id)
-    if not domain:
+    if not domain or not await _domain_visible_to(user, domain, db):
         return templates.TemplateResponse("404.html", {"request": request}, status_code=404)
 
     return templates.TemplateResponse("domain_analytics.html", {
@@ -269,7 +303,7 @@ async def domain_logs_page(request: Request, domain_id: int, db: AsyncSession = 
 
     domain_service = DomainService(db)
     domain = await domain_service.get_by_id(domain_id)
-    if not domain:
+    if not domain or not await _domain_visible_to(user, domain, db):
         return templates.TemplateResponse("404.html", {"request": request}, status_code=404)
 
     return templates.TemplateResponse("domain_logs.html", {

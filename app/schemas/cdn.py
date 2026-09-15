@@ -1,8 +1,14 @@
 """Origin and cache schemas"""
 from datetime import datetime
 from typing import Optional, List
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from enum import Enum
+
+from app.schemas.validators import (
+    validate_host_or_ip,
+    validate_health_check_url,
+    validate_url_pattern,
+)
 
 
 # Origin schemas
@@ -20,6 +26,16 @@ class OriginCreate(BaseModel):
     health_check_interval: int = Field(default=30, ge=10, le=300)
     health_check_timeout: int = Field(default=5, ge=1, le=60)
 
+    @field_validator('origin_host')
+    @classmethod
+    def _v_origin_host(cls, v):
+        return validate_host_or_ip(v)
+
+    @field_validator('health_check_url')
+    @classmethod
+    def _v_health_check_url(cls, v):
+        return validate_health_check_url(v)
+
 
 class OriginUpdate(BaseModel):
     """Schema for origin update"""
@@ -34,6 +50,16 @@ class OriginUpdate(BaseModel):
     health_check_url: Optional[str] = None
     health_check_interval: Optional[int] = Field(None, ge=10, le=300)
     health_check_timeout: Optional[int] = Field(None, ge=1, le=60)
+
+    @field_validator('origin_host')
+    @classmethod
+    def _v_origin_host(cls, v):
+        return v if v is None else validate_host_or_ip(v)
+
+    @field_validator('health_check_url')
+    @classmethod
+    def _v_health_check_url(cls, v):
+        return v if v is None else validate_health_check_url(v)
 
 
 class OriginResponse(BaseModel):
@@ -79,6 +105,11 @@ class CacheRuleCreate(BaseModel):
     cache_by_device_type: bool = Field(default=False)
     enabled: bool = Field(default=True)
 
+    @field_validator('pattern')
+    @classmethod
+    def _v_pattern(cls, v):
+        return validate_url_pattern(v)
+
 
 class CacheRuleUpdate(BaseModel):
     """Schema for cache rule update"""
@@ -92,6 +123,11 @@ class CacheRuleUpdate(BaseModel):
     cache_by_query_string: Optional[bool] = None
     cache_by_device_type: Optional[bool] = None
     enabled: Optional[bool] = None
+
+    @field_validator('pattern')
+    @classmethod
+    def _v_pattern(cls, v):
+        return v if v is None else validate_url_pattern(v)
 
 
 class CacheRuleResponse(BaseModel):
@@ -116,6 +152,11 @@ class CachePurgeRequest(BaseModel):
     purge_type: str = Field(..., pattern="^(all|url|pattern)$")
     urls: Optional[List[str]] = None
     pattern: Optional[str] = None
+
+    @field_validator('pattern')
+    @classmethod
+    def _v_pattern(cls, v):
+        return v if v is None else validate_url_pattern(v)
 
 
 class CachePurgeResponse(BaseModel):

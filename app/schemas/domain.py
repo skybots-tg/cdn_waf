@@ -1,8 +1,10 @@
 """Domain schemas"""
 from datetime import datetime
 from typing import Optional
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from enum import Enum
+
+from app.schemas.validators import validate_hostname
 
 
 class DomainStatusEnum(str, Enum):
@@ -23,6 +25,11 @@ class TLSModeEnum(str, Enum):
 class DomainCreate(BaseModel):
     """Schema for domain creation"""
     name: str = Field(..., min_length=3, max_length=255)
+
+    @field_validator("name")
+    @classmethod
+    def _validate_name(cls, v):
+        return validate_hostname(v)
 
 
 class DomainUpdate(BaseModel):
