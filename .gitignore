@@ -75,3 +75,9 @@ static/dist/
 uploads/
 
 
+
+# Extra env variants and stray dumps (do not commit secrets/backups)
+.env.*
+!.env.example
+*.save
+proportion_backup.sql
