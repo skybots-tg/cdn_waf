@@ -10,12 +10,13 @@ from sqlalchemy import select, func, case, desc
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
-from app.core.security import get_optional_current_user, require_domain_access
+from app.core.security import get_current_superuser
 from app.models.user import User
 from app.models.log import RequestLog
 from app.models.analytics import HourlyStats, DailyStats, GeoStats, TopPathsStats, ErrorStats
 from app.services.analytics_service import AnalyticsService
-from app.api.v1.dependencies import get_domain_or_404
+from app.models.domain import Domain
+from app.api.v1.dependencies import get_domain_for_user
 
 router = APIRouter()
 
@@ -24,14 +25,10 @@ router = APIRouter()
 async def get_domain_basic_stats(
     domain_id: int,
     range: str = Query("24h", regex="^(1h|24h|7d|30d|90d|6m)$"),
-    current_user: Optional[User] = Depends(get_optional_current_user),
+    domain: Domain = Depends(get_domain_for_user),
     db: AsyncSession = Depends(get_db)
 ):
     """Get basic statistics for a specific domain using aggregated data"""
-    if current_user:
-        require_domain_access(current_user, domain_id)
-
-    domain = await get_domain_or_404(domain_id, db)
     start_time = AnalyticsService.get_time_range_start(range)
 
     if range in ["7d", "30d", "90d", "6m"]:
@@ -102,14 +99,10 @@ async def get_domain_timeseries(
     domain_id: int,
     range: str = Query("24h", regex="^(1h|24h|7d|30d|90d|6m)$"),
     metric: str = Query("requests", regex="^(requests|bandwidth)$"),
-    current_user: Optional[User] = Depends(get_optional_current_user),
+    domain: Domain = Depends(get_domain_for_user),
     db: AsyncSession = Depends(get_db)
 ):
     """Get domain statistics timeseries using aggregated data"""
-    if current_user:
-        require_domain_access(current_user, domain_id)
-
-    domain = await get_domain_or_404(domain_id, db)
     return await AnalyticsService.get_timeseries_optimized(db, range, metric, domain_id)
 
 
@@ -118,14 +111,10 @@ async def get_domain_top_paths(
     domain_id: int,
     range: str = Query("24h", regex="^(1h|24h|7d|30d)$"),
     limit: int = Query(10, ge=1, le=100),
-    current_user: Optional[User] = Depends(get_optional_current_user),
+    domain: Domain = Depends(get_domain_for_user),
     db: AsyncSession = Depends(get_db)
 ):
     """Get top paths for a specific domain from aggregated data"""
-    if current_user:
-        require_domain_access(current_user, domain_id)
-
-    domain = await get_domain_or_404(domain_id, db)
     start_time = AnalyticsService.get_time_range_start(range)
 
     if range in ["7d", "30d"]:
@@ -163,14 +152,10 @@ async def get_domain_errors(
     domain_id: int,
     range: str = Query("24h", regex="^(1h|24h|7d|30d)$"),
     limit: int = Query(20, ge=1, le=100),
-    current_user: Optional[User] = Depends(get_optional_current_user),
+    domain: Domain = Depends(get_domain_for_user),
     db: AsyncSession = Depends(get_db)
 ):
     """Get top errors for a specific domain"""
-    if current_user:
-        require_domain_access(current_user, domain_id)
-
-    domain = await get_domain_or_404(domain_id, db)
     start_time = AnalyticsService.get_time_range_start(range)
 
     if range in ["7d", "30d"]:
@@ -202,14 +187,10 @@ async def get_domain_errors(
 async def get_domain_geo_stats(
     domain_id: int,
     range: str = Query("24h", regex="^(1h|24h|7d|30d)$"),
-    current_user: Optional[User] = Depends(get_optional_current_user),
+    domain: Domain = Depends(get_domain_for_user),
     db: AsyncSession = Depends(get_db)
 ):
     """Get geographic distribution for a specific domain"""
-    if current_user:
-        require_domain_access(current_user, domain_id)
-
-    domain = await get_domain_or_404(domain_id, db)
     start_time = AnalyticsService.get_time_range_start(range)
 
     if range in ["7d", "30d"]:
@@ -265,14 +246,10 @@ async def get_domain_logs(
     offset: int = Query(0, ge=0),
     status: Optional[int] = None,
     method: Optional[str] = None,
-    current_user: Optional[User] = Depends(get_optional_current_user),
+    domain: Domain = Depends(get_domain_for_user),
     db: AsyncSession = Depends(get_db)
 ):
     """Get request logs for a specific domain (raw logs, last 30 days)"""
-    if current_user:
-        require_domain_access(current_user, domain_id)
-
-    domain = await get_domain_or_404(domain_id, db)
 
     query = select(RequestLog).where(RequestLog.domain_id == domain_id)
     if status:
@@ -326,14 +303,10 @@ async def export_domain_analytics(
     domain_id: int,
     range: str = Query("24h", regex="^(1h|24h|7d|30d)$"),
     format: str = Query("csv", regex="^(csv|json)$"),
-    current_user: Optional[User] = Depends(get_optional_current_user),
+    domain: Domain = Depends(get_domain_for_user),
     db: AsyncSession = Depends(get_db)
 ):
     """Export domain analytics data"""
-    if current_user:
-        require_domain_access(current_user, domain_id)
-
-    domain = await get_domain_or_404(domain_id, db)
     start_time = AnalyticsService.get_time_range_start(range)
 
     timeseries = await AnalyticsService.get_timeseries_optimized(db, range, "requests", domain_id)
@@ -369,10 +342,10 @@ async def export_domain_analytics(
 async def export_global_analytics(
     range: str = Query("24h", regex="^(1h|24h|7d|30d)$"),
     format: str = Query("csv", regex="^(csv|json)$"),
-    current_user: Optional[User] = Depends(get_optional_current_user),
+    current_user: User = Depends(get_current_superuser),
     db: AsyncSession = Depends(get_db)
 ):
-    """Export global analytics data"""
+    """Export global analytics data (superuser only)"""
     stats = await AnalyticsService.get_global_stats_optimized(db, range)
     timeseries = await AnalyticsService.get_timeseries_optimized(db, range, "requests")
     bandwidth = await AnalyticsService.get_timeseries_optimized(db, range, "bandwidth")

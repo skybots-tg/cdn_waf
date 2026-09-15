@@ -1,10 +1,10 @@
 """DNS Nodes API"""
-from typing import List, Optional, Dict, Any, Union
-from fastapi import APIRouter, Depends, HTTPException, status, Query
+from typing import List, Optional, Union
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
-from app.core.security import get_current_active_user, get_current_superuser
+from app.core.security import get_current_superuser
 from app.models.user import User
 from app.schemas.dns_node import (
     DNSNodeCreate,
@@ -31,7 +31,7 @@ async def list_dns_nodes(
     limit: int = 100,
     status: Optional[str] = None,
     location: Optional[str] = None,
-    current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(get_current_superuser),
     db: AsyncSession = Depends(get_db)
 ):
     """List all DNS nodes"""
@@ -39,7 +39,7 @@ async def list_dns_nodes(
 
 @router.get("/stats", response_model=DNSNodeStats)
 async def get_dns_nodes_stats(
-    current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(get_current_superuser),
     db: AsyncSession = Depends(get_db)
 ):
     """Get DNS nodes statistics"""
@@ -80,7 +80,7 @@ async def create_dns_node(
 @router.get("/{node_id}", response_model=DNSNodeResponse)
 async def get_dns_node(
     node_id: int,
-    current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(get_current_superuser),
     db: AsyncSession = Depends(get_db)
 ):
     """Get DNS node by ID"""
@@ -165,7 +165,7 @@ async def execute_command(
 async def get_node_logs(
     node_id: int,
     lines: int = 100,
-    current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(get_current_superuser),
     db: AsyncSession = Depends(get_db)
 ):
     """Get DNS node logs"""
@@ -180,7 +180,7 @@ async def get_node_logs(
 async def get_component_status(
     node_id: int,
     component: str,
-    current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(get_current_superuser),
     db: AsyncSession = Depends(get_db)
 ):
     """Get status of a component"""
@@ -193,7 +193,7 @@ async def get_component_status(
 @router.post("/{node_id}/check-health")
 async def check_node_health(
     node_id: int,
-    current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(get_current_superuser),
     db: AsyncSession = Depends(get_db)
 ):
     """Check node health and update status"""

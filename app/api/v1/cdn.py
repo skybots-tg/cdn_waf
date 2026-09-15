@@ -7,6 +7,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import get_db
 from app.models.user import User
 from app.models.domain import Domain
+from app.models.cache import CacheRule
+from app.models.origin import Origin
 from app.schemas.cdn import (
     CacheRuleCreate,
     CacheRuleUpdate,
@@ -25,7 +27,12 @@ from app.schemas.cdn import (
 from app.services.cache_service import CacheService
 from app.services.origin_service import OriginService
 from app.services.ssl_service import SSLService
-from app.core.security import get_current_active_user, require_domain_access
+from app.core.security import get_current_active_user
+from app.api.v1.dependencies import (
+    get_domain_for_user,
+    get_cache_rule_for_user,
+    get_origin_for_user,
+)
 
 router = APIRouter()
 
@@ -36,10 +43,10 @@ router = APIRouter()
 async def get_cache_rules(
     domain_id: int,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user),
+    domain: Domain = Depends(get_domain_for_user)
 ):
     """Get cache rules for domain"""
-    require_domain_access(current_user, domain_id)
     rules = await CacheService.get_rules(db, domain_id)
     return rules
 
@@ -49,10 +56,10 @@ async def create_cache_rule(
     domain_id: int,
     rule_data: CacheRuleCreate,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user),
+    domain: Domain = Depends(get_domain_for_user)
 ):
     """Create cache rule"""
-    require_domain_access(current_user, domain_id)
     rule = await CacheService.create_rule(db, domain_id, rule_data)
     return rule
 
@@ -62,7 +69,8 @@ async def update_cache_rule(
     rule_id: int,
     rule_data: CacheRuleUpdate,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user),
+    rule: CacheRule = Depends(get_cache_rule_for_user)
 ):
     """Update cache rule"""
     rule = await CacheService.update_rule(db, rule_id, rule_data)
@@ -78,7 +86,8 @@ async def update_cache_rule(
 async def delete_cache_rule(
     rule_id: int,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user),
+    rule: CacheRule = Depends(get_cache_rule_for_user)
 ):
     """Delete cache rule"""
     success = await CacheService.delete_rule(db, rule_id)
@@ -96,10 +105,10 @@ async def purge_cache(
     domain_id: int,
     purge_data: CachePurgeRequest,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user),
+    domain: Domain = Depends(get_domain_for_user)
 ):
     """Purge cache for domain"""
-    require_domain_access(current_user, domain_id)
     if purge_data.purge_type == "all":
         purge = await CacheService.purge_all(db, domain_id, current_user.id)
     elif purge_data.purge_type == "url":
@@ -134,10 +143,10 @@ async def get_purge_history(
     domain_id: int,
     limit: int = 50,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user),
+    domain: Domain = Depends(get_domain_for_user)
 ):
     """Get cache purge history"""
-    require_domain_access(current_user, domain_id)
     history = await CacheService.get_purge_history(db, domain_id, limit)
     return history
 
@@ -149,10 +158,10 @@ async def enable_dev_mode(
     domain_id: int,
     duration_minutes: int = 10,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user),
+    domain: Domain = Depends(get_domain_for_user)
 ):
     """Enable dev mode (bypass cache)"""
-    require_domain_access(current_user, domain_id)
     expires_at = await CacheService.enable_dev_mode(db, domain_id, duration_minutes)
     return DevModeResponse(
         enabled=True,
@@ -164,10 +173,10 @@ async def enable_dev_mode(
 async def disable_dev_mode(
     domain_id: int,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user),
+    domain: Domain = Depends(get_domain_for_user)
 ):
     """Disable dev mode"""
-    require_domain_access(current_user, domain_id)
     await CacheService.disable_dev_mode(db, domain_id)
     return {"status": "disabled"}
 
@@ -176,10 +185,10 @@ async def disable_dev_mode(
 async def get_dev_mode_status(
     domain_id: int,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user),
+    domain: Domain = Depends(get_domain_for_user)
 ):
     """Get dev mode status"""
-    require_domain_access(current_user, domain_id)
     is_active = await CacheService.is_dev_mode_active(db, domain_id)
     expires_at = await CacheService.get_dev_mode_expires(db, domain_id) if is_active else None
     
@@ -195,10 +204,10 @@ async def get_dev_mode_status(
 async def get_origins(
     domain_id: int,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user),
+    domain: Domain = Depends(get_domain_for_user)
 ):
     """Get origin servers for domain"""
-    require_domain_access(current_user, domain_id)
     origins = await OriginService.get_origins(db, domain_id)
     return origins
 
@@ -208,10 +217,10 @@ async def create_origin(
     domain_id: int,
     origin_data: OriginCreate,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user),
+    domain: Domain = Depends(get_domain_for_user)
 ):
     """Create origin server"""
-    require_domain_access(current_user, domain_id)
     origin = await OriginService.create_origin(db, domain_id, origin_data)
     return origin
 
@@ -221,7 +230,8 @@ async def update_origin(
     origin_id: int,
     origin_data: OriginUpdate,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user),
+    origin: Origin = Depends(get_origin_for_user)
 ):
     """Update origin server"""
     origin = await OriginService.update_origin(db, origin_id, origin_data)
@@ -237,7 +247,8 @@ async def update_origin(
 async def delete_origin(
     origin_id: int,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user),
+    origin: Origin = Depends(get_origin_for_user)
 ):
     """Delete origin server"""
     success = await OriginService.delete_origin(db, origin_id)
@@ -252,7 +263,8 @@ async def delete_origin(
 async def check_origin_health(
     origin_id: int,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user),
+    origin: Origin = Depends(get_origin_for_user)
 ):
     """Check origin server health"""
     health = await OriginService.check_health(db, origin_id)
@@ -266,15 +278,15 @@ async def upload_certificate(
     domain_id: int,
     cert_data: CertificateCreate,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user),
+    domain: Domain = Depends(get_domain_for_user)
 ):
     """
     # Загрузить собственный SSL сертификат
-    
+
     Используйте этот эндпоинт для загрузки собственного сертификата (не Let's Encrypt).
     Для автоматического выпуска Let's Encrypt используйте `/certificates/issue`.
     """
-    require_domain_access(current_user, domain_id)
     try:
         cert = await SSLService.create_certificate(db, domain_id, cert_data)
         return cert
@@ -289,10 +301,10 @@ async def upload_certificate(
 async def get_tls_settings(
     domain_id: int,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user),
+    domain: Domain = Depends(get_domain_for_user)
 ):
     """Get TLS settings for domain"""
-    require_domain_access(current_user, domain_id)
     from app.models.domain import DomainTLSSettings, TLSMode
     
     # Get TLS settings from database
@@ -303,8 +315,8 @@ async def get_tls_settings(
     
     if not tls_settings:
         from app.api.v1.dependencies import get_domain_or_404
-        domain = await get_domain_or_404(domain_id, db)
-        
+        await get_domain_or_404(domain_id, db)
+
         # Create default TLS settings
         tls_settings = DomainTLSSettings(
             domain_id=domain_id,
@@ -337,10 +349,10 @@ async def update_tls_settings(
     domain_id: int,
     settings: TLSSettingsUpdate,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user),
+    domain: Domain = Depends(get_domain_for_user)
 ):
     """Update TLS settings for domain"""
-    require_domain_access(current_user, domain_id)
     settings_dict = settings.model_dump(exclude_unset=True)
     success = await SSLService.update_tls_settings(db, domain_id, settings_dict)
     

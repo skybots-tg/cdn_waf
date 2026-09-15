@@ -1,5 +1,6 @@
 """Authentication endpoints"""
 from typing import List
+from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
@@ -15,7 +16,6 @@ from app.core.security import (
     create_refresh_token,
     decode_token,
     get_current_active_user,
-    get_optional_current_user,
 )
 from app.schemas.user import (
     UserCreate,
@@ -33,7 +33,7 @@ from app.schemas.api_token import (
 from app.services.user_service import UserService
 from app.models.user import User, APIToken
 from app.models.domain import Domain
-from app.models.organization import Organization, OrganizationMember
+from app.models.organization import Organization, OrganizationMember, OrganizationRole
 from app.api.v1.dependencies import get_user_org_ids
 
 router = APIRouter()
@@ -57,8 +57,24 @@ async def signup(
     
     # Create user
     user = await user_service.create(user_create)
+    await db.flush()
+
+    # Give every new user their own organization so tenant isolation actually
+    # separates them (previously all domains were funnelled into shared org 1).
+    org = Organization(name=f"{user.email}'s organization", owner_id=user.id)
+    db.add(org)
+    await db.flush()
+    db.add(
+        OrganizationMember(
+            organization_id=org.id,
+            user_id=user.id,
+            role=OrganizationRole.OWNER,
+            joined_at=datetime.utcnow(),
+        )
+    )
     await db.commit()
-    
+    await db.refresh(user)
+
     return user
 
 

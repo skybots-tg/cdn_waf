@@ -3,7 +3,6 @@ import asyncio
 import logging
 from sqlalchemy import text, select
 from app.core.database import AsyncSessionLocal, engine, Base
-import app.models # Register all models
 from app.core.config import settings
 # from app.models import Base
 from app.models.user import User
@@ -130,15 +129,24 @@ async def migrate_schema():
 
 
 async def seed_data():
-    """Seed initial data"""
+    """Seed initial data.
+
+    The well-known ``admin@example.com`` / ``admin`` account is created ONLY in
+    DEBUG (local dev). In production it is never (re)created — that seed used to
+    hand anyone who could reach the panel a superuser login. Provision the first
+    production admin explicitly with ``python create_superuser.py``.
+    """
+    if not settings.DEBUG:
+        logger.info("Production mode: skipping default admin/org seed")
+        return
     try:
         async with AsyncSessionLocal() as session:
             # Check if default user exists
             result = await session.execute(select(User).filter(User.email == "admin@example.com"))
             user = result.scalars().first()
-            
+
             if not user:
-                logger.info("Creating default admin user...")
+                logger.info("Creating default admin user (DEBUG only)...")
                 user = User(
                     email="admin@example.com",
                     password_hash=get_password_hash("admin"),
@@ -150,7 +158,7 @@ async def seed_data():
                 await session.commit()
                 await session.refresh(user)
                 logger.info(f"Created user with ID {user.id}")
-            
+
             # Check if default organization exists
             result = await session.execute(select(Organization).filter(Organization.id == 1))
             org = result.scalars().first()
