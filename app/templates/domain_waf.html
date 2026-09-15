@@ -252,8 +252,8 @@ async function loadWAFRules() {
                             <span class="badge ${rule.enabled ? 'badge-success' : 'badge-secondary'}">
                                 ${rule.enabled ? 'Enabled' : 'Disabled'}
                             </span>
-                            <span class="badge badge-primary">${rule.action}</span>
-                            <span style="font-weight: 600;">${rule.name}</span>
+                            <span class="badge badge-primary">${escapeHtml(rule.action)}</span>
+                            <span style="font-weight: 600;">${escapeHtml(rule.name)}</span>
                         </div>
                         <p style="font-size: 13px; color: var(--text-secondary); margin: 0;">
                             ${rule.description || 'No description'}
@@ -304,7 +304,7 @@ async function loadRateLimits() {
                             <span class="badge ${limit.enabled ? 'badge-success' : 'badge-secondary'}">
                                 ${limit.enabled ? 'Enabled' : 'Disabled'}
                             </span>
-                            <span style="font-weight: 600;">${limit.name}</span>
+                            <span style="font-weight: 600;">${escapeHtml(limit.name)}</span>
                         </div>
                         <p style="font-size: 13px; color: var(--text-secondary); margin: 0;">
                             ${limit.limit_value} requests per ${limit.interval_seconds}s
@@ -352,7 +352,7 @@ async function loadIPRules() {
                             <span class="badge ${rule.rule_type === 'whitelist' ? 'badge-success' : 'badge-error'}">
                                 ${rule.rule_type}
                             </span>
-                            <span style="font-weight: 600; font-family: monospace;">${rule.ip_address}</span>
+                            <span style="font-weight: 600; font-family: monospace;">${escapeHtml(rule.ip_address)}</span>
                         </div>
                         <p style="font-size: 13px; color: var(--text-secondary); margin: 0;">
                             ${rule.description || 'No description'}

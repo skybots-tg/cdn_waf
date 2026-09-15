@@ -1094,12 +1094,8 @@ function getToken() {
     return localStorage.getItem('access_token') || '';
 }
 
-const _settingsEscapeEl = document.createElement('div');
-function escapeHtml(text) {
-    if (text === null || text === undefined) return '';
-    _settingsEscapeEl.textContent = String(text);
-    return _settingsEscapeEl.innerHTML;
-}
+// escapeHtml is provided globally by main.js (loaded via base.html before this script runs);
+// using that single correct implementation avoids the incomplete quote-unsafe copy.
 
 // Initialize
 document.addEventListener('DOMContentLoaded', () => {

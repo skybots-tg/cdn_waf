@@ -414,7 +414,7 @@ async function loadTopPages(range) {
             <div class="flex-between mb-2" style="padding: 8px 0; border-bottom: 1px solid var(--glass-border);">
                 <div style="flex: 1;">
                     <span style="color: var(--text-muted); margin-right: 8px;">${index + 1}.</span>
-                    <span style="font-family: monospace; font-size: 13px;">${item.path}</span>
+                    <span style="font-family: monospace; font-size: 13px;">${escapeHtml(item.path)}</span>
                 </div>
                 <span style="font-weight: 600;">${formatNumber(item.requests)}</span>
             </div>
@@ -440,7 +440,7 @@ async function loadGeoDistribution(range) {
             <div class="flex-between mb-2" style="padding: 8px 0; border-bottom: 1px solid var(--glass-border);">
                 <div>
                     <span style="color: var(--text-muted); margin-right: 8px;">${index + 1}.</span>
-                    <span style="font-weight: 500;">${item.country}</span>
+                    <span style="font-weight: 500;">${escapeHtml(item.country)}</span>
                 </div>
                 <div style="display: flex; align-items: center; gap: 16px;">
                     <span style="font-size: 13px; color: var(--text-secondary);">${item.percentage}%</span>
@@ -483,13 +483,13 @@ async function loadRecentLogs(range) {
                             <tr style="border-bottom: 1px solid var(--glass-border);">
                                 <td style="padding: 8px; color: var(--text-muted); white-space: nowrap;">${formatTime(log.timestamp)}</td>
                                 <td style="padding: 8px;">
-                                    <span class="badge badge-secondary">${log.method}</span>
+                                    <span class="badge badge-secondary">${escapeHtml(log.method)}</span>
                                 </td>
-                                <td style="padding: 8px; font-family: monospace; max-width: 300px; overflow: hidden; text-overflow: ellipsis;">${log.path}</td>
+                                <td style="padding: 8px; font-family: monospace; max-width: 300px; overflow: hidden; text-overflow: ellipsis;">${escapeHtml(log.path)}</td>
                                 <td style="padding: 8px; text-align: center;">
                                     <span class="badge ${getStatusBadgeClass(log.status)}">${log.status}</span>
                                 </td>
-                                <td style="padding: 8px; font-family: monospace; font-size: 12px;">${log.client_ip}</td>
+                                <td style="padding: 8px; font-family: monospace; font-size: 12px;">${escapeHtml(log.client_ip)}</td>
                                 <td style="padding: 8px; text-align: right; color: var(--text-secondary);">${formatBytes(log.bytes_sent)}</td>
                             </tr>
                         `).join('')}
@@ -583,7 +583,7 @@ async function loadTopErrors() {
             <div class="flex-between mb-2" style="padding: 8px 0; border-bottom: 1px solid var(--glass-border);">
                 <div style="flex: 1;">
                     <span class="badge ${item.status_code >= 500 ? 'badge-error' : 'badge-warning'}">${item.status_code}</span>
-                    <span style="font-family: monospace; font-size: 13px; margin-left: 8px;">${item.path}</span>
+                    <span style="font-family: monospace; font-size: 13px; margin-left: 8px;">${escapeHtml(item.path)}</span>
                 </div>
                 <span style="font-weight: 600; color: var(--error);">${formatNumber(item.count)}</span>
             </div>

@@ -552,12 +552,8 @@ function getToken() {
     return localStorage.getItem('access_token') || '';
 }
 
-// Utility: Escape HTML
-function escapeHtml(text) {
-    const div = document.createElement('div');
-    div.textContent = text;
-    return div.innerHTML;
-}
+// escapeHtml is provided globally by main.js (loaded before this file in base.html);
+// using that single correct implementation avoids the incomplete quote-unsafe copy.
 
 // Utility: Format date time (UTC from server → browser local timezone)
 function formatDateTime(dateStr) {
