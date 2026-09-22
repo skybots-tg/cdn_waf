@@ -1,4 +1,5 @@
 """Telegram alert service for node health monitoring"""
+import html
 import logging
 from enum import Enum
 from typing import Optional
@@ -214,4 +215,20 @@ class AlertService:
             title="DNS-нода восстановлена",
             message=f"<b>Нода:</b> {node_name} ({ip})",
             level=AlertLevel.INFO,
+        )
+
+    @staticmethod
+    async def dns_sync_refused(where: str, reason: str):
+        await AlertService.send_alert(
+            title="DNS-синк остановлен защитой",
+            message=(
+                f"<b>Где:</b> {html.escape(where)}\n"
+                f"<b>Причина:</b> {html.escape(reason)}\n\n"
+                "Снапшот похож на сбой БД панели, зоны на DNS-нодах не тронуты, "
+                "но новые изменения на них не попадают. Проверьте БД панели. "
+                "Если сокращение намеренное — Sync All на странице DNS-нод "
+                "и подтвердите принудительный синк."
+            ),
+            level=AlertLevel.CRITICAL,
+            tag_user=True,
         )

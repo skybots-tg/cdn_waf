@@ -323,10 +323,14 @@ async function syncNode(nodeId, btn) {
     btn.disabled = true;
 
     try {
-        await apiRequest(`/api/v1/dns-nodes/${nodeId}/component`, {
+        const result = await apiRequest(`/api/v1/dns-nodes/${nodeId}/component`, {
             method: 'POST',
             body: { component: 'database', action: 'sync' }
         });
+        if (result && result.success === false) {
+            showNotification(result.stderr || 'Sync failed', 'error');
+            return;
+        }
         showNotification('Database synced successfully', 'success');
     } catch (error) {
         console.error('Sync error:', error);
@@ -337,19 +341,33 @@ async function syncNode(nodeId, btn) {
     }
 }
 
-async function syncAllNodes() {
+async function syncAllNodes(force = false) {
     const btn = document.getElementById('btn-sync-all');
     const icon = btn.querySelector('i');
     icon.classList.add('fa-spin');
     btn.disabled = true;
+    let retryForced = false;
 
     try {
-        const result = await apiRequest('/api/v1/dns-nodes/sync-all', { method: 'POST' });
+        const url = force ? '/api/v1/dns-nodes/sync-all?force=true' : '/api/v1/dns-nodes/sync-all';
+        const result = await apiRequest(url, { method: 'POST' });
         const results = result.results || {};
         const failed = Object.entries(results).filter(([, v]) => !v.success);
+        const refused = failed.filter(([, v]) => v.refused);
 
         if (failed.length === 0) {
             showNotification('All nodes synced successfully', 'success');
+        } else if (refused.length > 0 && !force) {
+            // Защита синка: снапшот похож на сбой БД панели, ноды его не применили.
+            const reasons = refused.map(([n, v]) => `${n}: ${v.message}`).join('\n\n');
+            retryForced = confirm(
+                `The sync guard refused the snapshot:\n\n${reasons}\n\n` +
+                'Forcing it replaces the zones on the DNS nodes with what the panel DB ' +
+                'has right now. Do it only if the drop is intended. Force the sync?'
+            );
+            if (!retryForced) {
+                showNotification('Sync refused by the guard, DNS nodes keep their zones', 'error');
+            }
         } else {
             const names = failed.map(([n]) => n).join(', ');
             showNotification(`Sync failed for: ${names}`, 'error');
@@ -361,6 +379,7 @@ async function syncAllNodes() {
         icon.classList.remove('fa-spin');
         btn.disabled = false;
     }
+    if (retryForced) await syncAllNodes(true);
 }
 
 // ---------- Утилиты ----------

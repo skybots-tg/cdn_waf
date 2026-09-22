@@ -25,7 +25,7 @@ from app.models.dns_node import DNSNode
 from app.models.user import User
 from app.models.organization import Organization
 from app.schemas.sync import DNSSyncPayload
-from app.dns_node_sync import replace_snapshot
+from app.dns_node_sync import SnapshotRejected, replace_snapshot
 
 # Configure logging
 logging.basicConfig(
@@ -342,12 +342,20 @@ def debug_lookup(name: str, type: str = "TXT", _auth: None = Depends(require_nod
 
 
 @app.post("/api/v1/sync")
-async def sync_data(payload: DNSSyncPayload, _auth: None = Depends(require_node_token)):
-    """Sync data from central server"""
-    logger.info("Received sync request")
+async def sync_data(
+    payload: DNSSyncPayload,
+    force: bool = False,
+    _auth: None = Depends(require_node_token),
+):
+    """Sync data from central server.
+
+    A snapshot that would wipe or gut the local zones is refused with 409 and
+    nothing is touched, unless the panel resends it with ?force=true.
+    """
+    logger.info("Received sync request%s", " (force)" if force else "")
     try:
         with SessionLocal() as db:
-            replace_snapshot(db, payload)
+            replace_snapshot(db, payload, force=force)
             db.commit()
             logger.info("Sync completed successfully")
             return {"status": "success", "count": {
@@ -357,6 +365,12 @@ async def sync_data(payload: DNSSyncPayload, _auth: None = Depends(require_node_
                 "edge_nodes": len(payload.edge_nodes)
             }}
             
+    except SnapshotRejected as e:
+        logger.error(
+            "Sync refused, local zones kept: %s (local=%s, incoming=%s)",
+            e.reason, e.current.as_dict(), e.incoming.as_dict(),
+        )
+        raise HTTPException(status_code=409, detail=e.detail())
     except Exception as e:
         logger.error(f"Sync failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))

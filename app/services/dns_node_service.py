@@ -384,9 +384,14 @@ ACME_EMAIL={settings.ACME_EMAIL}
         return res
     
     @staticmethod
-    async def sync_database(node: DNSNode, db_session: AsyncSession) -> DNSNodeCommandResult:
-        """Sync domains and records from central DB to node DB via API"""
-        return await sync_node(node, db_session)
+    async def sync_database(
+        node: DNSNode, db_session: AsyncSession, force: bool = False
+    ) -> DNSNodeCommandResult:
+        """Sync domains and records from central DB to node DB via API.
+
+        force=True applies a snapshot the sync guard would refuse.
+        """
+        return await sync_node(node, db_session, force=force)
 
     @staticmethod
     async def issue_certificate(node: DNSNode) -> DNSNodeCommandResult:

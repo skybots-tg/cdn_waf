@@ -1,4 +1,5 @@
 """DNS Nodes API"""
+import logging
 from typing import List, Optional, Union
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -18,7 +19,10 @@ from app.schemas.dns_node import (
 )
 from app.schemas.task import TaskStartResponse
 from app.services.dns_node_service import DNSNodeService
+from app.services.dns_sync_service import SYNC_REFUSED_EXIT_CODE
 from app.tasks.edge_tasks import run_node_component_task
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -47,20 +51,27 @@ async def get_dns_nodes_stats(
 
 @router.post("/sync-all")
 async def sync_all_dns_nodes(
+    force: bool = False,
     current_user: User = Depends(get_current_superuser),
     db: AsyncSession = Depends(get_db)
 ):
-    """Trigger database sync for all DNS nodes"""
+    """Trigger database sync for all DNS nodes.
+
+    force=true applies a snapshot the sync guard refused (see dns_sync_guard).
+    """
     nodes = await DNSNodeService.get_nodes(db)
     if not nodes:
         return {"status": "no_nodes", "results": {}}
+    if force:
+        logger.warning("Forced DNS sync-all requested by %s", current_user.email)
     
     results = {}
     for node in nodes:
         try:
-            res = await DNSNodeService.sync_database(node, db)
+            res = await DNSNodeService.sync_database(node, db, force=force)
             results[node.name] = {
                 "success": res.success,
+                "refused": res.exit_code == SYNC_REFUSED_EXIT_CODE,
                 "message": res.stdout if res.success else res.stderr
             }
         except Exception as e:
