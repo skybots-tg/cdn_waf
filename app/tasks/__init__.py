@@ -13,6 +13,7 @@ celery_app = Celery(
         "app.tasks.edge_tasks",
         "app.tasks.analytics_tasks",
         "app.tasks.health_tasks",
+        "app.tasks.edge_health_tasks",
     ]
 )
 
