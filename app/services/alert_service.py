@@ -165,7 +165,7 @@ class AlertService:
             title="Edge-нода восстановлена",
             message=(
                 f"<b>Нода:</b> {node_name} ({ip})\n\n"
-                "Нода снова отвечает. Включение в ротацию — вручную."
+                "Нода снова отвечает и возвращена в ротацию."
             ),
             level=AlertLevel.INFO,
         )
