@@ -183,6 +183,20 @@ class AlertService:
         )
 
     @staticmethod
+    async def edge_mass_failure(failing: int, total: int, nodes: str, cause: str):
+        await AlertService.send_alert(
+            title="Проверка edge-нод: упали почти все сразу",
+            message=(
+                f"<b>Не прошли проверку:</b> {failing}/{total} — {nodes}\n"
+                f"<b>Вероятная причина:</b> {cause}\n\n"
+                "Автоотключение приостановлено, ноды остаются в DNS. "
+                "Проверьте их вручную."
+            ),
+            level=AlertLevel.CRITICAL,
+            tag_user=True,
+        )
+
+    @staticmethod
     async def dns_node_down(node_name: str, ip: str):
         await AlertService.send_alert(
             title="DNS-нода недоступна",

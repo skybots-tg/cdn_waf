@@ -7,6 +7,12 @@ import httpx
 from sqlalchemy import select
 
 from app.tasks import celery_app
+from app.tasks.edge_health_guard import (
+    EDGE_MIN_ENABLED_NODES,
+    can_auto_disable,
+    checker_is_online,
+    is_mass_failure,
+)
 from app.tasks.utils import create_task_db_session
 
 logger = logging.getLogger(__name__)
@@ -17,8 +23,7 @@ EDGE_FAILURE_THRESHOLD = 3
 EDGE_TLS_TIMEOUT = 6
 EDGE_TLS_SAMPLE_SIZE = 3  # proxied hostnames probed per health check
 EDGE_ALERT_COOLDOWN_SECONDS = 1800  # 30 min between repeated WARNING alerts
-EDGE_MIN_ENABLED_NODES = 2  # never auto-disable below this count
-
+EDGE_MASS_ALERT_KEY = "edge:mass_failure_alert"
 
 
 @celery_app.task(name="app.tasks.health.check_edge_nodes_health", soft_time_limit=90, time_limit=120)
@@ -49,93 +54,29 @@ async def _check_edge_nodes_health_async():
             if not nodes:
                 return {"status": "ok", "checked": 0}
 
-            checked = 0
-            disabled_any = False
-            enabled_count = len(nodes)
+            # Сначала опрашиваем все ноды разом и только потом решаем: иначе
+            # не отличить упавшую ноду от упавшей проверки, а последовательные
+            # таймауты при пропавшей сети упираются в soft_time_limit.
             tls_hostnames = await _edge_tls_sample(db)
-
-            for node in nodes:
-                checked += 1
-                http_ok, stale, age, tls_ok, tls_detail = await _probe_edge_node(
-                    node, tls_hostnames
-                )
-                healthy = http_ok and not stale and tls_ok
-                redis_key = f"edge:failures:{node.id}"
-                alert_key = f"edge:alert_sent:{node.id}"
-
-                if healthy:
-                    old_failures = int(await redis_client.get(redis_key) or 0)
-                    if old_failures > 0:
-                        await redis_client.delete(redis_key)
-                    await redis_client.delete(alert_key)
-                    if node.status == "offline":
-                        node.status = "online"
-                        await db.commit()
-                        logger.info("Edge node %s (%s) recovered", node.name, node.ip_address)
-                        await AlertService.edge_node_recovered(node.name, node.ip_address)
+            probes = await asyncio.gather(
+                *(_probe_edge_node(node, tls_hostnames) for node in nodes)
+            )
+            failing = []
+            for node, probe in zip(nodes, probes):
+                if _probe_is_healthy(probe):
+                    await _mark_edge_healthy(db, redis_client, AlertService, node)
                 else:
-                    failures = int(await redis_client.get(redis_key) or 0) + 1
-                    await redis_client.set(redis_key, str(failures), expire=3600)
+                    failing.append((node, probe))
 
-                    reason = _edge_failure_reason(http_ok, stale, age, tls_detail)
-                    logger.warning(
-                        "Edge node %s (%s) failing (%d/%d): %s",
-                        node.name, node.ip_address, failures, EDGE_FAILURE_THRESHOLD, reason,
-                    )
-
-                    if failures >= EDGE_FAILURE_THRESHOLD and enabled_count <= EDGE_MIN_ENABLED_NODES:
-                        # Отключив ноду, мы увели бы трафик проксируемых доменов
-                        # на origin в обход CDN/WAF (см. fallback в dns_server).
-                        # Оставляем её в ротации: и enabled, и status="online",
-                        # иначе get_edge_nodes_ips всё равно её отбросит.
-                        logger.warning(
-                            "Edge node %s (%s) would be auto-disabled but only %d enabled "
-                            "(min %d) — keeping in rotation: %s",
-                            node.name, node.ip_address, enabled_count,
-                            EDGE_MIN_ENABLED_NODES, reason,
-                        )
-                        already_alerted = await redis_client.get(alert_key)
-                        if not already_alerted:
-                            await redis_client.set(
-                                alert_key, "1", expire=EDGE_ALERT_COOLDOWN_SECONDS,
-                            )
-                            await AlertService.edge_node_down(
-                                node.name, node.ip_address,
-                                f"{reason} — нода оставлена в ротации, так как включено "
-                                f"{enabled_count} (минимум {EDGE_MIN_ENABLED_NODES})",
-                            )
-                    elif failures >= EDGE_FAILURE_THRESHOLD:
-                        node.enabled = False
-                        node.status = "offline"
-                        await db.commit()
-                        disabled_any = True
-                        enabled_count -= 1
-                        await redis_client.delete(redis_key)
-                        await redis_client.delete(alert_key)
-                        await redis_client.set(
-                            f"edge:auto_disabled:{node.id}", "1", expire=86400,
-                        )
-                        logger.critical(
-                            "Edge node %s (%s) auto-disabled after %d failures",
-                            node.name, node.ip_address, failures,
-                        )
-                        await AlertService.edge_node_disabled(
-                            node.name, node.ip_address,
-                            f"{failures} неудачных проверок подряд ({reason})",
-                        )
-                    elif not http_ok:
-                        # HTTP-нода реально не отвечает → шлём WARNING с cooldown,
-                        # чтобы не спамить однотипными сообщениями.
-                        already_alerted = await redis_client.get(alert_key)
-                        if not already_alerted:
-                            await redis_client.set(
-                                alert_key, "1", expire=EDGE_ALERT_COOLDOWN_SECONDS,
-                            )
-                            await AlertService.edge_node_down(
-                                node.name, node.ip_address, reason,
-                            )
-                    # else: только устаревший heartbeat при живом HTTP —
-                    # не спамим, ждём либо восстановления, либо порога авто-отключения.
+            mass_failure = is_mass_failure(len(failing), len(nodes))
+            disabled_any = False
+            if mass_failure:
+                # Раунду не верим: счётчики не трогаем, никого не выключаем.
+                await _report_mass_failure(redis_client, AlertService, failing, len(nodes))
+            else:
+                disabled_any = await _handle_failing_edges(
+                    db, redis_client, AlertService, failing, len(nodes),
+                )
 
             if disabled_any:
                 sync_dns_nodes.delay()
@@ -143,10 +84,125 @@ async def _check_edge_nodes_health_async():
 
             await _check_auto_disabled_recovery(db, redis_client, AlertService)
 
-            return {"status": "ok", "checked": checked, "disabled_any": disabled_any}
+            return {
+                "status": "ok", "checked": len(nodes),
+                "disabled_any": disabled_any, "mass_failure": mass_failure,
+            }
     finally:
         await engine.dispose()
         await redis_client.disconnect()
+
+
+def _probe_is_healthy(probe) -> bool:
+    http_ok, stale, _age, tls_ok, _tls_detail = probe
+    return http_ok and not stale and tls_ok
+
+
+async def _mark_edge_healthy(db, redis_client, alert_svc, node):
+    """Сбросить счётчик сбоев и вернуть статус online, если нода была offline."""
+    redis_key = f"edge:failures:{node.id}"
+    if int(await redis_client.get(redis_key) or 0) > 0:
+        await redis_client.delete(redis_key)
+    await redis_client.delete(f"edge:alert_sent:{node.id}")
+    await redis_client.delete(f"edge:alert_kept:{node.id}")
+    if node.status == "offline":
+        node.status = "online"
+        await db.commit()
+        logger.info("Edge node %s (%s) recovered", node.name, node.ip_address)
+        await alert_svc.edge_node_recovered(node.name, node.ip_address)
+
+
+async def _report_mass_failure(redis_client, alert_svc, failing, total: int):
+    """Лог каждого такого раунда и один CRITICAL-алерт на EDGE_ALERT_COOLDOWN_SECONDS."""
+    names = ", ".join(f"{node.name} ({node.ip_address})" for node, _ in failing)
+    if await checker_is_online():
+        cause = (
+            "у панели есть интернет — проверьте cdn_app (heartbeat), маршрут "
+            "до хостеров и сертификаты доменов из TLS-выборки"
+        )
+    else:
+        cause = "у самой панели нет выхода в интернет"
+    logger.error(
+        "Edge health: %d of %d nodes failing at once (%s) — auto-disable "
+        "suspended this round: %s", len(failing), total, cause, names,
+    )
+    if await redis_client.get(EDGE_MASS_ALERT_KEY):
+        return
+    await redis_client.set(EDGE_MASS_ALERT_KEY, "1", expire=EDGE_ALERT_COOLDOWN_SECONDS)
+    await alert_svc.edge_mass_failure(len(failing), total, names, cause)
+
+
+async def _handle_failing_edges(db, redis_client, alert_svc, failing, enabled_count: int) -> bool:
+    """Посчитать сбои и выключить дошедшие до порога ноды, не опускаясь ниже минимума."""
+    disabled_any = False
+    for node, probe in failing:
+        http_ok, stale, age, _tls_ok, tls_detail = probe
+        reason = _edge_failure_reason(http_ok, stale, age, tls_detail)
+        failures = await _count_edge_failure(redis_client, node, reason)
+
+        if failures < EDGE_FAILURE_THRESHOLD:
+            # Устаревший heartbeat или TLS при живом HTTP не спамим —
+            # ждём либо восстановления, либо порога автоотключения.
+            if not http_ok:
+                await _alert_edge_down(redis_client, alert_svc, node, reason)
+        elif not can_auto_disable(enabled_count):
+            # Отключив ноду, мы увели бы трафик проксируемых доменов
+            # на origin в обход CDN/WAF (см. fallback в dns_server).
+            logger.warning(
+                "Edge node %s (%s) would be auto-disabled but only %d enabled "
+                "(min %d) — keeping in rotation: %s",
+                node.name, node.ip_address, enabled_count,
+                EDGE_MIN_ENABLED_NODES, reason,
+            )
+            await _alert_edge_down(
+                redis_client, alert_svc, node,
+                f"{reason} — нода оставлена в ротации, так как включено "
+                f"{enabled_count} (минимум {EDGE_MIN_ENABLED_NODES})",
+                kind="alert_kept",
+            )
+        else:
+            await _auto_disable_edge(db, redis_client, alert_svc, node, failures, reason)
+            enabled_count -= 1
+            disabled_any = True
+    return disabled_any
+
+
+async def _count_edge_failure(redis_client, node, reason: str) -> int:
+    redis_key = f"edge:failures:{node.id}"
+    failures = int(await redis_client.get(redis_key) or 0) + 1
+    await redis_client.set(redis_key, str(failures), expire=3600)
+    logger.warning(
+        "Edge node %s (%s) failing (%d/%d): %s",
+        node.name, node.ip_address, failures, EDGE_FAILURE_THRESHOLD, reason,
+    )
+    return failures
+
+
+async def _alert_edge_down(redis_client, alert_svc, node, reason: str, kind: str = "alert_sent"):
+    """WARNING по ноде не чаще раза в EDGE_ALERT_COOLDOWN_SECONDS на каждый kind."""
+    alert_key = f"edge:{kind}:{node.id}"
+    if await redis_client.get(alert_key):
+        return
+    await redis_client.set(alert_key, "1", expire=EDGE_ALERT_COOLDOWN_SECONDS)
+    await alert_svc.edge_node_down(node.name, node.ip_address, reason)
+
+
+async def _auto_disable_edge(db, redis_client, alert_svc, node, failures: int, reason: str):
+    node.enabled = False
+    node.status = "offline"
+    await db.commit()
+    await redis_client.delete(f"edge:failures:{node.id}")
+    await redis_client.delete(f"edge:alert_sent:{node.id}")
+    await redis_client.delete(f"edge:alert_kept:{node.id}")
+    await redis_client.set(f"edge:auto_disabled:{node.id}", "1", expire=86400)
+    logger.critical(
+        "Edge node %s (%s) auto-disabled after %d failures",
+        node.name, node.ip_address, failures,
+    )
+    await alert_svc.edge_node_disabled(
+        node.name, node.ip_address,
+        f"{failures} неудачных проверок подряд ({reason})",
+    )
 
 
 async def _edge_tls_sample(db) -> list[str]:
