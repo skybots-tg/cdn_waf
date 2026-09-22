@@ -12,7 +12,7 @@ from dnslib import (
     RCODE, CLASS, DNSLabel
 )
 from dnslib.server import DNSServer, BaseResolver
-from sqlalchemy import create_engine, select, and_, or_, text
+from sqlalchemy import create_engine, select, and_, or_
 from sqlalchemy.orm import sessionmaker, Session
 from fastapi import FastAPI, HTTPException, BackgroundTasks, Depends, Header
 import uvicorn
@@ -25,6 +25,7 @@ from app.models.dns_node import DNSNode
 from app.models.user import User
 from app.models.organization import Organization
 from app.schemas.sync import DNSSyncPayload
+from app.dns_node_sync import replace_snapshot
 
 # Configure logging
 logging.basicConfig(
@@ -346,100 +347,7 @@ async def sync_data(payload: DNSSyncPayload, _auth: None = Depends(require_node_
     logger.info("Received sync request")
     try:
         with SessionLocal() as db:
-            def insert_rows(table_name: str, rows: list[dict], defaults: dict | None = None):
-                """Insert rows only into existing columns to avoid schema drift issues."""
-                if not rows:
-                    return
-                defaults = defaults or {}
-                cols_res = db.execute(
-                    text(
-                        "SELECT column_name FROM information_schema.columns "
-                        "WHERE table_name = :table_name"
-                    ),
-                    {"table_name": table_name},
-                )
-                table_columns = [r[0] for r in cols_res]
-                if not table_columns:
-                    logger.warning(f"Sync: table {table_name} does not exist, skipping {len(rows)} rows")
-                    return
-                # Use only columns that exist both in DB and in incoming rows
-                used_columns = [c for c in table_columns if any(c in row for row in rows) or c in defaults]
-                if not used_columns:
-                    return
-                stmt = text(
-                    f"INSERT INTO {table_name} ({', '.join(used_columns)}) "
-                    f"VALUES ({', '.join(':'+c for c in used_columns)})"
-                )
-                filtered_rows = [
-                    {c: row.get(c, defaults.get(c)) for c in used_columns}
-                    for row in rows
-                ]
-                db.execute(stmt, filtered_rows)
-
-            existing = db.execute(text(
-                "SELECT tablename FROM pg_tables WHERE schemaname = 'public' "
-                "AND tablename IN ('dns_records','domains','organizations','users','edge_nodes','dns_nodes')"
-            )).scalars().all()
-            if existing:
-                db.execute(text(f"TRUNCATE TABLE {', '.join(existing)} RESTART IDENTITY CASCADE"))
-            
-            # 2. Insert Users
-            if payload.users:
-                insert_rows(
-                    "users",
-                    [u.model_dump() for u in payload.users],
-                    defaults={
-                        "totp_enabled": False,
-                        "totp_secret": None,
-                    },
-                )
-            
-            # 3. Insert Organizations
-            if payload.organizations:
-                insert_rows("organizations", [o.model_dump() for o in payload.organizations])
-            
-            # 4. Insert Domains
-            if payload.domains:
-                insert_rows("domains", [d.model_dump() for d in payload.domains])
-            
-            # 5. Insert DNS Records
-            if payload.records:
-                insert_rows("dns_records", [r.model_dump() for r in payload.records])
-            
-            # 6. Insert Edge Nodes
-            if payload.edge_nodes:
-                insert_rows(
-                    "edge_nodes",
-                    [n.model_dump() for n in payload.edge_nodes],
-                    defaults={
-                        "config_version": 0,
-                        "last_heartbeat": None,
-                        "cpu_usage": None,
-                        "memory_usage": None,
-                        "disk_usage": None,
-                        "last_config_update": None,
-                        "ssh_host": None,
-                        "ssh_port": None,
-                        "ssh_user": None,
-                        "ssh_key": None,
-                        "ssh_password": None,
-                    },
-                )
-
-            # 7. Insert DNS Nodes
-            if payload.dns_nodes:
-                insert_rows(
-                    "dns_nodes",
-                    [n.model_dump() for n in payload.dns_nodes],
-                    defaults={
-                        "ssh_host": None,
-                        "ssh_port": None,
-                        "ssh_user": None,
-                        "ssh_key": None,
-                        "ssh_password": None,
-                    },
-                )
-
+            replace_snapshot(db, payload)
             db.commit()
             logger.info("Sync completed successfully")
             return {"status": "success", "count": {
