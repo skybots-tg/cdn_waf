@@ -76,12 +76,14 @@ class DBResolver(BaseResolver):
     def get_edge_nodes_ips(self, db: Session) -> List[str]:
         """Get IPs of active edge nodes"""
         try:
-            nodes = db.execute(
-                select(EdgeNode).where(
+            # Only the column we need: the node's DB is migrated separately from
+            # a code update, and selecting the whole model would fail on any
+            # column added since — leaving every proxied name pointing at origin.
+            return list(db.execute(
+                select(EdgeNode.ip_address).where(
                     and_(EdgeNode.status == "online", EdgeNode.enabled == True)
                 )
-            ).scalars().all()
-            return [node.ip_address for node in nodes]
+            ).scalars().all())
         except Exception as e:
             logger.warning(f"get_edge_nodes_ips failed: {e}")
             db.rollback()

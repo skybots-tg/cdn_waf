@@ -81,12 +81,12 @@ function renderNodes(nodes) {
                 ${node.ipv6_address ? `<div style="font-family: monospace; font-size: 11px; color: var(--text-muted);">${escapeHtml(node.ipv6_address)}</div>` : ''}
             </td>
             <td>
-                <label class="toggle-switch toggle-sm" title="${node.enabled ? 'Включена' : 'Выключена'}">
+                <label class="toggle-switch toggle-sm" title="${getEnabledTitle(node)}">
                     <input type="checkbox" ${node.enabled ? 'checked' : ''} onchange="toggleNodeEnabled(${node.id}, this.checked)">
                     <span class="toggle-slider"></span>
                 </label>
             </td>
-            <td>${getStatusBadge(node.status)}</td>
+            <td>${getStatusBadge(node)}</td>
             <td>${node.cpu_usage !== null ? `${node.cpu_usage.toFixed(1)}%` : '-'}</td>
             <td>${node.memory_usage !== null ? `${node.memory_usage.toFixed(1)}%` : '-'}</td>
             <td>${node.disk_usage !== null ? `${node.disk_usage.toFixed(1)}%` : '-'}</td>
@@ -112,8 +112,19 @@ function renderNodes(nodes) {
     `).join('');
 }
 
+function getEnabledTitle(node) {
+    if (node.enabled) return 'Включена';
+    return node.disabled_by === 'auto'
+        ? 'Выключена автоматикой: вернётся сама, когда пройдёт health check'
+        : 'Выключена вручную';
+}
+
 // Get status badge HTML
-function getStatusBadge(status) {
+function getStatusBadge(node) {
+    if (!node.enabled && node.disabled_by === 'auto') {
+        return '<span class="badge badge-warning"><i class="fas fa-ban"></i> Auto-disabled</span>';
+    }
+    const status = node.status;
     const badges = {
         'online': '<span class="badge badge-success"><i class="fas fa-check-circle"></i> Online</span>',
         'offline': '<span class="badge badge-error"><i class="fas fa-times-circle"></i> Offline</span>',

@@ -152,6 +152,7 @@ def test_single_dead_node_is_disabled_after_threshold(cluster):
     results = cluster.run(eht.EDGE_FAILURE_THRESHOLD)
 
     assert not cluster.nodes[0].enabled
+    assert cluster.nodes[0].disabled_by == "auto"
     assert all(n.enabled for n in cluster.nodes[1:])
     assert results[-1]["disabled_any"] and not results[-1]["mass_failure"]
     assert cluster.synced == [1]

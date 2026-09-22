@@ -35,6 +35,7 @@ class EdgeNode(Base):
     
     # Status
     enabled = Column(Boolean, default=True, nullable=False)
+    disabled_by = Column(String(10), nullable=True)  # 'auto' or 'manual'; NULL = enabled
     status = Column(String(20), default="unknown", nullable=False)  # online, offline, maintenance
     
     # Health metrics

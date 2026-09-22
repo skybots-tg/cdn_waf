@@ -73,6 +73,7 @@ class EdgeNodeService:
             city=node_data.city,
             datacenter=node_data.datacenter,
             enabled=node_data.enabled,
+            disabled_by=None if node_data.enabled else "manual",
             status="unknown",
             ssh_host=node_data.ssh_host or node_data.ip_address,
             ssh_port=node_data.ssh_port,
@@ -111,6 +112,12 @@ class EdgeNodeService:
             return None
         
         update_data = node_data.model_dump(exclude_unset=True)
+
+        if update_data.get("enabled") is not None:
+            # Ручное выключение health check не откатывает, даже если агент
+            # ноды жив и шлёт heartbeat; вернуть её может только человек.
+            update_data["disabled_by"] = None if update_data["enabled"] else "manual"
+
         for field, value in update_data.items():
             if hasattr(node, field):
                 setattr(node, field, value)

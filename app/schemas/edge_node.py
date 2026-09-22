@@ -46,6 +46,7 @@ class EdgeNodeResponse(EdgeNodeBase):
     """Edge node response schema"""
     id: int
     status: str
+    disabled_by: Optional[str] = None
     last_heartbeat: Optional[datetime] = None
     cpu_usage: Optional[float] = None
     memory_usage: Optional[float] = None

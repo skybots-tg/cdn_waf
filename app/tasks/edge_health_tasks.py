@@ -82,7 +82,7 @@ async def _check_edge_nodes_health_async():
                 sync_dns_nodes.delay()
                 logger.info("Triggered DNS sync after edge node auto-disable")
 
-            await _check_auto_disabled_recovery(db, redis_client, AlertService)
+            await _check_auto_disabled_recovery(db, AlertService)
 
             return {
                 "status": "ok", "checked": len(nodes),
@@ -189,12 +189,12 @@ async def _alert_edge_down(redis_client, alert_svc, node, reason: str, kind: str
 
 async def _auto_disable_edge(db, redis_client, alert_svc, node, failures: int, reason: str):
     node.enabled = False
+    node.disabled_by = "auto"
     node.status = "offline"
     await db.commit()
     await redis_client.delete(f"edge:failures:{node.id}")
     await redis_client.delete(f"edge:alert_sent:{node.id}")
     await redis_client.delete(f"edge:alert_kept:{node.id}")
-    await redis_client.set(f"edge:auto_disabled:{node.id}", "1", expire=86400)
     logger.critical(
         "Edge node %s (%s) auto-disabled after %d failures",
         node.name, node.ip_address, failures,
@@ -326,53 +326,34 @@ def _edge_failure_reason(
     return "; ".join(parts)
 
 
-def _heartbeat_is_fresh(node, max_age_seconds: int = 300) -> bool:
-    """Отчитывалась ли нода в последние минуты.
-
-    Признак того, что нода жива и выключена автоматикой, а не человеком:
-    выключенная руками нода обычно погашена целиком и heartbeat не шлёт.
-    """
-    last = getattr(node, "last_heartbeat", None)
-    if last is None:
-        return False
-    from datetime import datetime, timezone
-
-    if last.tzinfo is None:
-        last = last.replace(tzinfo=timezone.utc)
-    age = (datetime.now(timezone.utc) - last).total_seconds()
-    return 0 <= age <= max_age_seconds
-
-
-async def _check_auto_disabled_recovery(db, redis_client, alert_svc):
+async def _check_auto_disabled_recovery(db, alert_svc):
     """Re-enable nodes that were auto-disabled and are now responding.
 
-    Возврат срабатывает по метке `edge:auto_disabled:{id}` в Redis, а если она
-    истекла — по свежему heartbeat: нода, которая продолжает отчитываться,
-    очевидно жива и выключена не руками. Без этого запаса три ноды провисели
-    выключенными и не вернулись: метка живёт сутки, а сбой был раньше.
+    Кандидаты — только `disabled_by == "auto"`. Свежий heartbeat признаком
+    автовыключения больше не служит: агент шлёт его и после ручного
+    выключения, и health check возвращал такую ноду в DNS через пару минут.
+    Этот запасной признак появился, когда метка автовыключения жила в Redis
+    сутки и истекала раньше, чем нода оживала; у отметки в БД срока нет.
+    NULL у выключенной ноды считаем ручным выключением.
 
-    Выборка идёт по всем выключенным нодам, без условия на статус. Обработчик
-    heartbeat переводит статус в "online", поэтому ожившая нода почти сразу
-    переставала подходить под старое условие `status == "offline"` и выпадала
-    из проверки навсегда.
+    Условия на статус нет: обработчик heartbeat переводит выключенную ноду
+    в "online", так что по `status == "offline"` ожившая нода выпадала бы
+    из проверки.
     """
     from app.models.edge_node import EdgeNode
     from app.tasks.dns_tasks import sync_dns_nodes
 
     result = await db.execute(
-        select(EdgeNode).where(EdgeNode.enabled == False)
+        select(EdgeNode).where(
+            EdgeNode.enabled == False,
+            EdgeNode.disabled_by == "auto",
+        )
     )
     disabled_nodes = list(result.scalars().all())
     re_enabled_any = False
     tls_hostnames = await _edge_tls_sample(db) if disabled_nodes else []
 
     for node in disabled_nodes:
-        marker = await redis_client.get(f"edge:auto_disabled:{node.id}")
-        if not marker and not _heartbeat_is_fresh(node):
-            # Ни метки автовыключения, ни признаков жизни — значит ноду
-            # выключили руками, и трогать её мы не вправе.
-            continue
-
         try:
             http_ok, stale, age, tls_ok, tls_detail = await _probe_edge_node(
                 node, tls_hostnames
@@ -385,9 +366,9 @@ async def _check_auto_disabled_recovery(db, redis_client, alert_svc):
                 continue
             if http_ok and not stale:
                 node.enabled = True
+                node.disabled_by = None
                 node.status = "online"
                 await db.commit()
-                await redis_client.delete(f"edge:auto_disabled:{node.id}")
                 re_enabled_any = True
                 logger.info(
                     "Auto-disabled edge node %s (%s) recovered — re-enabled",

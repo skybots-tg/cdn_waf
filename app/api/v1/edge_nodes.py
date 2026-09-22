@@ -18,12 +18,18 @@ from app.schemas.edge_node import (
 from app.schemas.task import TaskStartResponse
 from app.services.edge_service import EdgeNodeService
 from app.core.security import get_current_superuser
+from app.tasks.dns_tasks import sync_dns_nodes
 from app.tasks.edge_tasks import run_node_component_task
 
 router = APIRouter()
 
 # Actions that should run asynchronously (long-running operations)
 ASYNC_ACTIONS = {'install', 'update'}
+
+
+def _dns_view(node) -> tuple:
+    """What DNS nodes answer with for this edge (see get_edge_nodes_ips in dns_server)."""
+    return (node.enabled, node.ip_address)
 
 
 @router.get("/stats", response_model=EdgeNodeStats)
@@ -98,12 +104,19 @@ async def update_edge_node(
     current_user: User = Depends(get_current_superuser)
 ):
     """Update edge node (superuser only)"""
+    node = await EdgeNodeService.get_node(db, node_id)
+    dns_before = _dns_view(node) if node else None
     node = await EdgeNodeService.update_node(db, node_id, node_data)
     if not node:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Edge node not found"
         )
+    if _dns_view(node) != dns_before:
+        # DNS-ноды видят edge-ноды только через синхронизацию, а плановая
+        # идёт раз в 10 минут — без неё выключенная нода столько же
+        # оставалась бы в ответах DNS.
+        sync_dns_nodes.delay()
     return node
 
 
