@@ -19,6 +19,7 @@ EDGE_FAILURE_THRESHOLD = 3
 EDGE_TLS_TIMEOUT = 6
 EDGE_TLS_SAMPLE_SIZE = 3  # proxied hostnames probed per health check
 EDGE_ALERT_COOLDOWN_SECONDS = 1800  # 30 min between repeated WARNING alerts
+EDGE_MIN_ENABLED_NODES = 2  # never auto-disable below this count
 DNS_HTTP_TIMEOUT = 5
 DNS_FAILURE_THRESHOLD = 3
 DNS_MIN_ENABLED_NODES = 2  # never auto-disable below this count
@@ -241,6 +242,7 @@ async def _check_edge_nodes_health_async():
 
             checked = 0
             disabled_any = False
+            enabled_count = len(nodes)
             tls_hostnames = await _edge_tls_sample(db)
 
             for node in nodes:
@@ -272,11 +274,33 @@ async def _check_edge_nodes_health_async():
                         node.name, node.ip_address, failures, EDGE_FAILURE_THRESHOLD, reason,
                     )
 
-                    if failures >= EDGE_FAILURE_THRESHOLD:
+                    if failures >= EDGE_FAILURE_THRESHOLD and enabled_count <= EDGE_MIN_ENABLED_NODES:
+                        # Отключив ноду, мы увели бы трафик проксируемых доменов
+                        # на origin в обход CDN/WAF (см. fallback в dns_server).
+                        # Оставляем её в ротации: и enabled, и status="online",
+                        # иначе get_edge_nodes_ips всё равно её отбросит.
+                        logger.warning(
+                            "Edge node %s (%s) would be auto-disabled but only %d enabled "
+                            "(min %d) — keeping in rotation: %s",
+                            node.name, node.ip_address, enabled_count,
+                            EDGE_MIN_ENABLED_NODES, reason,
+                        )
+                        already_alerted = await redis_client.get(alert_key)
+                        if not already_alerted:
+                            await redis_client.set(
+                                alert_key, "1", expire=EDGE_ALERT_COOLDOWN_SECONDS,
+                            )
+                            await AlertService.edge_node_down(
+                                node.name, node.ip_address,
+                                f"{reason} — нода оставлена в ротации, так как включено "
+                                f"{enabled_count} (минимум {EDGE_MIN_ENABLED_NODES})",
+                            )
+                    elif failures >= EDGE_FAILURE_THRESHOLD:
                         node.enabled = False
                         node.status = "offline"
                         await db.commit()
                         disabled_any = True
+                        enabled_count -= 1
                         await redis_client.delete(redis_key)
                         await redis_client.delete(alert_key)
                         await redis_client.set(
