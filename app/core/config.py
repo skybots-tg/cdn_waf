@@ -74,6 +74,11 @@ class Settings(BaseSettings):
     
     # DNS / NS Verification
     EXPECTED_NS: str = "ns1.flarecloud.ru,ns2.flarecloud.ru"
+    # Резервные edge-ноды (IP через запятую): в DNS их не отдаём, пока
+    # онлайн хотя бы одна основная. Нода остаётся настроенной и принимает
+    # трафик, если кто-то пришёл на её адрес; возвращается в выдачу сама,
+    # когда основных не осталось (app/services/dns_sync_service.py).
+    BACKUP_EDGE_IPS: str = ""
     DNS_RESOLVERS: str = "8.8.8.8,8.8.4.4"
 
     # Analytics retention (days)

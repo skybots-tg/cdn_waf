@@ -40,6 +40,38 @@ GUARD_ALERT_COOLDOWN_SECONDS = 1800  # sync runs every 10 min and after edits
 REDIS_TIMEOUT_SECONDS = 3
 
 
+def apply_backup_tier(edge_rows: list[dict]) -> list[dict]:
+    """Резервные ноды не попадают в DNS, пока жива хотя бы одна основная.
+
+    Решать это на самой DNS-ноде нечем: она отвечает всеми строками, которые
+    приехали enabled+online. Поэтому уровень назначается здесь, где и так
+    лежат хартбиты. Медленная нода остаётся установленной и настроенной, но
+    посетителей на неё не отправляем; если основных не осталось, она
+    возвращается в выдачу сама — на следующей синхронизации (каждые 10 минут).
+    """
+    backups = {ip.strip() for ip in settings.BACKUP_EDGE_IPS.split(",") if ip.strip()}
+    if not backups:
+        return edge_rows
+    primary_online = any(
+        row.get("ip_address") not in backups
+        and row.get("enabled")
+        and row.get("status") == "online"
+        for row in edge_rows
+    )
+    if not primary_online:
+        logger.warning(
+            "DNS: основных edge-нод в строю нет — резервные %s возвращаются в выдачу",
+            ",".join(sorted(backups)),
+        )
+        return edge_rows
+    return [
+        {**row, "enabled": False}
+        if row.get("ip_address") in backups and row.get("enabled")
+        else row
+        for row in edge_rows
+    ]
+
+
 async def build_sync_payload(db_session: AsyncSession) -> DNSSyncPayload:
     """Read everything a DNS node needs from the central DB."""
     users = (await db_session.execute(text("SELECT * FROM users"))).all()
@@ -65,7 +97,10 @@ async def build_sync_payload(db_session: AsyncSession) -> DNSSyncPayload:
         organizations=[OrganizationSync(**row_to_dict(o)) for o in organizations],
         domains=[DomainSync(**row_to_dict(d)) for d in domains],
         records=[DNSRecordSync(**row_to_dict(r)) for r in dns_records],
-        edge_nodes=[EdgeNodeSync(**row_to_dict(n)) for n in edge_nodes],
+        edge_nodes=[
+            EdgeNodeSync(**row)
+            for row in apply_backup_tier([row_to_dict(n) for n in edge_nodes])
+        ],
         dns_nodes=[DNSNodeSync(**row_to_dict(n)) for n in dns_nodes],
     )
 
