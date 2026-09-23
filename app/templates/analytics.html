@@ -224,7 +224,7 @@ const DOMAIN_COLUMNS = [
     { key: 'avg_response_time', title: 'Avg time', render: d => FC.ms(d.avg_response_time) },
 ];
 
-function renderDomains() {
+function renderDomainTable() {
     const el = document.getElementById('domain-performance');
     if (!domainRows.length) return FC.empty(el, 'No domains');
     const rows = [...domainRows].sort((a, b) => {
@@ -233,13 +233,13 @@ function renderDomains() {
         return domainSort.desc ? -cmp : cmp;
     });
     el.innerHTML = `<table class="data-table"><thead><tr>${DOMAIN_COLUMNS.map(c =>
-        `<th onclick="sortDomains('${c.key}')">${c.title}${domainSort.key === c.key ? (domainSort.desc ? ' ▾' : ' ▴') : ''}</th>`).join('')}
+        `<th onclick="sortDomainTable('${c.key}')">${c.title}${domainSort.key === c.key ? (domainSort.desc ? ' ▾' : ' ▴') : ''}</th>`).join('')}
         </tr></thead><tbody>${rows.map(d => `<tr>${DOMAIN_COLUMNS.map(c => `<td>${c.render(d)}</td>`).join('')}</tr>`).join('')}</tbody></table>`;
 }
 
-function sortDomains(key) {
+function sortDomainTable(key) {
     domainSort = { key, desc: domainSort.key === key ? !domainSort.desc : key !== 'name' };
-    renderDomains();
+    renderDomainTable();
 }
 
 async function loadDomainPerformance(range) {
@@ -247,7 +247,7 @@ async function loadDomainPerformance(range) {
     FC.loading(el);
     try {
         domainRows = await FC.get(`/api/v1/stats/domains?range=${range}`);
-        renderDomains();
+        renderDomainTable();
     } catch (e) { FC.error(el, e); }
 }
 

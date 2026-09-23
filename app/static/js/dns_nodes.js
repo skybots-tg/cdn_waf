@@ -135,7 +135,7 @@ function renderNodes(nodes) {
                         : ''
                 }
             </td>
-            <td>${getStatusBadge(node.status, node.enabled, node.disabled_by)}</td>
+            <td>${dnsNodeStatusBadge(node.status, node.enabled, node.disabled_by)}</td>
             <td>
                 ${
                     node.last_sync_at
@@ -172,7 +172,7 @@ function renderNodes(nodes) {
 }
 
 // Get status badge HTML (includes enabled state)
-function getStatusBadge(status, enabled, disabledBy) {
+function dnsNodeStatusBadge(status, enabled, disabledBy) {
     if (!enabled) {
         const reason = disabledBy === 'auto' ? 'Auto-disabled' : 'Disabled';
         const color = disabledBy === 'auto'

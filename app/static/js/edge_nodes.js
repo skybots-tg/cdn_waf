@@ -95,7 +95,7 @@ function renderNodes(nodes) {
                     <span class="toggle-slider"></span>
                 </label>
             </td>
-            <td>${getStatusBadge(node)}${(nodeTraffic[node.id] || {}).backup ? ' <span class="badge badge-info" title="В DNS только если основных нод нет (BACKUP_EDGE_IPS)">DNS backup</span>' : ''}</td>
+            <td>${nodeStatusBadge(node)}${(nodeTraffic[node.id] || {}).backup ? ' <span class="badge badge-info" title="В DNS только если основных нод нет (BACKUP_EDGE_IPS)">DNS backup</span>' : ''}</td>
             <td>${node.cpu_usage !== null ? `${node.cpu_usage.toFixed(1)}%` : '-'}</td>
             <td>${node.memory_usage !== null ? `${node.memory_usage.toFixed(1)}%` : '-'}</td>
             <td>${node.disk_usage !== null ? `${node.disk_usage.toFixed(1)}%` : '-'}</td>
@@ -131,7 +131,7 @@ function getEnabledTitle(node) {
 }
 
 // Get status badge HTML
-function getStatusBadge(node) {
+function nodeStatusBadge(node) {
     if (!node.enabled && node.disabled_by === 'auto') {
         return '<span class="badge badge-warning"><i class="fas fa-ban"></i> Auto-disabled</span>';
     }

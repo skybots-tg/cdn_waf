@@ -198,7 +198,7 @@
 <script src="/static/js/analytics.js?v={{ asset_v }}"></script>
 <script>
 const DOMAIN_ID = {{ domain.id }};
-const API = `/api/v1/domains/${DOMAIN_ID}`;
+const DOMAIN_API = `/api/v1/domains/${DOMAIN_ID}`;
 let chartMetric = 'requests';
 let trafficChart = null;
 let lastSeries = null;
@@ -208,7 +208,7 @@ function setText(id, value) { const el = document.getElementById(id); if (el) el
 function setHtml(id, value) { const el = document.getElementById(id); if (el) el.innerHTML = value; }
 
 async function loadOverview(range) {
-    const s = await FC.get(`${API}/stats/overview?range=${range}`);
+    const s = await FC.get(`${DOMAIN_API}/stats/overview?range=${range}`);
     setText('total-requests', FC.num(s.total_requests));
     setText('requests-split', `${FC.num(s.cached_requests)} cached · ${FC.num(s.uncached_requests)} uncached`);
     setHtml('requests-change', FC.change(s.changes.requests));
@@ -249,7 +249,7 @@ async function loadOverview(range) {
 }
 
 async function loadChart(range) {
-    lastSeries = await FC.get(`${API}/stats/timeseries?range=${range}`);
+    lastSeries = await FC.get(`${DOMAIN_API}/stats/timeseries?range=${range}`);
     trafficChart = FC.trafficChart(document.getElementById('traffic-chart'), trafficChart, lastSeries, chartMetric);
 }
 
@@ -264,7 +264,7 @@ async function loadTop(dimension, elementId, opts) {
     const el = document.getElementById(elementId);
     FC.loading(el);
     try {
-        const data = await FC.get(`${API}/stats/top?dimension=${dimension}&range=${currentRange}&limit=${(opts && opts.limit) || 10}`);
+        const data = await FC.get(`${DOMAIN_API}/stats/top?dimension=${dimension}&range=${currentRange}&limit=${(opts && opts.limit) || 10}`);
         FC.renderTop(el, data.items, { ...(opts || {}), partial: data.partial });
     } catch (e) { FC.error(el, e); }
 }
@@ -273,7 +273,7 @@ async function loadSecurityEvents(range) {
     const el = document.getElementById('security-events');
     FC.loading(el);
     try {
-        const events = await FC.get(`${API}/stats/security?range=${range}&limit=10`);
+        const events = await FC.get(`${DOMAIN_API}/stats/security?range=${range}&limit=10`);
         if (!events.length) return FC.empty(el, 'No blocked or rate-limited requests in this period');
         el.innerHTML = events.map(e => `
             <div class="flex-between" style="gap: 12px; padding: 8px 0; border-bottom: 1px solid var(--glass-border); font-size: 13px;">
@@ -291,7 +291,7 @@ async function loadRecentLogs() {
     const el = document.getElementById('recent-logs');
     FC.loading(el);
     try {
-        const logs = await FC.get(`${API}/logs?limit=10`);
+        const logs = await FC.get(`${DOMAIN_API}/logs?limit=10`);
         if (!logs.length) return FC.empty(el, 'No requests logged yet');
         el.innerHTML = `<table class="log-table"><thead><tr>
             <th>Time</th><th>Request</th><th>Status</th><th>Cache</th><th>Client</th><th>Size</th><th>Time</th>
@@ -334,7 +334,7 @@ async function loadAnalytics(range) {
 }
 
 function exportData(format) {
-    FC.download(`${API}/export?range=${currentRange}&format=${format}`,
+    FC.download(`${DOMAIN_API}/export?range=${currentRange}&format=${format}`,
         `{{ domain.name }}_analytics_${currentRange}.${format}`);
 }
 

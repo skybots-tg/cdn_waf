@@ -148,13 +148,13 @@ async function loadSecurity() {
         document.getElementById('threats-today').textContent = FC.num(stats.threats_blocked + stats.rate_limited);
         document.getElementById('active-rules').textContent = FC.num(domainState.reduce((a, d) => a + d.rules + d.ipRules, 0));
         document.getElementById('rate-limits').textContent = FC.num(domainState.reduce((a, d) => a + d.limits, 0));
-        renderDomains();
+        renderWafDomains();
     } catch (e) {
         FC.error(document.getElementById('domains-security'), e);
     }
 }
 
-function renderDomains() {
+function renderWafDomains() {
     const container = document.getElementById('domains-security');
     const filter = document.getElementById('filter-security').value;
     const rows = domainState.filter(d => {
@@ -217,7 +217,7 @@ async function loadRecentThreats() {
 document.addEventListener('DOMContentLoaded', () => {
     loadSecurity();
     loadRecentThreats();
-    document.getElementById('filter-security').addEventListener('change', renderDomains);
+    document.getElementById('filter-security').addEventListener('change', renderWafDomains);
 });
 </script>
 {% endblock %}

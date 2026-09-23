@@ -189,11 +189,11 @@ async function loadDomainsCDN(rulesMap) {
             stats: byId[d.id] || {},
             rules: (rulesMap[d.id] || []).filter(r => r.enabled !== false),
         }));
-        renderDomains();
+        renderCdnDomains();
     } catch (e) { FC.error(container, e); }
 }
 
-function renderDomains() {
+function renderCdnDomains() {
     const container = document.getElementById('domains-cdn');
     const sortBy = document.getElementById('sort-by').value;
     const rows = [...domainsState].sort((a, b) => {
@@ -261,7 +261,7 @@ async function purgeDomainCache(domainId, name) {
 }
 
 document.addEventListener('DOMContentLoaded', async () => {
-    document.getElementById('sort-by').addEventListener('change', renderDomains);
+    document.getElementById('sort-by').addEventListener('change', renderCdnDomains);
     loadCacheChart();
     const rulesMap = await loadCDNStats();
     loadDomainsCDN(rulesMap);
