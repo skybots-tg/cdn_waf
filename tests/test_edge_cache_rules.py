@@ -39,13 +39,14 @@ import edge_config_updater as agent  # noqa: E402
 from app.api.internal import _cookie_names  # noqa: E402
 
 
-def _render(rules):
+def _render(rules, **extra):
     domain = {
         "name": "example.com",
         "tls_settings": {"mode": "flexible"},
         "tls": {"enabled": False},
         "origins": [{"host": "198.51.100.1", "port": 80, "protocol": "http", "weight": 100}],
         "cache_rules": rules,
+        **extra,
     }
     return agent.NGINX_TEMPLATE.render(
         domains=[domain], global_settings={"control_plane_url": "https://panel.test"},
@@ -83,6 +84,15 @@ def test_bypass_rule_does_not_cache():
     block = _location(_render([{"pattern": "^/api/", "rule_type": "bypass", "ttl": None}]), "^/api/")
     assert "proxy_cache " not in block
     assert "X-Cache-Status BYPASS" in block
+
+
+def test_dev_mode_turns_cache_rules_into_bypass():
+    """Development Mode: копии из кэша не отдаются, пока режим включён."""
+    rule = {"pattern": "^/static/", "rule_type": "cache", "ttl": 600, "respect_origin": True}
+    block = _location(_render([rule], dev_mode=True), "^/static/")
+    assert "proxy_cache " not in block
+    assert "X-Cache-Status BYPASS" in block
+    assert "proxy_cache example_com;" in _location(_render([rule], dev_mode=False), "^/static/")
 
 
 def test_cache_zone_lives_a_week_with_size_limit():

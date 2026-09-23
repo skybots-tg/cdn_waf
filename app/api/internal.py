@@ -208,6 +208,20 @@ def _resolve_cname_origins(record, domain_name, dns_records, origins_by_name):
     return []
 
 
+async def _dev_mode_active(domain_id: int) -> bool:
+    """Включён ли у домена режим разработки (ключ в Redis со сроком).
+
+    Redis недоступен — режим считаем выключенным: конфиг ноде нужнее флага.
+    """
+    from app.core.redis import redis_client
+
+    try:
+        return bool(await redis_client.exists(f"dev_mode:{domain_id}"))
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("dev mode check failed for domain %s: %s", domain_id, exc)
+        return False
+
+
 @router.get("/config")
 async def get_edge_config(
     since_version: Optional[int] = None,
@@ -259,6 +273,7 @@ async def get_edge_config(
     config_domains = []
     
     for domain in domains:
+        dev_mode = await _dev_mode_active(domain.id)
         # Include aliases, but never pass their public hostname as an upstream.
         dns_records_result = await db.execute(
             select(DNSRecord).where(
@@ -429,6 +444,8 @@ async def get_edge_config(
                     "hsts_preload": tls_settings.hsts_preload if tls_settings else False
                 },
                 "origins": sub_origins,
+                # Режим разработки: правила кэша домена на ноде работают как bypass.
+                "dev_mode": dev_mode,
                 "cache_rules": [
                     {
                         "id": rule.id,

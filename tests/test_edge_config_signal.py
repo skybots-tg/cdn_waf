@@ -95,3 +95,50 @@ def test_node_heartbeat_does_not_bump(db):
     db.get(EdgeNode, 1).status = "online"
     db.commit()
     assert versions(db) == [5, 5]
+
+
+class FakeRedis:
+    def __init__(self, keys=()):
+        self.data = {key: "1" for key in keys}
+
+    async def exists(self, key):
+        return int(key in self.data)
+
+    async def get(self, key):
+        return self.data.get(key)
+
+    async def set(self, key, value):
+        self.data[key] = value
+
+
+class AsyncWrap:
+    """Синхронная SQLite-сессия под видом AsyncSession."""
+
+    def __init__(self, session):
+        self.sync = session
+
+    async def execute(self, stmt):
+        return self.sync.execute(stmt)
+
+    async def commit(self):
+        self.sync.commit()
+
+
+def test_dev_mode_change_bumps_once(db):
+    import asyncio
+
+    from app.models.domain import Domain
+    from app.tasks.edge_tasks import sync_dev_mode_state
+
+    Domain.__table__.create(db.get_bind())
+    db.execute(Domain.__table__.insert().values(id=7, organization_id=1, name="example.com",
+                                                status="ACTIVE", ns_verified=False))
+    db.commit()
+    redis = FakeRedis({"dev_mode:7"})
+    run = lambda: asyncio.run(sync_dev_mode_state(AsyncWrap(db), redis))  # noqa: E731
+
+    assert run()["changed"] is True      # режим включили — ноды перестают кэшировать
+    assert run()["changed"] is False     # ничего не поменялось — версию не трогаем
+    del redis.data["dev_mode:7"]         # срок истёк, ключ исчез сам
+    assert run() == {"changed": True, "active": []}
+    assert versions(db) == [7, 7]

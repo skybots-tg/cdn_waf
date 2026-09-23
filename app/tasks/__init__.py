@@ -66,6 +66,11 @@ celery_app.conf.beat_schedule = {
         "task": "app.tasks.health.check_edge_nodes_health",
         "schedule": crontab(minute="*/2"),
     },
+    # Режим разработки домена истёк — ноды должны снова кэшировать.
+    "sync-dev-mode-every-1-min": {
+        "task": "app.tasks.edge.sync_dev_mode",
+        "schedule": 60.0,
+    },
     # DNS node availability check (HTTP)
     "check-dns-nodes-health-every-3-min": {
         "task": "app.tasks.health.check_dns_nodes_health",

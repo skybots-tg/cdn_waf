@@ -68,3 +68,13 @@ def _bump_edge_config(session, _flush_context):
     session.connection().execute(
         update(nodes).values(config_version=func.coalesce(nodes.c.config_version, 0) + 1)
     )
+
+
+async def bump_edge_config(db) -> None:
+    """Поднять версию всех нод явно — для настроек, которые живут не в этих
+    таблицах (режим разработки хранится в Redis)."""
+    nodes = EdgeNode.__table__
+    await db.execute(
+        update(nodes).values(config_version=func.coalesce(nodes.c.config_version, 0) + 1)
+    )
+    await db.commit()

@@ -66,6 +66,58 @@ async def _update_all_edge_configs_async():
         await engine.dispose()
 
 
+DEV_MODE_SNAPSHOT_KEY = "dev_mode:edge_snapshot"
+
+
+@celery_app.task(name="app.tasks.edge.sync_dev_mode")
+def sync_dev_mode():
+    """Режим разработки истёк или сменился — поднять версию конфига нод.
+
+    Ключ ``dev_mode:<id>`` живёт в Redis со сроком и исчезает сам, а нода узнаёт
+    о нём только из конфига. Раз в минуту сверяем набор доменов в режиме
+    разработки со снимком прошлого прогона; разошлись — ноды забирают конфиг.
+    """
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    try:
+        return loop.run_until_complete(_sync_dev_mode_async())
+    finally:
+        loop.close()
+
+
+async def _sync_dev_mode_async():
+    import redis.asyncio as aioredis
+
+    from app.core.config import settings
+
+    client = aioredis.from_url(settings.REDIS_URL, decode_responses=True)
+    engine, SessionLocal = create_task_db_session()
+    try:
+        async with SessionLocal() as db:
+            return await sync_dev_mode_state(db, client)
+    finally:
+        closer = getattr(client, "aclose", None) or client.close
+        await closer()
+        await engine.dispose()
+
+
+async def sync_dev_mode_state(db, client) -> Dict[str, Any]:
+    import json
+
+    from app.models.domain import Domain
+    from app.models.edge_signal import bump_edge_config
+
+    domain_ids = (await db.execute(select(Domain.id))).scalars().all()
+    active = sorted([i for i in domain_ids if await client.exists(f"dev_mode:{i}")])
+    snapshot = json.dumps(active)
+    if await client.get(DEV_MODE_SNAPSHOT_KEY) == snapshot:
+        return {"changed": False, "active": active}
+    await bump_edge_config(db)
+    await client.set(DEV_MODE_SNAPSHOT_KEY, snapshot)
+    logger.info("Dev mode set changed to %s, bumped edge config", active)
+    return {"changed": True, "active": active}
+
+
 @celery_app.task(name="app.tasks.edge.health_check_origins")
 def health_check_origins():
     """Perform HTTP health checks on all origins with health_check_enabled."""

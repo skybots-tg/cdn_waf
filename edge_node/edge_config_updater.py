@@ -293,8 +293,9 @@ server {
     {% if domain.cache_rules %}
     {% for rule in domain.cache_rules %}
     location ~ {{ rule.pattern }} {
-        {% if rule.rule_type == 'bypass' %}
-        # «Не кэшировать» — как Cache Level: Bypass у Cloudflare.
+        {% if rule.rule_type == 'bypass' or domain.dev_mode %}
+        # «Не кэшировать» — как Cache Level: Bypass у Cloudflare. Режим
+        # разработки домена (Development Mode) делает так со всеми правилами.
         add_header X-Cache-Status BYPASS always;
         {% else %}
         proxy_cache {{ safe_name }};
@@ -412,8 +413,9 @@ server {
     {% if domain.cache_rules %}
     {% for rule in domain.cache_rules %}
     location ~ {{ rule.pattern }} {
-        {% if rule.rule_type == 'bypass' %}
-        # «Не кэшировать» — как Cache Level: Bypass у Cloudflare.
+        {% if rule.rule_type == 'bypass' or domain.dev_mode %}
+        # «Не кэшировать» — как Cache Level: Bypass у Cloudflare. Режим
+        # разработки домена (Development Mode) делает так со всеми правилами.
         add_header X-Cache-Status BYPASS always;
         {% else %}
         proxy_cache {{ safe_name }};

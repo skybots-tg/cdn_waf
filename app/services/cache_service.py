@@ -9,9 +9,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.cache import CacheRule, CachePurge
 from app.models.domain import Domain
 from app.core.redis import redis_client
+from app.models.edge_signal import bump_edge_config
 from app.schemas.cdn import CacheRuleCreate, CacheRuleUpdate
 
 logger = logging.getLogger(__name__)
+
+
+# Как у Cloudflare: режим разработки держится не дольше трёх часов.
+DEV_MODE_MAX_MINUTES = 180
 
 
 class CacheService:
@@ -223,7 +228,13 @@ class CacheService:
         domain_id: int,
         duration_minutes: int = 10
     ) -> datetime:
-        """Enable dev mode (bypass cache) for domain"""
+        """Enable dev mode (bypass cache) for domain.
+
+        Флаг едет в конфиг edge-нод (app/api/internal.py), там правила кэша
+        домена становятся «не кэшировать». Истечение срока ловит задача
+        app.tasks.edge.sync_dev_mode.
+        """
+        duration_minutes = max(1, min(duration_minutes, DEV_MODE_MAX_MINUTES))
         expires_at = datetime.utcnow() + timedelta(minutes=duration_minutes)
         
         # Store in Redis with TTL
@@ -232,6 +243,7 @@ class CacheService:
             duration_minutes * 60,
             expires_at.isoformat()
         )
+        await bump_edge_config(db)
         
         return expires_at
     
@@ -239,6 +251,7 @@ class CacheService:
     async def disable_dev_mode(db: AsyncSession, domain_id: int) -> bool:
         """Disable dev mode for domain"""
         await redis_client.delete(f"dev_mode:{domain_id}")
+        await bump_edge_config(db)
         return True
     
     @staticmethod
