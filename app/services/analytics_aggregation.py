@@ -76,6 +76,9 @@ def raw_metrics():
         func.count(case((RequestLog.waf_status == "challenged", 1))).label("waf_challenged"),
         func.count(case((RequestLog.status_code == 429, 1))).label("rate_limited"),
         func.coalesce(func.avg(RequestLog.request_time), 0).label("avg_response_time"),
+        func.coalesce(func.sum(RequestLog.bytes_received), 0).label("total_bytes_received"),
+        func.count(RequestLog.upstream_time).label("origin_requests"),
+        func.coalesce(func.avg(RequestLog.upstream_time), 0).label("avg_origin_time"),
     )
 
 
@@ -83,6 +86,7 @@ _HOURLY_FIELDS = (
     "total_requests", "total_bytes_sent", "status_2xx", "status_3xx",
     "status_4xx", "status_5xx", "cache_hits", "cache_misses", "cache_bypass",
     "cached_bytes", "waf_blocked", "waf_challenged", "rate_limited",
+    "total_bytes_received", "origin_requests",
 )
 
 
@@ -117,11 +121,11 @@ async def aggregate_hourly_stats(
     for row in rows:
         values = {name: int(getattr(row, name) or 0) for name in _HOURLY_FIELDS}
         values["avg_response_time"] = float(row.avg_response_time or 0)
+        values["avg_origin_time"] = float(row.avg_origin_time or 0)
         stmt = insert(HourlyStats).values(
             hour=hour_start,
             domain_id=row.domain_id,
             edge_node_id=row.edge_node_id,
-            total_bytes_received=0,
             created_at=now,
             updated_at=now,
             **values,
@@ -223,6 +227,7 @@ async def aggregate_daily_stats(
         HourlyStats.hour.label("hour"),
         *[func.sum(getattr(HourlyStats, f)).label(f) for f in _HOURLY_FIELDS],
         func.sum(HourlyStats.avg_response_time * HourlyStats.total_requests).label("rt_weighted"),
+        func.sum(HourlyStats.avg_origin_time * HourlyStats.origin_requests).label("ot_weighted"),
     ).where(
         HourlyStats.hour >= day_start,
         HourlyStats.hour < day_end,
@@ -233,6 +238,7 @@ async def aggregate_daily_stats(
         per_hour.c.domain_id,
         *[func.sum(per_hour.c[f]).label(f) for f in _HOURLY_FIELDS],
         func.sum(per_hour.c.rt_weighted).label("rt_weighted"),
+        func.sum(per_hour.c.ot_weighted).label("ot_weighted"),
         func.max(per_hour.c.total_requests).label("peak_requests_hour"),
         func.max(per_hour.c.total_bytes_sent).label("peak_bandwidth_hour"),
     ).group_by(per_hour.c.domain_id)
@@ -253,8 +259,10 @@ async def aggregate_daily_stats(
         # тихий час с одним медленным запросом не должен весить как пиковый.
         avg_rt = float(row.rt_weighted or 0) / requests if requests else 0.0
         values = {name: int(getattr(row, name) or 0) for name in _HOURLY_FIELDS}
+        origin = int(row.origin_requests or 0)
         values.update(
             avg_response_time=avg_rt,
+            avg_origin_time=float(row.ot_weighted or 0) / origin if origin else 0.0,
             peak_requests_hour=int(row.peak_requests_hour or 0),
             peak_bandwidth_hour=int(row.peak_bandwidth_hour or 0),
             unique_visitors=int(unique_visitors),
@@ -262,7 +270,6 @@ async def aggregate_daily_stats(
         stmt = insert(DailyStats).values(
             day=target_date,
             domain_id=row.domain_id,
-            total_bytes_received=0,
             created_at=now,
             updated_at=now,
             **values,

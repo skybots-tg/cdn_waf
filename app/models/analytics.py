@@ -45,6 +45,9 @@ class HourlyStats(Base):
     cached_bytes = Column(BigInteger, default=0, nullable=False)
     # Ответы 429 от правил ограничения частоты — WAF их не помечает.
     rate_limited = Column(Integer, default=0, nullable=False)
+    # Запросы, дошедшие до origin с замером, и их среднее время (мс).
+    origin_requests = Column(Integer, default=0, nullable=False)
+    avg_origin_time = Column(Float, default=0, nullable=False)
     
     # WAF metrics
     waf_blocked = Column(Integer, default=0)
@@ -95,6 +98,9 @@ class DailyStats(Base):
     cached_bytes = Column(BigInteger, default=0, nullable=False)
     # Ответы 429 от правил ограничения частоты — WAF их не помечает.
     rate_limited = Column(Integer, default=0, nullable=False)
+    # Запросы, дошедшие до origin с замером, и их среднее время (мс).
+    origin_requests = Column(Integer, default=0, nullable=False)
+    avg_origin_time = Column(Float, default=0, nullable=False)
     
     # WAF metrics
     waf_blocked = Column(Integer, default=0)

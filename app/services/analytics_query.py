@@ -54,6 +54,7 @@ FIELDS = (
     "total_requests", "total_bytes_sent", "status_2xx", "status_3xx",
     "status_4xx", "status_5xx", "cache_hits", "cache_misses", "cache_bypass",
     "cached_bytes", "waf_blocked", "waf_challenged", "rate_limited",
+    "total_bytes_received", "origin_requests",
 )
 
 
@@ -131,11 +132,13 @@ def iso(dt: Optional[datetime]) -> Optional[str]:
 class Metrics:
     values: Dict[str, int] = field(default_factory=lambda: {f: 0 for f in FIELDS})
     rt_sum: float = 0.0
+    ot_sum: float = 0.0  # сумма времени ответа origin (мс) по origin_requests
 
     def add(self, row: Any) -> None:
         for f in FIELDS:
             self.values[f] += int(getattr(row, f, 0) or 0)
         self.rt_sum += float(getattr(row, "rt_sum", 0) or 0)
+        self.ot_sum += float(getattr(row, "ot_sum", 0) or 0)
 
     @property
     def requests(self) -> int:
@@ -175,6 +178,12 @@ class Metrics:
             "status_5xx": v["status_5xx"],
             "error_rate": _ratio(v["status_4xx"] + v["status_5xx"], requests),
             "avg_response_time": self.avg_response_time,
+            # Время ответа самого сайта — у запросов, дошедших до origin.
+            "avg_origin_time": (
+                round(self.ot_sum / v["origin_requests"], 1) if v["origin_requests"] else None
+            ),
+            "origin_requests": v["origin_requests"],
+            "bytes_received": v["total_bytes_received"],
         }
 
 
@@ -225,6 +234,7 @@ async def totals(
             *keys,
             *[func.coalesce(func.sum(getattr(HourlyStats, f)), 0).label(f) for f in FIELDS],
             func.coalesce(func.sum(HourlyStats.avg_response_time * HourlyStats.total_requests), 0).label("rt_sum"),
+            func.coalesce(func.sum(HourlyStats.avg_origin_time * HourlyStats.origin_requests), 0).label("ot_sum"),
         ).where(HourlyStats.hour >= s, HourlyStats.hour < e, *_domain_filter(HourlyStats.domain_id, domain_ids))
         if keys:
             q = q.group_by(*keys)
@@ -236,6 +246,7 @@ async def totals(
             *keys,
             *[func.coalesce(func.sum(getattr(DailyStats, f)), 0).label(f) for f in FIELDS],
             func.coalesce(func.sum(DailyStats.avg_response_time * DailyStats.total_requests), 0).label("rt_sum"),
+            func.coalesce(func.sum(DailyStats.avg_origin_time * DailyStats.origin_requests), 0).label("ot_sum"),
         ).where(DailyStats.day >= s.date(), DailyStats.day < e.date(), *_domain_filter(DailyStats.domain_id, domain_ids))
         if keys:
             q = q.group_by(*keys)
@@ -247,6 +258,7 @@ async def totals(
             *keys,
             *raw_metrics(),
             func.coalesce(func.sum(RequestLog.request_time), 0).label("rt_sum"),
+            func.coalesce(func.sum(RequestLog.upstream_time), 0).label("ot_sum"),
         ).where(
             RequestLog.timestamp >= s, RequestLog.timestamp < e,
             RequestLog.domain_id.isnot(None),
@@ -296,6 +308,7 @@ async def response_percentiles(
         select(
             func.percentile_cont(0.5).within_group(RequestLog.request_time).label("p50"),
             func.percentile_cont(0.95).within_group(RequestLog.request_time).label("p95"),
+            func.percentile_cont(0.95).within_group(RequestLog.upstream_time).label("origin_p95"),
         ).where(
             RequestLog.timestamp >= max(w.start, raw_floor()), RequestLog.timestamp < w.end,
             RequestLog.request_time.isnot(None),
@@ -306,6 +319,7 @@ async def response_percentiles(
     return {
         "p50_response_time": round(float(row.p50), 1) if row and row.p50 is not None else None,
         "p95_response_time": round(float(row.p95), 1) if row and row.p95 is not None else None,
+        "p95_origin_time": round(float(row.origin_p95), 1) if row and row.origin_p95 is not None else None,
     }
 
 

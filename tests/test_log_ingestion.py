@@ -177,3 +177,22 @@ def test_late_rows_mark_their_hours_dirty(fake_env):
     ]
     asyncio.run(internal_logs._mark_dirty_hours(rows))
     assert fake_env.values[internal_logs.DIRTY_HOURS_KEY] == {"2026-09-23T02", "2026-09-23T05"}
+
+
+def test_origin_timing_parsed():
+    row = internal_logs._row(dict(LINE, upstream_time="0.120, 0.030", upstream_status="502, 200",
+                                  request_length=812), 6, 13, "perek.us")
+    assert row["upstream_time"] == 150          # сумма попыток, мс
+    assert row["upstream_status"] == 200        # последняя попытка ушла клиенту
+    assert row["bytes_received"] == 812
+
+
+def test_cache_hit_has_no_origin_timing():
+    row = internal_logs._row(dict(LINE, upstream_time="-", upstream_status="-"), 6, 13, "perek.us")
+    assert row["upstream_time"] is None and row["upstream_status"] is None
+
+
+def test_old_node_without_new_fields():
+    """Нода со старым агентом этих полей не шлёт — строка всё равно пишется."""
+    row = internal_logs._row(LINE, 6, 13, "perek.us")
+    assert row["upstream_time"] is None and row["bytes_received"] is None

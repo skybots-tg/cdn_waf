@@ -183,7 +183,8 @@ async function loadOverview(range) {
     setText('global-error-split', `${FC.num(s.status_4xx)} 4xx · ${FC.num(s.status_5xx)} 5xx`);
     setHtml('global-errors-change', FC.change(s.changes.errors, { invert: true }));
     setText('global-response', FC.ms(s.avg_response_time));
-    setText('global-percentiles', `p50 ${FC.ms(s.p50_response_time)} · p95 ${FC.ms(s.p95_response_time)}`);
+    setText('global-percentiles', `p50 ${FC.ms(s.p50_response_time)} · p95 ${FC.ms(s.p95_response_time)}`
+        + (s.avg_origin_time != null ? ` · origin ${FC.ms(s.avg_origin_time)}` : ''));
     setText('period-note', `All your domains · ${FC.localTime(s.start)} — ${FC.localTime(s.end)}`);
 
     const total = s.total_requests || 0;

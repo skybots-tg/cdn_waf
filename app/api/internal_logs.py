@@ -237,7 +237,36 @@ def _row(log_data: Dict[str, Any], node_id: int, domain_id: int, host: str) -> D
         "country_code": _fit(log_data.get("country_code") or None, "country_code"),
         "waf_status": _fit(log_data.get("waf_status") or None, "waf_status"),
         "waf_rule_id": _as_int(log_data.get("waf_rule_id")),
+        "upstream_time": _upstream_ms(log_data.get("upstream_time")),
+        "upstream_status": _upstream_status(log_data.get("upstream_status")),
+        "bytes_received": _as_int(log_data.get("request_length")),
     }
+
+
+def _upstream_parts(value: Any) -> List[str]:
+    """Значения $upstream_* по попыткам: nginx пишет «0.012, 0.030» или «502 : 200»."""
+    text = str(value or "").replace(":", ",")
+    return [p.strip() for p in text.split(",") if p.strip() and p.strip() != "-"]
+
+
+def _upstream_ms(value: Any) -> Optional[int]:
+    """Время ответа origin в мс — сумма по попыткам; None, если до origin не ходили."""
+    total = 0.0
+    seen = False
+    for part in _upstream_parts(value):
+        try:
+            total += float(part)
+            seen = True
+        except ValueError:
+            continue
+    return int(total * 1000) if seen else None
+
+
+def _upstream_status(value: Any) -> Optional[int]:
+    """Код последней попытки к origin — именно он ушёл клиенту."""
+    parts = _upstream_parts(value)
+    code = _as_int(parts[-1]) if parts else None
+    return code if code is not None and 100 <= code <= 599 else None
 
 
 def _hour_key(prefix: str) -> str:

@@ -113,6 +113,9 @@ log_format cdn_json_log escape=json '{'
     '"user_agent": "$http_user_agent",'
     '"request_time": $request_time,'
     '"cache_status": "$upstream_cache_status",'
+    '"upstream_time": "$upstream_response_time",'
+    '"upstream_status": "$upstream_status",'
+    '"request_length": $request_length,'
     '"country_code": "$geoip2_data_country_code",'
     '"waf_status": "$waf_status",'
     '"waf_rule_id": "$waf_rule_id"'
@@ -149,7 +152,9 @@ limit_req_zone $binary_remote_addr zone={{ safe_name }}_rl_{{ rl.id }}:10m rate=
 # ============================================
 {% for domain in domains %}
 {% set safe_name = domain.name|replace('.', '_') %}
-proxy_cache_path /var/cache/nginx/{{ safe_name }} levels=1:2 keys_zone={{ safe_name }}:10m max_size=1g inactive=10m use_temp_path=off;
+# inactive=7d: копия живёт неделю без запросов (было 10 минут — у тихих сайтов
+# кэш остывал между заходами). max_size на зону держит диск: зон десятки.
+proxy_cache_path /var/cache/nginx/{{ safe_name }} levels=1:2 keys_zone={{ safe_name }}:10m max_size=256m inactive=7d use_temp_path=off;
 {% endfor %}
 
 # ============================================
@@ -288,10 +293,30 @@ server {
     {% if domain.cache_rules %}
     {% for rule in domain.cache_rules %}
     location ~ {{ rule.pattern }} {
+        {% if rule.rule_type == 'bypass' %}
+        # «Не кэшировать» — как Cache Level: Bypass у Cloudflare.
+        add_header X-Cache-Status BYPASS always;
+        {% else %}
         proxy_cache {{ safe_name }};
         proxy_cache_key $scheme$host$request_uri;
         {% if rule.ttl %}
-        proxy_cache_valid 200 {{ rule.ttl }}s;
+        proxy_cache_valid 200 206 301 302 {{ rule.ttl }}s;
+        {% endif %}
+        {% if rule.respect_origin == false %}
+        # Edge TTL поверх заголовков origin (Cache-Control/Expires).
+        proxy_ignore_headers Cache-Control Expires;
+        {% endif %}
+        {% for cookie in rule.bypass_cookie_names or [] %}
+        proxy_cache_bypass $cookie_{{ cookie }};
+        proxy_no_cache $cookie_{{ cookie }};
+        {% endfor %}
+        # Origin лежит или копия обновляется — отдаём устаревшую из кэша;
+        # одновременные промахи по одному адресу ждут один запрос к origin.
+        proxy_cache_use_stale error timeout updating http_500 http_502 http_503 http_504;
+        proxy_cache_background_update on;
+        proxy_cache_lock on;
+        proxy_cache_revalidate on;
+        add_header X-Cache-Status $upstream_cache_status always;
         {% endif %}
 
         proxy_pass {{ backend_protocol }}://{{ safe_name }}_backend;
@@ -387,10 +412,30 @@ server {
     {% if domain.cache_rules %}
     {% for rule in domain.cache_rules %}
     location ~ {{ rule.pattern }} {
+        {% if rule.rule_type == 'bypass' %}
+        # «Не кэшировать» — как Cache Level: Bypass у Cloudflare.
+        add_header X-Cache-Status BYPASS always;
+        {% else %}
         proxy_cache {{ safe_name }};
         proxy_cache_key $scheme$host$request_uri;
         {% if rule.ttl %}
-        proxy_cache_valid 200 {{ rule.ttl }}s;
+        proxy_cache_valid 200 206 301 302 {{ rule.ttl }}s;
+        {% endif %}
+        {% if rule.respect_origin == false %}
+        # Edge TTL поверх заголовков origin (Cache-Control/Expires).
+        proxy_ignore_headers Cache-Control Expires;
+        {% endif %}
+        {% for cookie in rule.bypass_cookie_names or [] %}
+        proxy_cache_bypass $cookie_{{ cookie }};
+        proxy_no_cache $cookie_{{ cookie }};
+        {% endfor %}
+        # Origin лежит или копия обновляется — отдаём устаревшую из кэша;
+        # одновременные промахи по одному адресу ждут один запрос к origin.
+        proxy_cache_use_stale error timeout updating http_500 http_502 http_503 http_504;
+        proxy_cache_background_update on;
+        proxy_cache_lock on;
+        proxy_cache_revalidate on;
+        add_header X-Cache-Status $upstream_cache_status always;
         {% endif %}
 
         proxy_pass {{ backend_protocol }}://{{ safe_name }}_backend;

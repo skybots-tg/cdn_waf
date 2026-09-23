@@ -229,7 +229,8 @@ async function loadOverview(range) {
     setText('error-split', `${FC.num(s.status_4xx)} 4xx · ${FC.num(s.status_5xx)} 5xx`);
     setHtml('errors-change', FC.change(s.changes.errors, { invert: true }));
     setText('avg-response', FC.ms(s.avg_response_time));
-    setText('response-percentiles', `p50 ${FC.ms(s.p50_response_time)} · p95 ${FC.ms(s.p95_response_time)}`);
+    setText('response-percentiles', `p50 ${FC.ms(s.p50_response_time)} · p95 ${FC.ms(s.p95_response_time)}`
+        + (s.avg_origin_time != null ? ` · origin ${FC.ms(s.avg_origin_time)}` : ''));
     setText('period-note', `${FC.localTime(s.start)} — ${FC.localTime(s.end)} (your local time)`);
 
     const total = s.total_requests || 0;

@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, BigInteger
+from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, BigInteger, SmallInteger
 from sqlalchemy.orm import backref, relationship
 from datetime import datetime
 
@@ -39,7 +39,12 @@ class RequestLog(Base):
     referer = Column(String(2048), nullable=True)
     
     # Performance & Security
-    request_time = Column(Integer)  # microseconds or milliseconds? let's say milliseconds
+    request_time = Column(Integer)  # мс: запрос на ноде целиком, вместе с ожиданием origin
+    # Время ответа origin (мс, сумма при повторах) и его код: отличить
+    # «тормозит сайт» от «тормозит CDN». У ответов из кэша — NULL.
+    upstream_time = Column(Integer, nullable=True)
+    upstream_status = Column(SmallInteger, nullable=True)
+    bytes_received = Column(BigInteger, nullable=True)  # $request_length
     cache_status = Column(String(20)) # HIT, MISS, BYPASS
     waf_status = Column(String(20), nullable=True) # BLOCKED, ALLOWED, CHALLENGED
     waf_rule_id = Column(Integer, nullable=True)

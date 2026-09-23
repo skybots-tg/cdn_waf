@@ -22,6 +22,25 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
+def _cookie_names(raw) -> list:
+    """Имена cookie для обхода кэша, пригодные для переменной nginx $cookie_*.
+
+    В БД лежит JSON-список. Имя уходит в конфиг ноды как есть, поэтому
+    пропускаем только [A-Za-z0-9_]: всё остальное либо не станет переменной
+    nginx, либо позволит вписать в конфиг лишнее.
+    """
+    import json
+    import re
+
+    if not raw:
+        return []
+    try:
+        names = json.loads(raw) if isinstance(raw, str) else list(raw)
+    except (ValueError, TypeError):
+        return []
+    return [n for n in names if isinstance(n, str) and re.fullmatch(r"[A-Za-z0-9_]{1,64}", n)]
+
+
 def _parse_waf_conditions(conditions_str: str) -> Optional[Dict]:
     """Safely parse WAF rule conditions JSON string."""
     if not conditions_str:
@@ -320,8 +339,12 @@ async def get_edge_config(
                 )
 
         # Get other rules (shared across all subdomains for now)
+        # Регулярные location nginx проверяет по порядку, и первое совпадение
+        # выигрывает — поэтому правила отдаём по приоритету, как у Cloudflare.
         cache_rules_result = await db.execute(
-            select(CacheRule).where(CacheRule.domain_id == domain.id, CacheRule.enabled == True)
+            select(CacheRule)
+            .where(CacheRule.domain_id == domain.id, CacheRule.enabled == True)
+            .order_by(CacheRule.priority.desc(), CacheRule.id)
         )
         cache_rules = cache_rules_result.scalars().all()
         
@@ -413,7 +436,8 @@ async def get_edge_config(
                         "rule_type": rule.rule_type,
                         "ttl": rule.ttl,
                         "respect_origin": rule.respect_origin_headers,
-                        "bypass_cookies": rule.bypass_cookies
+                        "bypass_cookies": rule.bypass_cookies,
+                        "bypass_cookie_names": _cookie_names(rule.bypass_cookies),
                     }
                     for rule in cache_rules
                 ],
