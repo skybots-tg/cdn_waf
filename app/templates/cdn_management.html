@@ -21,10 +21,10 @@
     <div class="grid grid-4 gap-3 mb-4">
         <div class="glass-card">
             <div style="font-size: 14px; color: var(--text-secondary); margin-bottom: 8px;">
-                <i class="fas fa-bolt"></i> Avg Cache Ratio
+                <i class="fas fa-bolt"></i> Percent Cached
             </div>
             <div style="font-size: 28px; font-weight: 700; color: var(--success);" id="avg-cache-ratio">-</div>
-            <div style="font-size: 12px; color: var(--text-muted); margin-top: 4px;">Across all domains</div>
+            <div style="font-size: 12px; color: var(--text-muted); margin-top: 4px;">Requests served from edge cache, 24h</div>
         </div>
 
         <div class="glass-card">
@@ -32,7 +32,7 @@
                 <i class="fas fa-save"></i> Bandwidth Saved
             </div>
             <div style="font-size: 28px; font-weight: 700; color: var(--info);" id="bandwidth-saved">-</div>
-            <div style="font-size: 12px; color: var(--text-muted); margin-top: 4px;">Last 24 hours</div>
+            <div style="font-size: 12px; color: var(--text-muted); margin-top: 4px;" id="bandwidth-saved-note">Last 24 hours</div>
         </div>
 
         <div class="glass-card">
@@ -48,21 +48,20 @@
                 <i class="fas fa-server"></i> Edge Nodes
             </div>
             <div style="font-size: 28px; font-weight: 700; color: var(--warning);" id="edge-nodes">-</div>
-            <div style="font-size: 12px; color: var(--text-muted); margin-top: 4px;">Active worldwide</div>
+            <div style="font-size: 12px; color: var(--text-muted); margin-top: 4px;">Online / total</div>
         </div>
     </div>
 
     <!-- Cache Performance Chart -->
     <div class="glass-card mb-4">
-        <h2 style="font-size: 20px; font-weight: 600; margin-bottom: 16px;">
-            <i class="fas fa-chart-line"></i> Cache Performance (24h)
-        </h2>
-        <div id="cache-chart" style="height: 250px; display: flex; align-items: center; justify-content: center; color: var(--text-muted);">
-            <div style="text-align: center;">
-                <i class="fas fa-chart-bar" style="font-size: 48px; margin-bottom: 16px; opacity: 0.3;"></i>
-                <p>Chart visualization coming soon</p>
+        <div class="flex-between mb-3">
+            <h2 style="font-size: 20px; font-weight: 600;"><i class="fas fa-chart-line"></i> Cache Performance (24h)</h2>
+            <div class="flex gap-2">
+                <button id="btn-cache-requests" class="btn btn-sm btn-primary" onclick="changeCacheMetric('requests')">Requests</button>
+                <button id="btn-cache-bandwidth" class="btn btn-sm btn-secondary" onclick="changeCacheMetric('bandwidth')">Bandwidth</button>
             </div>
         </div>
+        <div id="cache-chart" style="height: 250px;"><canvas id="cache-chart-canvas"></canvas></div>
     </div>
 
     <!-- Domains CDN Status -->
@@ -86,6 +85,7 @@
 </div>
 
 <style>
+.mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
 .cdn-domain-card {
     padding: 20px;
     background: var(--bg-tertiary);
@@ -116,241 +116,155 @@
 }
 </style>
 
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script src="/static/js/analytics.js"></script>
 <script>
+// CDN за сутки. До 23.09.2026 «сэкономлено» показывало весь трафик, «ноды»
+// — все ноды вместе с выключенными, график был заглушкой, а «Purge» слал
+// запрос без тела и всегда получал 422.
+let domainsState = [];
+let cacheChart = null;
+let cacheSeries = null;
+let cacheMetric = 'requests';
+
 async function loadCDNStats() {
     try {
-        const response = await fetch('/api/v1/stats/global');
-        const stats = await response.json();
-        
-        document.getElementById('avg-cache-ratio').textContent = (stats.avg_cache_ratio || 0) + '%';
-        document.getElementById('bandwidth-saved').textContent = formatBytes(stats.total_bandwidth || 0);
-        
-        // Count cache rules from all domains
-        const domainsResponse = await fetch('/api/v1/domains');
-        const domains = await domainsResponse.json();
-        
-        let totalRules = 0;
-        for (const domain of domains) {
-            try {
-                const rulesResponse = await fetch(`/api/v1/domains/${domain.id}/cache/rules`);
-                const rules = await rulesResponse.json();
-                totalRules += rules.length || 0;
-            } catch (e) {
-                console.error(`Error loading cache rules for domain ${domain.id}:`, e);
-            }
-        }
-        
-        document.getElementById('cache-rules').textContent = totalRules;
-        
-        // Get edge nodes count
-        const nodesResponse = await fetch('/api/v1/edge-nodes');
-        const nodes = await nodesResponse.json();
-        document.getElementById('edge-nodes').textContent = nodes.length || '0';
-    } catch (error) {
-        console.error('Error loading CDN stats:', error);
-        document.getElementById('avg-cache-ratio').textContent = '0%';
-        document.getElementById('bandwidth-saved').textContent = '0 B';
-        document.getElementById('cache-rules').textContent = '0';
-        document.getElementById('edge-nodes').textContent = '0';
+        const [stats, nodes, domains] = await Promise.all([
+            FC.get('/api/v1/stats/global?range=24h'),
+            FC.get('/api/v1/stats/edge-nodes?range=24h'),
+            FC.get('/api/v1/domains'),
+        ]);
+        document.getElementById('avg-cache-ratio').textContent = FC.pct(stats.cache_hit_ratio);
+        document.getElementById('bandwidth-saved').textContent = FC.bytes(stats.cached_bandwidth);
+        document.getElementById('bandwidth-saved-note').textContent =
+            `${FC.pct(stats.bandwidth_saved_ratio)} of ${FC.bytes(stats.total_bandwidth)} in 24h`;
+        const active = nodes.filter(n => n.enabled && n.status === 'online').length;
+        document.getElementById('edge-nodes').textContent = `${active} / ${nodes.length}`;
+
+        const rules = await Promise.all(domains.map(d =>
+            FC.get(`/api/v1/domains/${d.id}/cache/rules`).then(r => [d.id, r]).catch(() => [d.id, []])));
+        const rulesMap = Object.fromEntries(rules);
+        document.getElementById('cache-rules').textContent =
+            FC.num(rules.reduce((a, [, r]) => a + r.filter(x => x.enabled !== false).length, 0));
+        return rulesMap;
+    } catch (e) {
+        console.error('Error loading CDN stats:', e);
+        return {};
     }
 }
 
-async function loadDomainsCDN() {
+async function loadCacheChart() {
     try {
-        const response = await fetch('/api/v1/domains');
-        const domains = await response.json();
-        
-        const container = document.getElementById('domains-cdn');
-        
-        if (domains.length === 0) {
+        cacheSeries = await FC.get('/api/v1/stats/global/timeseries?range=24h');
+        cacheChart = FC.trafficChart(document.getElementById('cache-chart-canvas'), cacheChart, cacheSeries, cacheMetric);
+    } catch (e) { FC.error(document.getElementById('cache-chart'), e); }
+}
+
+function changeCacheMetric(metric) {
+    cacheMetric = metric;
+    document.getElementById('btn-cache-requests').className = 'btn btn-sm ' + (metric === 'requests' ? 'btn-primary' : 'btn-secondary');
+    document.getElementById('btn-cache-bandwidth').className = 'btn btn-sm ' + (metric === 'bandwidth' ? 'btn-primary' : 'btn-secondary');
+    if (cacheSeries) cacheChart = FC.trafficChart(document.getElementById('cache-chart-canvas'), cacheChart, cacheSeries, cacheMetric);
+}
+
+async function loadDomainsCDN(rulesMap) {
+    const container = document.getElementById('domains-cdn');
+    try {
+        const [domains, stats] = await Promise.all([
+            FC.get('/api/v1/domains'),
+            FC.get('/api/v1/stats/domains?range=24h'),
+        ]);
+        if (!domains.length) {
             container.innerHTML = `
                 <div style="text-align: center; padding: 64px; color: var(--text-muted);">
                     <i class="fas fa-server" style="font-size: 64px; margin-bottom: 24px; opacity: 0.3;"></i>
                     <h3 style="margin-bottom: 12px;">No domains configured yet</h3>
-                    <p style="margin-bottom: 24px;">Add a domain to start using the CDN</p>
-                    <a href="/domains" class="btn btn-primary">
-                        <i class="fas fa-plus"></i> Add Domain
-                    </a>
-                </div>
-            `;
+                    <a href="/domains" class="btn btn-primary"><i class="fas fa-plus"></i> Add Domain</a>
+                </div>`;
             return;
         }
-        
-        const domainCards = await Promise.all(domains.map(async domain => {
-            try {
-                // Get real stats for domain
-                const statsResponse = await fetch(`/api/v1/domains/${domain.id}/stats/basic`);
-                const stats = await statsResponse.json();
-                
-                // Get cache rules count
-                const rulesResponse = await fetch(`/api/v1/domains/${domain.id}/cache/rules`);
-                const rules = await rulesResponse.json();
-                const cacheRules = rules.length || 0;
-                
-                const cacheRatio = stats.cache_hit_ratio || 0;
-                const bandwidth = stats.total_bandwidth || 0;
-                const requests = stats.total_requests || 0;
-                
-                return `
-                    <div class="cdn-domain-card" data-name="${domain.name}" data-cache-ratio="${cacheRatio}" data-bandwidth="${bandwidth}">
-                        <div class="flex-between mb-3">
-                            <div style="flex: 1;">
-                                <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 8px;">
-                                    <h3 style="font-size: 18px; font-weight: 600; margin: 0;">${domain.name}</h3>
-                                    <span class="badge badge-success">${domain.status}</span>
-                                </div>
-                            </div>
-                            <div style="display: flex; gap: 8px;">
-                                <a href="/domains/${domain.id}/settings" class="btn btn-primary btn-sm">
-                                    <i class="fas fa-cog"></i> Configure
-                                </a>
-                                <button class="btn btn-secondary btn-sm" onclick="purgeDomainCache(${domain.id})">
-                                    <i class="fas fa-trash"></i> Purge
-                                </button>
-                            </div>
-                        </div>
-                        
-                        <div class="grid grid-4 gap-3 mb-3">
-                            <div>
-                                <div style="font-size: 12px; color: var(--text-secondary); margin-bottom: 4px;">
-                                    Cache Ratio
-                                </div>
-                                <div style="font-size: 20px; font-weight: 700; color: var(--success);">
-                                    ${cacheRatio.toFixed(1)}%
-                                </div>
-                                <div class="progress-bar">
-                                    <div class="progress-fill" style="width: ${cacheRatio}%;"></div>
-                                </div>
-                            </div>
-                            
-                            <div>
-                                <div style="font-size: 12px; color: var(--text-secondary); margin-bottom: 4px;">
-                                    Bandwidth (24h)
-                                </div>
-                                <div style="font-size: 20px; font-weight: 700;">
-                                    ${formatBytes(bandwidth)}
-                                </div>
-                            </div>
-                            
-                            <div>
-                                <div style="font-size: 12px; color: var(--text-secondary); margin-bottom: 4px;">
-                                    Requests (24h)
-                                </div>
-                                <div style="font-size: 20px; font-weight: 700;">
-                                    ${formatNumber(requests)}
-                                </div>
-                            </div>
-                            
-                            <div>
-                                <div style="font-size: 12px; color: var(--text-secondary); margin-bottom: 4px;">
-                                    Cache Rules
-                                </div>
-                                <div style="font-size: 20px; font-weight: 700;">
-                                    ${cacheRules}
-                                </div>
-                            </div>
-                        </div>
-                        
-                        <div style="display: flex; gap: 16px; font-size: 13px; color: var(--text-secondary);">
-                            <span>
-                                <i class="fas fa-check-circle" style="color: var(--success);"></i>
-                                ${stats.cache_hits || 0} hits
-                            </span>
-                            <span>
-                                <i class="fas fa-times-circle" style="color: var(--error);"></i>
-                                ${stats.cache_misses || 0} misses
-                            </span>
-                            <span>
-                                <i class="fas fa-save" style="color: var(--info);"></i>
-                                ${formatBytes((bandwidth * cacheRatio / 100))} saved
-                            </span>
-                        </div>
-                    </div>
-                `;
-            } catch (error) {
-                console.error(`Error loading CDN stats for domain ${domain.id}:`, error);
-                return `
-                    <div class="cdn-domain-card">
-                        <div class="flex-between">
-                            <div>
-                                <h3 style="font-size: 18px; font-weight: 600;">${domain.name}</h3>
-                                <p style="font-size: 13px; color: var(--text-muted);">Unable to load stats</p>
-                            </div>
-                            <a href="/domains/${domain.id}/settings" class="btn btn-primary btn-sm">
-                                <i class="fas fa-cog"></i> Configure
-                            </a>
-                        </div>
-                    </div>
-                `;
-            }
+        const byId = Object.fromEntries(stats.map(s => [s.id, s]));
+        domainsState = domains.map(d => ({
+            ...d,
+            stats: byId[d.id] || {},
+            rules: (rulesMap[d.id] || []).filter(r => r.enabled !== false),
         }));
-        
-        container.innerHTML = domainCards.join('');
-        
-    } catch (error) {
-        console.error('Error loading domains CDN:', error);
-        showNotification('Failed to load CDN status', 'error');
-    }
+        renderDomains();
+    } catch (e) { FC.error(container, e); }
 }
 
-function formatNumber(num) {
-    if (num >= 1000000) return (num / 1000000).toFixed(1) + 'M';
-    if (num >= 1000) return (num / 1000).toFixed(1) + 'K';
-    return num.toString();
-}
-
-function formatBytes(bytes) {
-    if (bytes >= 1073741824) return (bytes / 1073741824).toFixed(2) + ' GB';
-    if (bytes >= 1048576) return (bytes / 1048576).toFixed(2) + ' MB';
-    if (bytes >= 1024) return (bytes / 1024).toFixed(2) + ' KB';
-    return bytes + ' B';
-}
-
-async function purgeDomainCache(domainId) {
-    if (!confirm('Are you sure you want to purge all cache for this domain?')) {
-        return;
-    }
-    
-    try {
-        const response = await fetch(`/api/v1/domains/${domainId}/cache/purge`, {
-            method: 'POST'
-        });
-        
-        if (response.ok) {
-            showNotification('Cache purged successfully', 'success');
-        } else {
-            showNotification('Failed to purge cache', 'error');
-        }
-    } catch (error) {
-        console.error('Error purging cache:', error);
-        showNotification('Failed to purge cache', 'error');
-    }
-}
-
-// Initialize
-document.addEventListener('DOMContentLoaded', () => {
-    loadCDNStats();
-    loadDomainsCDN();
-    
-    document.getElementById('sort-by').addEventListener('change', (e) => {
-        const sortBy = e.target.value;
-        const container = document.getElementById('domains-cdn');
-        const cards = Array.from(container.querySelectorAll('.cdn-domain-card'));
-        if (cards.length === 0) return;
-
-        cards.sort((a, b) => {
-            if (sortBy === 'name') {
-                return (a.dataset.name || '').localeCompare(b.dataset.name || '');
-            } else if (sortBy === 'cache-ratio') {
-                return parseFloat(b.dataset.cacheRatio || 0) - parseFloat(a.dataset.cacheRatio || 0);
-            } else if (sortBy === 'bandwidth') {
-                return parseFloat(b.dataset.bandwidth || 0) - parseFloat(a.dataset.bandwidth || 0);
-            }
-            return 0;
-        });
-
-        cards.forEach(card => container.appendChild(card));
+function renderDomains() {
+    const container = document.getElementById('domains-cdn');
+    const sortBy = document.getElementById('sort-by').value;
+    const rows = [...domainsState].sort((a, b) => {
+        if (sortBy === 'cache-ratio') return (b.stats.cache_ratio || 0) - (a.stats.cache_ratio || 0);
+        if (sortBy === 'bandwidth') return (b.stats.bandwidth || 0) - (a.stats.bandwidth || 0);
+        return a.name.localeCompare(b.name);
     });
+    container.innerHTML = rows.map(d => {
+        const s = d.stats;
+        const ratio = s.cache_ratio || 0;
+        const rulesText = d.rules.length
+            ? d.rules.map(r => `<span class="mono">${FC.escape(r.pattern)}</span>${r.ttl ? ' · TTL ' + FC.escape(r.ttl) + 's' : ''}`).join('<br>')
+            : '<span style="color:var(--warning);">no cache rules — only dynamic traffic</span>';
+        return `
+        <div class="cdn-domain-card">
+            <div class="flex-between mb-3">
+                <div style="display: flex; align-items: center; gap: 12px;">
+                    <h3 style="font-size: 18px; font-weight: 600; margin: 0;">${FC.escape(d.name)}</h3>
+                    <span class="badge ${d.status === 'active' ? 'badge-success' : 'badge-warning'}">${FC.escape(d.status)}</span>
+                </div>
+                <div style="display: flex; gap: 8px;">
+                    <a href="/domains/${d.id}/analytics" class="btn btn-secondary btn-sm"><i class="fas fa-chart-line"></i> Analytics</a>
+                    <a href="/domains/${d.id}/settings" class="btn btn-primary btn-sm"><i class="fas fa-cog"></i> Configure</a>
+                    <button class="btn btn-secondary btn-sm" onclick="purgeDomainCache(${d.id}, '${FC.escape(d.name)}')"><i class="fas fa-trash"></i> Purge</button>
+                </div>
+            </div>
+            <div class="grid grid-4 gap-3 mb-3">
+                <div>
+                    <div style="font-size: 12px; color: var(--text-secondary); margin-bottom: 4px;">Percent cached</div>
+                    <div style="font-size: 20px; font-weight: 700; color: var(--success);">${FC.pct(ratio)}</div>
+                    <div class="progress-bar"><div class="progress-fill" style="width: ${Math.min(ratio, 100)}%;"></div></div>
+                </div>
+                <div>
+                    <div style="font-size: 12px; color: var(--text-secondary); margin-bottom: 4px;">Bandwidth (24h)</div>
+                    <div style="font-size: 20px; font-weight: 700;">${FC.bytes(s.bandwidth)}</div>
+                    <div style="font-size: 12px; color: var(--text-muted);">${FC.bytes(s.cached_bandwidth)} from cache</div>
+                </div>
+                <div>
+                    <div style="font-size: 12px; color: var(--text-secondary); margin-bottom: 4px;">Requests (24h)</div>
+                    <div style="font-size: 20px; font-weight: 700;">${FC.num(s.requests)}</div>
+                    <div style="font-size: 12px; color: var(--text-muted);">${FC.num(s.cache_hits)} hits · ${FC.num(s.cache_misses)} misses</div>
+                </div>
+                <div>
+                    <div style="font-size: 12px; color: var(--text-secondary); margin-bottom: 4px;">Cache rules</div>
+                    <div style="font-size: 13px;">${rulesText}</div>
+                </div>
+            </div>
+        </div>`;
+    }).join('');
+}
+
+async function purgeDomainCache(domainId, name) {
+    if (!confirm(`Purge all cached content for ${name}? Edge nodes will fetch everything from the origin again.`)) return;
+    try {
+        const r = await fetch(`/api/v1/domains/${domainId}/cache/purge`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ purge_type: 'all' }),
+        });
+        if (!r.ok) throw new Error(r.status + ' ' + r.statusText);
+        showNotification('Purge queued — edge nodes will clear their cache within a minute', 'success');
+    } catch (e) {
+        showNotification('Failed to purge cache: ' + e.message, 'error');
+    }
+}
+
+document.addEventListener('DOMContentLoaded', async () => {
+    document.getElementById('sort-by').addEventListener('change', renderDomains);
+    loadCacheChart();
+    const rulesMap = await loadCDNStats();
+    loadDomainsCDN(rulesMap);
 });
 </script>
 {% endblock %}

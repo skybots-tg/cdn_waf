@@ -57,6 +57,20 @@
         </div>
     </div>
 
+    <!-- Security events -->
+    <div class="glass-card mb-4">
+        <div class="flex-between mb-3">
+            <h2 style="font-size: 20px; font-weight: 600;"><i class="fas fa-user-shield"></i> Security Events</h2>
+            <select class="form-select" id="events-range" style="max-width: 180px;">
+                <option value="1h">Last hour</option>
+                <option value="24h" selected>Last 24 hours</option>
+                <option value="7d">Last 7 days</option>
+                <option value="30d">Last 30 days</option>
+            </select>
+        </div>
+        <div id="security-events"></div>
+    </div>
+
     <!-- Under Attack Mode -->
     <div class="glass-card mb-4">
         <div class="flex-between">
@@ -194,6 +208,7 @@
 }
 </style>
 
+<script src="/static/js/analytics.js"></script>
 <script>
 const DOMAIN_ID = {{ domain.id }};
 
@@ -202,7 +217,8 @@ async function loadWAFStats() {
         const response = await fetch(`/api/v1/domains/${DOMAIN_ID}/stats/basic?range=24h`);
         const stats = await response.json();
         
-        document.getElementById('blocked-today').textContent = stats.threats_blocked || '0';
+        // Угрозы — блокировки и проверки WAF плюс ответы 429 правил частоты.
+        document.getElementById('blocked-today').textContent = (stats.threats_blocked || 0) + (stats.rate_limited || 0);
         
         // Count active rules
         const rulesResponse = await fetch(`/api/v1/domains/${DOMAIN_ID}/waf/rules`);
@@ -215,6 +231,24 @@ async function loadWAFStats() {
         document.getElementById('blocked-today').textContent = '-';
         document.getElementById('active-rules').textContent = '-';
     }
+}
+
+async function loadSecurityEvents() {
+    const el = document.getElementById('security-events');
+    const range = document.getElementById('events-range').value;
+    FC.loading(el);
+    try {
+        const events = await FC.get(`/api/v1/domains/${DOMAIN_ID}/stats/security?range=${range}&limit=50`);
+        if (!events.length) return FC.empty(el, 'No blocked or rate-limited requests in this period');
+        el.innerHTML = `<table style="width:100%;border-collapse:collapse;font-size:13px;"><thead><tr style="color:var(--text-secondary);text-align:left;">
+            <th style="padding:8px;">When</th><th style="padding:8px;">Action</th><th style="padding:8px;">Request</th><th style="padding:8px;">Client</th></tr></thead><tbody>
+            ${events.map(e => `<tr style="border-top:1px solid var(--glass-border);">
+                <td style="padding:8px;white-space:nowrap;" title="${FC.escape(FC.localTime(e.timestamp))}">${FC.relative(e.timestamp)}</td>
+                <td style="padding:8px;"><span class="badge ${e.action === 'blocked' ? 'badge-error' : 'badge-warning'}">${FC.escape(e.action)}</span>${e.rule_id ? ' <span style="color:var(--text-muted);">rule #' + e.rule_id + '</span>' : ''}</td>
+                <td style="padding:8px;font-family:monospace;word-break:break-all;">${FC.escape(e.method)} ${FC.escape(e.host || '')}${FC.escape(e.path)}</td>
+                <td style="padding:8px;white-space:nowrap;">${FC.country(e.country_code)} <span style="font-family:monospace;">${FC.escape(e.client_ip)}</span></td>
+            </tr>`).join('')}</tbody></table>`;
+    } catch (e) { FC.error(el, e); }
 }
 
 async function loadWAFRules() {
@@ -378,6 +412,8 @@ async function loadIPRules() {
 // Initialize
 document.addEventListener('DOMContentLoaded', () => {
     loadWAFStats();
+    loadSecurityEvents();
+    document.getElementById('events-range').addEventListener('change', loadSecurityEvents);
     loadWAFRules();
     loadRateLimits();
     loadIPRules();

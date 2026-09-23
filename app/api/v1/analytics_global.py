@@ -12,6 +12,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.dependencies import visible_domain_ids
+from app.core.config import settings
 from app.core.database import get_db
 from app.core.security import get_current_active_user
 from app.models.domain import Domain
@@ -79,6 +80,9 @@ async def get_domains_stats(
             "bandwidth": m["total_bandwidth"],
             "cached_bandwidth": m["cached_bandwidth"],
             "cache_ratio": m["cache_hit_ratio"],
+            "cacheable_ratio": m["cacheable_hit_ratio"],
+            "cache_hits": m["cache_hits"],
+            "cache_misses": m["cache_misses"],
             "threats": m["threats_blocked"],
             "errors": m["status_4xx"] + m["status_5xx"],
             "error_rate": m["error_rate"],
@@ -135,6 +139,8 @@ async def get_edge_nodes_stats(
     by_node = await aq.totals(db, w, domain_ids, group_by="node")
     seconds = max((w.end - w.start).total_seconds(), 1)
     nodes = (await db.execute(select(EdgeNode).order_by(EdgeNode.id))).scalars().all()
+    # Резервные ноды (BACKUP_EDGE_IPS) DNS отдаёт, только когда основных нет.
+    backups = {ip.strip() for ip in settings.BACKUP_EDGE_IPS.split(",") if ip.strip()}
     rows = []
     for node in nodes:
         m = by_node.get(node.id, aq.Metrics()).as_dict()
@@ -146,6 +152,7 @@ async def get_edge_nodes_stats(
             "city": node.city,
             "status": node.status,
             "enabled": node.enabled,
+            "backup": node.ip_address in backups,
             "requests": m["total_requests"],
             "rps": round(m["total_requests"] / seconds, 2),
             "bandwidth": m["total_bandwidth"],

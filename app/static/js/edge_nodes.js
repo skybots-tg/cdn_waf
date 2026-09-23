@@ -1,6 +1,7 @@
 // Edge Nodes Management JavaScript
 
 let currentNodeId = null;
+let nodeTraffic = {};
 let resetPasswordFlag = false;
 let resetSshKeyFlag = false;
 
@@ -23,6 +24,14 @@ async function loadNodes() {
         if (!response.ok) throw new Error('Failed to load nodes');
         
         const nodes = await response.json();
+        // Трафик за сутки и роль в DNS — из аналитики; без неё таблица
+        // всё равно рисуется.
+        try {
+            const stats = await FC.get('/api/v1/stats/edge-nodes?range=24h');
+            nodeTraffic = Object.fromEntries(stats.map(s => [s.id, s]));
+        } catch (e) {
+            nodeTraffic = {};
+        }
         renderNodes(nodes);
     } catch (error) {
         console.error('Error loading nodes:', error);
@@ -58,7 +67,7 @@ function renderNodes(nodes) {
     if (nodes.length === 0) {
         tbody.innerHTML = `
             <tr>
-                <td colspan="10" style="text-align: center; padding: 32px; color: var(--text-muted);">
+                <td colspan="12" style="text-align: center; padding: 32px; color: var(--text-muted);">
                     <i class="fas fa-inbox"></i><br>
                     No edge nodes found
                 </td>
@@ -86,10 +95,12 @@ function renderNodes(nodes) {
                     <span class="toggle-slider"></span>
                 </label>
             </td>
-            <td>${getStatusBadge(node)}</td>
+            <td>${getStatusBadge(node)}${(nodeTraffic[node.id] || {}).backup ? ' <span class="badge badge-info" title="В DNS только если основных нод нет (BACKUP_EDGE_IPS)">DNS backup</span>' : ''}</td>
             <td>${node.cpu_usage !== null ? `${node.cpu_usage.toFixed(1)}%` : '-'}</td>
             <td>${node.memory_usage !== null ? `${node.memory_usage.toFixed(1)}%` : '-'}</td>
             <td>${node.disk_usage !== null ? `${node.disk_usage.toFixed(1)}%` : '-'}</td>
+            <td>${nodeTraffic[node.id] ? FC.num(nodeTraffic[node.id].requests) : '-'}</td>
+            <td>${nodeTraffic[node.id] ? FC.bytes(nodeTraffic[node.id].bandwidth) + '<div style="font-size:11px;color:var(--text-muted);">' + FC.ms(nodeTraffic[node.id].avg_latency) + ' avg</div>' : '-'}</td>
             <td>
                 ${node.last_config_update ? formatDateTime(node.last_config_update) : 
                     '<span style="color: var(--text-muted);">Never</span>'}

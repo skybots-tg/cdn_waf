@@ -10,14 +10,14 @@
             <div class="flex-between mb-2">
                 <div>
                     <p class="text-secondary" style="font-size: 13px; margin-bottom: 4px;">TOTAL DOMAINS</p>
-                    <h2 style="font-size: 32px; font-weight: 700;">0</h2>
+                    <h2 style="font-size: 32px; font-weight: 700;" id="kpi-domains">—</h2>
                 </div>
                 <div style="width: 48px; height: 48px; background: rgba(51, 154, 240, 0.15); border-radius: 12px; display: flex; align-items: center; justify-content: center;">
                     <i class="fas fa-globe" style="font-size: 24px; color: var(--info);"></i>
                 </div>
             </div>
             <p class="text-secondary" style="font-size: 13px;">
-                <i class="fas fa-arrow-up"></i> Active and configured
+                <span id="kpi-domains-sub">Active and configured</span>
             </p>
         </div>
         
@@ -25,44 +25,44 @@
             <div class="flex-between mb-2">
                 <div>
                     <p class="text-secondary" style="font-size: 13px; margin-bottom: 4px;">REQUESTS (24H)</p>
-                    <h2 style="font-size: 32px; font-weight: 700;">0</h2>
+                    <h2 style="font-size: 32px; font-weight: 700;" id="kpi-requests">—</h2>
                 </div>
                 <div style="width: 48px; height: 48px; background: rgba(81, 207, 102, 0.15); border-radius: 12px; display: flex; align-items: center; justify-content: center;">
                     <i class="fas fa-chart-line" style="font-size: 24px; color: var(--success);"></i>
                 </div>
             </div>
             <p class="text-secondary" style="font-size: 13px;">
-                <i class="fas fa-arrow-up"></i> Last 24 hours
+                <span id="kpi-requests-sub">Last 24 hours</span>
             </p>
         </div>
         
         <div class="glass-card">
             <div class="flex-between mb-2">
                 <div>
-                    <p class="text-secondary" style="font-size: 13px; margin-bottom: 4px;">BANDWIDTH</p>
-                    <h2 style="font-size: 32px; font-weight: 700;">0 GB</h2>
+                    <p class="text-secondary" style="font-size: 13px; margin-bottom: 4px;">BANDWIDTH (30D)</p>
+                    <h2 style="font-size: 32px; font-weight: 700;" id="kpi-bandwidth">—</h2>
                 </div>
                 <div style="width: 48px; height: 48px; background: rgba(255, 107, 53, 0.15); border-radius: 12px; display: flex; align-items: center; justify-content: center;">
                     <i class="fas fa-network-wired" style="font-size: 24px; color: var(--accent-primary);"></i>
                 </div>
             </div>
             <p class="text-secondary" style="font-size: 13px;">
-                <i class="fas fa-arrow-up"></i> Last 30 days
+                <span id="kpi-bandwidth-sub">Last 30 days</span>
             </p>
         </div>
         
         <div class="glass-card">
             <div class="flex-between mb-2">
                 <div>
-                    <p class="text-secondary" style="font-size: 13px; margin-bottom: 4px;">CACHE HIT RATE</p>
-                    <h2 style="font-size: 32px; font-weight: 700;">0%</h2>
+                    <p class="text-secondary" style="font-size: 13px; margin-bottom: 4px;">CACHE HIT RATE (24H)</p>
+                    <h2 style="font-size: 32px; font-weight: 700;" id="kpi-cache">—</h2>
                 </div>
                 <div style="width: 48px; height: 48px; background: rgba(255, 212, 59, 0.15); border-radius: 12px; display: flex; align-items: center; justify-content: center;">
                     <i class="fas fa-rocket" style="font-size: 24px; color: var(--warning);"></i>
                 </div>
             </div>
             <p class="text-secondary" style="font-size: 13px;">
-                <i class="fas fa-arrow-up"></i> Optimization active
+                <span id="kpi-cache-sub">Requests served from edge cache</span>
             </p>
         </div>
     </div>
@@ -104,8 +104,29 @@
     </div>
 </div>
 
+<script src="/static/js/analytics.js"></script>
 <script>
+    // Карточки дашборда были нулями, вписанными в разметку.
+    async function loadKpis() {
+        try {
+            const [day, month] = await Promise.all([
+                FC.get('/api/v1/stats/global?range=24h'),
+                FC.get('/api/v1/stats/global?range=30d'),
+            ]);
+            document.getElementById('kpi-domains').textContent = FC.num(day.total_domains);
+            document.getElementById('kpi-requests').textContent = FC.num(day.total_requests);
+            document.getElementById('kpi-requests-sub').innerHTML = FC.change(day.changes.requests);
+            document.getElementById('kpi-bandwidth').textContent = FC.bytes(month.total_bandwidth);
+            document.getElementById('kpi-bandwidth-sub').innerHTML = FC.change(month.changes.bandwidth);
+            document.getElementById('kpi-cache').textContent = FC.pct(day.cache_hit_ratio);
+            document.getElementById('kpi-cache-sub').textContent = `${FC.bytes(day.cached_bandwidth)} served from cache in 24h`;
+        } catch (e) {
+            console.error('Dashboard KPIs:', e);
+        }
+    }
+
     document.addEventListener('DOMContentLoaded', () => {
+        loadKpis();
         loadDomains();
     });
 </script>

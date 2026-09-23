@@ -1,16 +1,12 @@
 {% extends "base.html" %}
-
 {% block title %}Analytics - FlareCloud{% endblock %}
-
 {% block content %}
 <div class="container" style="padding: 32px 24px;">
     <!-- Header -->
     <div class="flex-between mb-4">
         <div>
             <h1 style="font-size: 32px; font-weight: 700;">Analytics</h1>
-            <p style="color: var(--text-secondary); font-size: 14px;">
-                Global traffic analytics across all your domains
-            </p>
+            <p style="color: var(--text-secondary); font-size: 14px;" id="period-note">Traffic across all your domains</p>
         </div>
         <div style="display: flex; gap: 12px;">
             <select class="form-select" id="time-range" style="max-width: 200px;">
@@ -21,436 +17,324 @@
                 <option value="90d">Last 90 Days</option>
                 <option value="6m">Last 6 Months</option>
             </select>
-            <button class="btn btn-secondary" onclick="exportGlobalData()">
-                <i class="fas fa-download"></i> Export
-            </button>
+            <button class="btn btn-secondary" onclick="exportGlobalData('csv')"><i class="fas fa-download"></i> CSV</button>
+            <button class="btn btn-secondary" onclick="exportGlobalData('json')"><i class="fas fa-code"></i> JSON</button>
         </div>
     </div>
 
-    <!-- Global Metrics -->
+    <!-- Traffic -->
+    <div class="grid grid-4 gap-3 mb-3">
+        <div class="glass-card">
+            <div class="metric-title"><i class="fas fa-exchange-alt"></i> Requests</div>
+            <div class="metric-value" id="global-requests">-</div>
+            <div class="metric-sub" id="global-requests-split">-</div>
+            <div class="metric-change" id="global-requests-change">-</div>
+        </div>
+        <div class="glass-card">
+            <div class="metric-title"><i class="fas fa-database"></i> Bandwidth</div>
+            <div class="metric-value" id="global-bandwidth">-</div>
+            <div class="metric-sub" id="global-bandwidth-split">-</div>
+            <div class="metric-change" id="global-bandwidth-change">-</div>
+        </div>
+        <div class="glass-card">
+            <div class="metric-title"><i class="fas fa-users"></i> Unique Visitors</div>
+            <div class="metric-value" id="global-visitors">-</div>
+            <div class="metric-sub" id="global-domains">-</div>
+            <div class="metric-change" id="global-visitors-change">-</div>
+        </div>
+        <div class="glass-card">
+            <div class="metric-title"><i class="fas fa-shield-alt"></i> Threats</div>
+            <div class="metric-value" style="color: var(--error);" id="global-threats">-</div>
+            <div class="metric-sub" id="global-threats-split">-</div>
+            <div class="metric-change" id="global-threats-change">-</div>
+        </div>
+    </div>
+
+    <!-- Quality -->
     <div class="grid grid-4 gap-3 mb-4">
         <div class="glass-card">
-            <div style="font-size: 14px; color: var(--text-secondary); margin-bottom: 8px;">
-                <i class="fas fa-exchange-alt"></i> Total Requests
-            </div>
-            <div style="font-size: 28px; font-weight: 700;" id="global-requests">-</div>
-            <div style="font-size: 12px; color: var(--text-muted); margin-top: 4px;" id="global-requests-change">-</div>
+            <div class="metric-title"><i class="fas fa-bolt"></i> Percent Cached</div>
+            <div class="metric-value" style="color: var(--success);" id="global-cache">-</div>
+            <div class="metric-sub" id="global-cacheable">-</div>
+            <div class="metric-change" id="global-cache-change">-</div>
         </div>
-
         <div class="glass-card">
-            <div style="font-size: 14px; color: var(--text-secondary); margin-bottom: 8px;">
-                <i class="fas fa-database"></i> Bandwidth
-            </div>
-            <div style="font-size: 28px; font-weight: 700;" id="global-bandwidth">-</div>
-            <div style="font-size: 12px; color: var(--text-muted); margin-top: 4px;" id="global-bandwidth-change">-</div>
+            <div class="metric-title"><i class="fas fa-leaf"></i> Bandwidth Saved</div>
+            <div class="metric-value" style="color: var(--success);" id="global-saved">-</div>
+            <div class="metric-sub" id="global-saved-bytes">-</div>
         </div>
-
         <div class="glass-card">
-            <div style="font-size: 14px; color: var(--text-secondary); margin-bottom: 8px;">
-                <i class="fas fa-bolt"></i> Avg Cache Ratio
-            </div>
-            <div style="font-size: 28px; font-weight: 700; color: var(--success);" id="global-cache">-</div>
-            <div style="font-size: 12px; color: var(--text-muted); margin-top: 4px;">Across all domains</div>
+            <div class="metric-title"><i class="fas fa-exclamation-circle"></i> Error Rate</div>
+            <div class="metric-value" id="global-error-rate">-</div>
+            <div class="metric-sub" id="global-error-split">-</div>
+            <div class="metric-change" id="global-errors-change">-</div>
         </div>
-
         <div class="glass-card">
-            <div style="font-size: 14px; color: var(--text-secondary); margin-bottom: 8px;">
-                <i class="fas fa-shield-alt"></i> Threats Blocked
-            </div>
-            <div style="font-size: 28px; font-weight: 700; color: var(--error);" id="global-threats">-</div>
-            <div style="font-size: 12px; color: var(--text-muted); margin-top: 4px;" id="global-threats-change">-</div>
+            <div class="metric-title"><i class="fas fa-stopwatch"></i> Response Time</div>
+            <div class="metric-value" id="global-response">-</div>
+            <div class="metric-sub" id="global-percentiles">-</div>
         </div>
     </div>
 
-    <!-- Main Chart -->
+    <!-- Chart -->
     <div class="glass-card mb-4">
         <div class="flex-between mb-3">
-            <h2 style="font-size: 20px; font-weight: 600;">Global Traffic Overview</h2>
+            <h2 style="font-size: 20px; font-weight: 600;">Traffic</h2>
             <div class="flex gap-2">
-                <button class="btn btn-sm btn-primary" onclick="changeGlobalChartMetric('requests')">
-                    Requests
-                </button>
-                <button class="btn btn-sm btn-secondary" onclick="changeGlobalChartMetric('bandwidth')">
-                    Bandwidth
-                </button>
+                <button id="btn-metric-requests" class="btn btn-sm btn-primary" onclick="changeGlobalChartMetric('requests')">Requests</button>
+                <button id="btn-metric-bandwidth" class="btn btn-sm btn-secondary" onclick="changeGlobalChartMetric('bandwidth')">Bandwidth</button>
             </div>
         </div>
-        <div id="global-traffic-chart-container" style="height: 300px; width: 100%;">
-            <canvas id="global-traffic-chart"></canvas>
-        </div>
+        <div style="height: 300px; width: 100%;"><canvas id="global-traffic-chart"></canvas></div>
     </div>
 
-    <!-- Domain Performance -->
+    <!-- Domains -->
     <div class="glass-card mb-4">
-        <h2 style="font-size: 20px; font-weight: 600; margin-bottom: 16px;">
-            <i class="fas fa-globe"></i> Domain Performance
-        </h2>
-        <div id="domain-performance">
-            <p style="text-align: center; color: var(--text-muted); padding: 32px;">
-                <i class="fas fa-spinner fa-spin"></i> Loading...
-            </p>
-        </div>
+        <h2 style="font-size: 20px; font-weight: 600; margin-bottom: 16px;"><i class="fas fa-globe"></i> Domains</h2>
+        <div id="domain-performance" style="overflow-x: auto;"></div>
     </div>
 
-    <!-- Status & Performance -->
+    <!-- Edge nodes -->
+    <div class="glass-card mb-4">
+        <h2 style="font-size: 20px; font-weight: 600; margin-bottom: 16px;"><i class="fas fa-server"></i> Edge Nodes</h2>
+        <div id="edge-nodes-performance" style="overflow-x: auto;"></div>
+    </div>
+
     <div class="grid grid-2 gap-3 mb-4">
         <div class="glass-card">
-            <h3 style="font-size: 18px; font-weight: 600; margin-bottom: 16px;">
-                <i class="fas fa-check-circle"></i> Response Status
-            </h3>
-            <div id="global-status-codes">
-                <div class="flex-between mb-2">
-                    <span style="color: var(--text-secondary);">2xx Success</span>
-                    <span style="font-weight: 600; color: var(--success);" id="global-status-2xx">-</span>
-                </div>
-                <div class="flex-between mb-2">
-                    <span style="color: var(--text-secondary);">3xx Redirect</span>
-                    <span style="font-weight: 600; color: var(--info);" id="global-status-3xx">-</span>
-                </div>
-                <div class="flex-between mb-2">
-                    <span style="color: var(--text-secondary);">4xx Client Error</span>
-                    <span style="font-weight: 600; color: var(--warning);" id="global-status-4xx">-</span>
-                </div>
-                <div class="flex-between">
-                    <span style="color: var(--text-secondary);">5xx Server Error</span>
-                    <span style="font-weight: 600; color: var(--error);" id="global-status-5xx">-</span>
-                </div>
-            </div>
+            <h3 class="card-title"><i class="fas fa-check-circle"></i> Response Status</h3>
+            <div id="global-status-codes"></div>
         </div>
-
         <div class="glass-card">
-            <h3 style="font-size: 18px; font-weight: 600; margin-bottom: 16px;">
-                <i class="fas fa-globe"></i> Top Countries
-            </h3>
-            <div id="global-geo">
-                <p style="text-align: center; color: var(--text-muted); padding: 24px;">
-                    <i class="fas fa-spinner fa-spin"></i> Loading...
-                </p>
-            </div>
+            <h3 class="card-title"><i class="fas fa-globe"></i> Top Countries</h3>
+            <div id="global-geo"></div>
         </div>
     </div>
 
-    <!-- Edge Nodes Performance -->
-    <div class="glass-card">
-        <h2 style="font-size: 20px; font-weight: 600; margin-bottom: 16px;">
-            <i class="fas fa-server"></i> Edge Nodes Performance
-        </h2>
-        <div id="edge-nodes-performance">
-            <p style="text-align: center; color: var(--text-muted); padding: 32px;">
-                <i class="fas fa-spinner fa-spin"></i> Loading...
-            </p>
+    <div class="grid grid-2 gap-3 mb-4">
+        <div class="glass-card">
+            <h3 class="card-title"><i class="fas fa-fire"></i> Top Pages</h3>
+            <div id="global-paths"></div>
+        </div>
+        <div class="glass-card">
+            <h3 class="card-title"><i class="fas fa-link"></i> Top Referrers</h3>
+            <div id="global-referrers"></div>
+        </div>
+    </div>
+
+    <div class="grid grid-2 gap-3 mb-4">
+        <div class="glass-card">
+            <h3 class="card-title"><i class="fas fa-desktop"></i> Browsers &amp; Clients</h3>
+            <div id="global-browsers"></div>
+        </div>
+        <div class="glass-card">
+            <h3 class="card-title"><i class="fas fa-user-shield"></i> Security Events</h3>
+            <div id="global-security"></div>
         </div>
     </div>
 </div>
 
+<style>
+.metric-title { font-size: 14px; color: var(--text-secondary); margin-bottom: 8px; }
+.metric-value { font-size: 28px; font-weight: 700; }
+.metric-sub { font-size: 12px; color: var(--text-secondary); margin-top: 4px; }
+.metric-change { font-size: 12px; margin-top: 4px; }
+.card-title { font-size: 18px; font-weight: 600; margin-bottom: 16px; }
+.data-table { width: 100%; border-collapse: collapse; font-size: 14px; }
+.data-table th { text-align: left; color: var(--text-secondary); font-weight: 500; padding: 10px 8px; border-bottom: 1px solid var(--glass-border); white-space: nowrap; cursor: pointer; user-select: none; }
+.data-table td { padding: 10px 8px; border-bottom: 1px solid var(--glass-border); white-space: nowrap; }
+.data-table tr:hover td { background: var(--bg-tertiary); }
+.mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+</style>
+
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script src="/static/js/analytics.js"></script>
 <script>
-let globalChartMetric = 'requests';
-let globalTrafficChart = null;
+let currentRange = '24h';
+let chartMetric = 'requests';
+let chart = null;
+let lastSeries = null;
+let domainRows = [];
+let domainSort = { key: 'requests', desc: true };
 
-async function loadGlobalAnalytics() {
-    const timeRange = document.getElementById('time-range').value;
-    
-    try {
-        // Load global metrics
-        const response = await fetch(`/api/v1/stats/global?range=${timeRange}`);
-        const stats = await response.json();
-        
-        document.getElementById('global-requests').textContent = formatNumber(stats.total_requests || 0);
-        document.getElementById('global-bandwidth').textContent = formatBytes(stats.total_bandwidth || 0);
-        document.getElementById('global-cache').textContent = `${stats.avg_cache_ratio || 0}%`;
-        document.getElementById('global-threats').textContent = formatNumber(stats.threats_blocked || 0);
-        
-        // Load status codes
-        document.getElementById('global-status-2xx').textContent = formatNumber(stats.status_2xx || 0);
-        document.getElementById('global-status-3xx').textContent = formatNumber(stats.status_3xx || 0);
-        document.getElementById('global-status-4xx').textContent = formatNumber(stats.status_4xx || 0);
-        document.getElementById('global-status-5xx').textContent = formatNumber(stats.status_5xx || 0);
-        
-        // Load chart
-        await loadGlobalChartData(timeRange);
-        
-    } catch (error) {
-        console.error('Error loading global analytics:', error);
-        showNotification('Failed to load analytics data', 'error');
-    }
+function setText(id, v) { const el = document.getElementById(id); if (el) el.textContent = v; }
+function setHtml(id, v) { const el = document.getElementById(id); if (el) el.innerHTML = v; }
+
+async function loadOverview(range) {
+    const s = await FC.get(`/api/v1/stats/global?range=${range}`);
+    setText('global-requests', FC.num(s.total_requests));
+    setText('global-requests-split', `${FC.num(s.cached_requests)} cached · ${FC.num(s.uncached_requests)} uncached`);
+    setHtml('global-requests-change', FC.change(s.changes.requests));
+    setText('global-bandwidth', FC.bytes(s.total_bandwidth));
+    setText('global-bandwidth-split', `${FC.bytes(s.cached_bandwidth)} cached · ${FC.bytes(s.uncached_bandwidth)} uncached`);
+    setHtml('global-bandwidth-change', FC.change(s.changes.bandwidth));
+    setText('global-visitors', FC.num(s.unique_visitors));
+    setText('global-domains', `${s.total_domains} domains`);
+    setHtml('global-visitors-change', FC.change(s.changes.visitors));
+    setText('global-threats', FC.num(s.threats_blocked));
+    setText('global-threats-split', `${FC.num(s.waf_blocked)} blocked · ${FC.num(s.waf_challenged)} challenged · ${FC.num(s.rate_limited)} rate-limited`);
+    setHtml('global-threats-change', FC.change(s.changes.threats, { invert: true }));
+    setText('global-cache', FC.pct(s.cache_hit_ratio));
+    setText('global-cacheable', `${FC.pct(s.cacheable_hit_ratio)} of cacheable requests`);
+    setHtml('global-cache-change', FC.change(s.changes.cache_hit_ratio, { points: true }));
+    setText('global-saved', FC.pct(s.bandwidth_saved_ratio));
+    setText('global-saved-bytes', `${FC.bytes(s.cached_bandwidth)} served by edge cache`);
+    setText('global-error-rate', FC.pct(s.error_rate));
+    setText('global-error-split', `${FC.num(s.status_4xx)} 4xx · ${FC.num(s.status_5xx)} 5xx`);
+    setHtml('global-errors-change', FC.change(s.changes.errors, { invert: true }));
+    setText('global-response', FC.ms(s.avg_response_time));
+    setText('global-percentiles', `p50 ${FC.ms(s.p50_response_time)} · p95 ${FC.ms(s.p95_response_time)}`);
+    setText('period-note', `All your domains · ${FC.localTime(s.start)} — ${FC.localTime(s.end)}`);
+
+    const total = s.total_requests || 0;
+    const el = document.getElementById('global-status-codes');
+    el.innerHTML = '';
+    [
+        { key: '2xx Success', requests: s.status_2xx, color: 'var(--success)' },
+        { key: '3xx Redirect', requests: s.status_3xx, color: 'var(--info)' },
+        { key: '4xx Client error', requests: s.status_4xx, color: 'var(--warning)' },
+        { key: '5xx Server error', requests: s.status_5xx, color: 'var(--error)' },
+    ].forEach(c => {
+        const row = document.createElement('div');
+        FC.renderTop(row, [{ ...c, percentage: total ? c.requests / total * 100 : 0 }], { color: c.color });
+        el.appendChild(row);
+    });
 }
 
-async function loadDomainPerformance(range) {
-    try {
-        const response = await fetch(`/api/v1/stats/domains?range=${range}`);
-        const data = await response.json();
-        
-        const container = document.getElementById('domain-performance');
-        
-        if (data.length === 0) {
-            container.innerHTML = '<p style="text-align: center; color: var(--text-muted); padding: 24px;">No domains yet</p>';
-            return;
-        }
-        
-        container.innerHTML = data.map(domain => `
-            <div class="glass-card-sm mb-2">
-                <div class="flex-between">
-                    <div style="flex: 1;">
-                        <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 8px;">
-                            <a href="/domains/${domain.id}/analytics" style="font-weight: 600; color: var(--text-primary); text-decoration: none;">
-                                ${domain.name}
-                            </a>
-                            <span class="badge ${domain.status === 'active' ? 'badge-success' : 'badge-secondary'}">
-                                ${domain.status}
-                            </span>
-                        </div>
-                        <div style="display: flex; gap: 24px; font-size: 13px; color: var(--text-secondary);">
-                            <span><i class="fas fa-exchange-alt"></i> ${formatNumber(domain.requests)} requests</span>
-                            <span><i class="fas fa-database"></i> ${formatBytes(domain.bandwidth)}</span>
-                            <span><i class="fas fa-bolt"></i> ${domain.cache_ratio}% cached</span>
-                        </div>
-                    </div>
-                    <a href="/domains/${domain.id}/analytics" class="btn btn-secondary btn-sm">
-                        <i class="fas fa-chart-line"></i> View
-                    </a>
-                </div>
-            </div>
-        `).join('');
-    } catch (error) {
-        console.error('Error loading domain performance:', error);
-    }
-}
-
-async function loadGlobalGeo(range) {
-    try {
-        const response = await fetch(`/api/v1/stats/geo?range=${range}`);
-        const data = await response.json();
-        
-        const container = document.getElementById('global-geo');
-        
-        if (data.length === 0) {
-            container.innerHTML = '<p style="text-align: center; color: var(--text-muted); padding: 24px;">No data</p>';
-            return;
-        }
-        
-        container.innerHTML = data.slice(0, 5).map((item, index) => `
-            <div class="flex-between mb-2" style="padding: 4px 0;">
-                <span style="font-size: 13px;">
-                    <span style="color: var(--text-muted);">${index + 1}.</span>
-                    ${escapeHtml(item.country)}
-                </span>
-                <span style="font-weight: 600; font-size: 13px;">${formatNumber(item.requests)}</span>
-            </div>
-        `).join('');
-    } catch (error) {
-        console.error('Error loading geo data:', error);
-    }
-}
-
-async function loadEdgeNodesPerformance(range) {
-    try {
-        const response = await fetch(`/api/v1/stats/edge-nodes?range=${range}`);
-        const data = await response.json();
-        
-        const container = document.getElementById('edge-nodes-performance');
-        
-        if (data.length === 0) {
-            container.innerHTML = '<p style="text-align: center; color: var(--text-muted); padding: 24px;">No edge nodes configured</p>';
-            return;
-        }
-        
-        container.innerHTML = data.map(node => `
-            <div class="glass-card-sm mb-2">
-                <div class="flex-between">
-                    <div style="flex: 1;">
-                        <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 8px;">
-                            <span style="font-weight: 600;">${escapeHtml(node.name)}</span>
-                            <span class="badge ${node.status === 'active' ? 'badge-success' : 'badge-error'}">
-                                ${node.status}
-                            </span>
-                            <span style="font-size: 13px; color: var(--text-muted);">
-                                <i class="fas fa-map-marker-alt"></i> ${escapeHtml(node.location)}
-                            </span>
-                        </div>
-                        <div style="display: flex; gap: 24px; font-size: 13px; color: var(--text-secondary);">
-                            <span><i class="fas fa-exchange-alt"></i> ${formatNumber(node.requests)} req/s</span>
-                            <span><i class="fas fa-clock"></i> ${node.avg_latency}ms latency</span>
-                            <span><i class="fas fa-memory"></i> ${node.cpu_usage}% CPU</span>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        `).join('');
-    } catch (error) {
-        console.error('Error loading edge nodes performance:', error);
-    }
-}
-
-function formatNumber(num) {
-    if (num >= 1000000) return (num / 1000000).toFixed(1) + 'M';
-    if (num >= 1000) return (num / 1000).toFixed(1) + 'K';
-    return num.toString();
-}
-
-function formatBytes(bytes) {
-    if (bytes >= 1073741824) return (bytes / 1073741824).toFixed(2) + ' GB';
-    if (bytes >= 1048576) return (bytes / 1048576).toFixed(2) + ' MB';
-    if (bytes >= 1024) return (bytes / 1024).toFixed(2) + ' KB';
-    return bytes + ' B';
+async function loadChart(range) {
+    lastSeries = await FC.get(`/api/v1/stats/global/timeseries?range=${range}`);
+    chart = FC.trafficChart(document.getElementById('global-traffic-chart'), chart, lastSeries, chartMetric);
 }
 
 function changeGlobalChartMetric(metric) {
-    globalChartMetric = metric;
-    
-    // Update buttons
-    const buttons = document.querySelectorAll('[onclick^="changeGlobalChartMetric"]');
-    buttons.forEach(btn => {
-        if (btn.getAttribute('onclick').includes(`'${metric}'`)) {
-            btn.classList.remove('btn-secondary');
-            btn.classList.add('btn-primary');
-        } else {
-            btn.classList.remove('btn-primary');
-            btn.classList.add('btn-secondary');
-        }
+    chartMetric = metric;
+    document.getElementById('btn-metric-requests').className = 'btn btn-sm ' + (metric === 'requests' ? 'btn-primary' : 'btn-secondary');
+    document.getElementById('btn-metric-bandwidth').className = 'btn btn-sm ' + (metric === 'bandwidth' ? 'btn-primary' : 'btn-secondary');
+    if (lastSeries) chart = FC.trafficChart(document.getElementById('global-traffic-chart'), chart, lastSeries, chartMetric);
+}
+
+const DOMAIN_COLUMNS = [
+    { key: 'name', title: 'Domain', render: d => `<a href="/domains/${d.id}/analytics?range=${currentRange}" style="font-weight:600;">${FC.escape(d.name)}</a>` },
+    { key: 'status', title: 'Status', render: d => `<span class="badge ${d.status === 'active' ? 'badge-success' : 'badge-warning'}">${FC.escape(d.status)}</span>` },
+    { key: 'requests', title: 'Requests', render: d => FC.num(d.requests) },
+    { key: 'bandwidth', title: 'Bandwidth', render: d => FC.bytes(d.bandwidth) },
+    { key: 'cache_ratio', title: 'Cached', render: d => FC.pct(d.cache_ratio) },
+    { key: 'threats', title: 'Threats', render: d => d.threats ? `<span style="color:var(--error);">${FC.num(d.threats)}</span>` : '0' },
+    { key: 'error_rate', title: 'Errors', render: d => `${FC.pct(d.error_rate)} <span style="color:var(--text-muted);font-size:12px;">(${FC.num(d.errors)})</span>` },
+    { key: 'avg_response_time', title: 'Avg time', render: d => FC.ms(d.avg_response_time) },
+];
+
+function renderDomains() {
+    const el = document.getElementById('domain-performance');
+    if (!domainRows.length) return FC.empty(el, 'No domains');
+    const rows = [...domainRows].sort((a, b) => {
+        const x = a[domainSort.key], y = b[domainSort.key];
+        const cmp = typeof x === 'string' ? x.localeCompare(y) : (x || 0) - (y || 0);
+        return domainSort.desc ? -cmp : cmp;
     });
-    
-    // Reload chart data
-    const timeRange = document.getElementById('time-range').value;
-    loadGlobalChartData(timeRange);
+    el.innerHTML = `<table class="data-table"><thead><tr>${DOMAIN_COLUMNS.map(c =>
+        `<th onclick="sortDomains('${c.key}')">${c.title}${domainSort.key === c.key ? (domainSort.desc ? ' ▾' : ' ▴') : ''}</th>`).join('')}
+        </tr></thead><tbody>${rows.map(d => `<tr>${DOMAIN_COLUMNS.map(c => `<td>${c.render(d)}</td>`).join('')}</tr>`).join('')}</tbody></table>`;
 }
 
-async function loadGlobalChartData(timeRange) {
+function sortDomains(key) {
+    domainSort = { key, desc: domainSort.key === key ? !domainSort.desc : key !== 'name' };
+    renderDomains();
+}
+
+async function loadDomainPerformance(range) {
+    const el = document.getElementById('domain-performance');
+    FC.loading(el);
     try {
-        const response = await fetch(`/api/v1/stats/global/timeseries?range=${timeRange}&metric=${globalChartMetric}`);
-        const result = await response.json();
-        
-        renderGlobalChart(result.labels, result.data);
-        
-    } catch (error) {
-        console.error('Error loading global chart data:', error);
-    }
+        domainRows = await FC.get(`/api/v1/stats/domains?range=${range}`);
+        renderDomains();
+    } catch (e) { FC.error(el, e); }
 }
 
-function renderGlobalChart(labels, data) {
-    const ctx = document.getElementById('global-traffic-chart').getContext('2d');
-    
-    if (globalTrafficChart) {
-        globalTrafficChart.destroy();
-    }
-    
-    const isBandwidth = globalChartMetric === 'bandwidth';
-    const label = isBandwidth ? 'Bandwidth (Bytes)' : 'Requests';
-    const borderColor = isBandwidth ? '#3b82f6' : '#8b5cf6'; // Purple for global
-    const backgroundColor = isBandwidth ? 'rgba(59, 130, 246, 0.1)' : 'rgba(139, 92, 246, 0.1)';
-    
-    globalTrafficChart = new Chart(ctx, {
-        type: 'line',
-        data: {
-            labels: labels,
-            datasets: [{
-                label: label,
-                data: data,
-                borderColor: borderColor,
-                backgroundColor: backgroundColor,
-                borderWidth: 2,
-                fill: true,
-                tension: 0.4
-            }]
-        },
-        options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            plugins: {
-                legend: {
-                    display: false
-                },
-                tooltip: {
-                    mode: 'index',
-                    intersect: false,
-                    callbacks: {
-                        label: function(context) {
-                            let label = context.dataset.label || '';
-                            if (label) {
-                                label += ': ';
-                            }
-                            if (isBandwidth) {
-                                label += formatBytes(context.parsed.y);
-                            } else {
-                                label += formatNumber(context.parsed.y);
-                            }
-                            return label;
-                        }
-                    }
-                }
-            },
-            scales: {
-                y: {
-                    beginAtZero: true,
-                    grid: {
-                        color: 'rgba(255, 255, 255, 0.05)'
-                    },
-                    ticks: {
-                        callback: function(value) {
-                            if (isBandwidth) {
-                                return formatBytes(value);
-                            }
-                            return formatNumber(value);
-                        }
-                    }
-                },
-                x: {
-                    grid: {
-                        display: false
-                    }
-                }
-            },
-            interaction: {
-                mode: 'nearest',
-                axis: 'x',
-                intersect: false
-            }
-        }
-    });
-}
-
-async function exportGlobalData() {
-    const timeRange = document.getElementById('time-range').value;
-    showNotification('Exporting global data...', 'info');
-    
+async function loadEdgeNodes(range) {
+    const el = document.getElementById('edge-nodes-performance');
+    FC.loading(el);
     try {
-        // Download CSV
-        const response = await fetch(`/api/v1/export/global?range=${timeRange}&format=csv`);
-        if (!response.ok) throw new Error('Export failed');
-        
-        const blob = await response.blob();
-        const url = window.URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `global_analytics_${timeRange}.csv`;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        window.URL.revokeObjectURL(url);
-        
-        showNotification('Data exported successfully', 'success');
-    } catch (error) {
-        console.error('Export failed:', error);
-        showNotification('Failed to export data', 'error');
-    }
+        const nodes = await FC.get(`/api/v1/stats/edge-nodes?range=${range}`);
+        if (!nodes.length) return FC.empty(el, 'No edge nodes');
+        const badge = n => {
+            if (!n.enabled) return '<span class="badge">disabled</span>';
+            const cls = n.status === 'online' ? 'badge-success' : n.status === 'maintenance' ? 'badge-warning' : 'badge-error';
+            return `<span class="badge ${cls}">${FC.escape(n.status)}</span>`;
+        };
+        const heartbeat = n => n.heartbeat_age == null ? '—' :
+            `<span style="color:${n.heartbeat_age > 180 ? 'var(--error)' : 'var(--text-secondary)'};">${FC.relative(n.last_heartbeat)}</span>`;
+        el.innerHTML = `<table class="data-table"><thead><tr>
+            <th>Node</th><th>Status</th><th>Requests</th><th>Req/s</th><th>Bandwidth</th><th>Cached</th>
+            <th>Errors</th><th>Avg time</th><th>CPU</th><th>Memory</th><th>Disk</th><th>Heartbeat</th>
+            </tr></thead><tbody>${nodes.map(n => `<tr>
+            <td><strong>${FC.escape(n.name)}</strong><div class="mono" style="font-size:12px;color:var(--text-muted);">${FC.escape(n.ip_address)}${n.city ? ' · ' + FC.escape(n.city) : ''}</div></td>
+            <td>${badge(n)}</td>
+            <td>${FC.num(n.requests)}</td>
+            <td>${n.rps}</td>
+            <td>${FC.bytes(n.bandwidth)}</td>
+            <td>${FC.pct(n.cache_ratio)}</td>
+            <td>${FC.pct(n.error_rate)}</td>
+            <td>${FC.ms(n.avg_latency)}</td>
+            <td>${FC.pct(n.cpu_usage)}</td>
+            <td>${FC.pct(n.memory_usage)}</td>
+            <td>${FC.pct(n.disk_usage)}</td>
+            <td>${heartbeat(n)}</td>
+            </tr>`).join('')}</tbody></table>`;
+    } catch (e) { FC.error(el, e); }
 }
 
-// Initialize
+async function loadTop(dimension, elementId, opts) {
+    const el = document.getElementById(elementId);
+    FC.loading(el);
+    try {
+        const data = await FC.get(`/api/v1/stats/top?dimension=${dimension}&range=${currentRange}&limit=10`);
+        FC.renderTop(el, data.items, { ...(opts || {}), partial: data.partial });
+    } catch (e) { FC.error(el, e); }
+}
+
+async function loadSecurity(range) {
+    const el = document.getElementById('global-security');
+    FC.loading(el);
+    try {
+        const events = await FC.get(`/api/v1/stats/security?range=${range}&limit=10`);
+        if (!events.length) return FC.empty(el, 'No blocked or rate-limited requests in this period');
+        el.innerHTML = events.map(e => `
+            <div class="flex-between" style="gap:12px;padding:8px 0;border-bottom:1px solid var(--glass-border);font-size:13px;">
+                <div style="min-width:0;">
+                    <span class="badge ${e.action === 'blocked' ? 'badge-error' : 'badge-warning'}">${FC.escape(e.action)}</span>
+                    <strong>${FC.escape(e.domain || e.host || '')}</strong> <span class="mono">${FC.escape(e.method)} ${FC.escape(e.path)}</span>
+                    <div style="color:var(--text-muted);">${FC.country(e.country_code)} · <span class="mono">${FC.escape(e.client_ip)}</span></div>
+                </div>
+                <span style="color:var(--text-muted);white-space:nowrap;" title="${FC.escape(FC.localTime(e.timestamp))}">${FC.relative(e.timestamp)}</span>
+            </div>`).join('');
+    } catch (e) { FC.error(el, e); }
+}
+
+async function loadGlobalAnalytics(range) {
+    currentRange = range;
+    const guard = p => p.catch(e => console.error(e));
+    await Promise.all([
+        guard(loadOverview(range)),
+        guard(loadChart(range)),
+        loadDomainPerformance(range),
+        loadEdgeNodes(range),
+        loadTop('countries', 'global-geo', { format: i => FC.country(i.key) }),
+        loadTop('paths', 'global-paths', { format: i => `<span class="mono">${FC.escape(i.key)}</span>` }),
+        loadTop('referrers', 'global-referrers', { emptyText: 'No referrer headers in this period' }),
+        loadTop('browsers', 'global-browsers'),
+        loadSecurity(range),
+    ]);
+}
+
+function exportGlobalData(format) {
+    FC.download(`/api/v1/export/global?range=${currentRange}&format=${format}`, `global_analytics_${currentRange}.${format}`);
+}
+
 document.addEventListener('DOMContentLoaded', () => {
-    const range = document.getElementById('time-range').value;
-    loadGlobalAnalytics();
-    loadDomainPerformance(range);
-    loadGlobalGeo(range);
-    loadEdgeNodesPerformance(range);
-    
-    // Listen for time range changes
-    document.getElementById('time-range').addEventListener('change', () => {
-        const range = document.getElementById('time-range').value;
-        loadGlobalAnalytics();
-        loadDomainPerformance(range);
-        loadGlobalGeo(range);
-        loadEdgeNodesPerformance(range);
-    });
+    currentRange = FC.initRange(document.getElementById('time-range'), loadGlobalAnalytics);
+    loadGlobalAnalytics(currentRange);
+    setInterval(() => { if (currentRange === '1h' || currentRange === '24h') loadGlobalAnalytics(currentRange); }, 60000);
 });
 </script>
 {% endblock %}

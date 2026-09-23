@@ -64,10 +64,25 @@ async function silentRefresh() {
     return _refreshPromise;
 }
 
-// Global Fetch Interceptor — retry once with refreshed token on 401
+// Global Fetch Interceptor — Bearer-токен к своим /api/ и повтор после 401.
+//
+// Экраны зовут fetch() без заголовка Authorization, а API принимает только
+// Bearer: каждый запрос сначала получал 401, перевыпускал токен и повторялся.
+// Теперь токен подставляется сразу, если вызывающий код не передал свой.
+function withAuthHeader(input, init) {
+    const url = typeof input === 'string' ? input : (input && input.url) || '';
+    const sameOriginApi = url.startsWith('/api/') || url.startsWith(window.location.origin + '/api/');
+    const token = getToken();
+    if (!sameOriginApi || !token) return [input, init];
+    const headers = new Headers((init && init.headers) || (input instanceof Request ? input.headers : undefined));
+    if (!headers.has('Authorization')) headers.set('Authorization', 'Bearer ' + token);
+    return [input, { ...(init || {}), headers }];
+}
+
 (function() {
     const originalFetch = window.fetch;
     window.fetch = function(...args) {
+        args = withAuthHeader(args[0], args[1]);
         return originalFetch.apply(this, args).then(async response => {
             if (response.status === 401) {
                 const currentPath = window.location.pathname;
