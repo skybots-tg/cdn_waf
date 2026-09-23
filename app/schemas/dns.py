@@ -1,9 +1,9 @@
 """DNS schemas"""
 from datetime import datetime
 from typing import Optional, List
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
-from app.schemas.validators import validate_dns_name, validate_dns_content
+from app.schemas.validators import proxy_refusal, validate_dns_name, validate_dns_content
 
 
 class DNSRecordCreate(BaseModel):
@@ -26,6 +26,13 @@ class DNSRecordCreate(BaseModel):
     @classmethod
     def _v_content(cls, v):
         return validate_dns_content(v)
+
+    @model_validator(mode="after")
+    def _v_proxied(self):
+        refusal = proxy_refusal(self.name, self.type) if self.proxied else None
+        if refusal:
+            raise ValueError(refusal)
+        return self
 
 
 class DNSRecordImport(BaseModel):

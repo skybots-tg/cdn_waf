@@ -7,6 +7,7 @@ re-validates as defence in depth.
 """
 import ipaddress
 import re
+from typing import Optional
 
 # Characters that can terminate/rewrite an nginx directive or a shell/path
 # context. None of them appear in a legitimate hostname, URL pattern or path.
@@ -88,6 +89,24 @@ def validate_ip_or_cidr(value: str) -> str:
     except ValueError:
         raise ValueError("invalid IP address or CIDR")
     return v
+
+
+PROXIABLE_TYPES = ("A", "AAAA", "CNAME")
+
+
+def proxy_refusal(name: Optional[str], record_type: Optional[str]) -> Optional[str]:
+    """Почему запись нельзя пускать через CDN (None — можно).
+
+    Как у Cloudflare: проксируется только то, что может быть адресом сайта.
+    Служебные имена с подчёркиванием (_domainkey, _dmarc, _acme-challenge)
+    сайтом не бывают. До 23.09.2026 скан зоны проксировал CNAME DKIM-ключей
+    Proton у reshu.app, и DNS отдавал на этом имени сразу CNAME и адреса нод.
+    """
+    if record_type not in PROXIABLE_TYPES:
+        return f"{record_type} records cannot be proxied"
+    if any(label.startswith("_") for label in (name or "").split(".")):
+        return "names with a '_' label (DKIM, DMARC, ACME) cannot be proxied"
+    return None
 
 
 def sanitize_condition_values(conditions):

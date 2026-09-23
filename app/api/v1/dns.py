@@ -7,6 +7,7 @@ from sqlalchemy import select
 from app.core.database import get_db
 from app.core.security import get_current_active_user
 from app.schemas.dns import DNSRecordCreate, DNSRecordUpdate, DNSRecordResponse, DNSRecordImport
+from app.schemas.validators import proxy_refusal
 from app.models.user import User
 from app.models.dns import DNSRecord
 from app.models.domain import Domain
@@ -181,6 +182,11 @@ async def update_dns_record(
 
     for field, value in update_data.items():
         setattr(record, field, value)
+
+    refusal = proxy_refusal(record.name, record.type) if record.proxied else None
+    if refusal:
+        await db.rollback()
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=refusal)
     
     await db.commit()
     await db.refresh(record)

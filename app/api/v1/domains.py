@@ -24,6 +24,7 @@ from app.schemas.domain import (
     DomainUpdate,
     DomainResponse,
 )
+from app.schemas.validators import proxy_refusal
 from app.services.domain_service import DomainService
 from app.models.user import User
 from app.models.domain import Domain, DomainStatus
@@ -164,7 +165,9 @@ async def scan_dns_records(
                 "type": record_type,
                 "name": name_label,
                 "ttl": ttl,
-                "proxied": record_type in ["A", "AAAA", "CNAME"],
+                # Через CDN — только адреса сайтов; DKIM и прочие служебные
+                # имена остаются как есть (app/schemas/validators.py).
+                "proxied": proxy_refusal(name_label, record_type) is None,
             }
 
             if record_type in ("A", "AAAA"):
