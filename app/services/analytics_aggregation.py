@@ -137,13 +137,72 @@ async def aggregate_hourly_stats(
     return len(rows)
 
 
-async def aggregate_recent_hours(db: AsyncSession, hours: int = RECENT_HOURS) -> int:
-    """Пересчитать текущий и несколько прошедших часов (идемпотентно)."""
+# Часы, в которые приём логов положил строки (app/api/internal_logs.py).
+DIRTY_HOURS_KEY = "analytics:dirty_hours"
+_HOUR_FMT = "%Y-%m-%dT%H"
+
+
+async def _redis():
+    import redis.asyncio as aioredis
+
+    return aioredis.from_url(settings.REDIS_URL, decode_responses=True)
+
+
+async def _close(client) -> None:
+    closer = getattr(client, "aclose", None) or client.close
+    await closer()
+
+
+async def pop_dirty_hours(limit: int = 5000) -> List[datetime]:
+    """Забрать помеченные часы (SPOP — атомарно, двум воркерам не достанется одно)."""
+    client = await _redis()
+    try:
+        values = await client.spop(DIRTY_HOURS_KEY, limit) or []
+    finally:
+        await _close(client)
+    hours = []
+    for value in values:
+        try:
+            hours.append(datetime.strptime(value, _HOUR_FMT))
+        except ValueError:
+            continue
+    return hours
+
+
+async def _return_dirty_hours(hours: List[datetime]) -> None:
+    if not hours:
+        return
+    client = await _redis()
+    try:
+        await client.sadd(DIRTY_HOURS_KEY, *[h.strftime(_HOUR_FMT) for h in hours])
+    finally:
+        await _close(client)
+
+
+async def aggregate_recent_hours(db: AsyncSession, hours: int = RECENT_HOURS) -> Dict[str, int]:
+    """Пересчитать последние часы и все часы, куда дошли опоздавшие логи.
+
+    Идемпотентно (upsert). Если в опоздавших часах есть прошедшие сутки, их
+    суточные своды тоже пересчитываются — иначе «30 дней» и «6 месяцев»
+    расходились бы с «24 часами».
+    """
     current = datetime.utcnow().replace(minute=0, second=0, microsecond=0)
-    total = 0
-    for back in range(hours, -1, -1):
-        total += await aggregate_hourly_stats(db, current - timedelta(hours=back))
-    return total
+    targets = {current - timedelta(hours=back) for back in range(hours + 1)}
+    dirty = await pop_dirty_hours()
+    targets |= set(dirty)
+    try:
+        rows = 0
+        for hour in sorted(targets):
+            rows += await aggregate_hourly_stats(db, hour)
+        today = datetime.utcnow().date()
+        days = sorted({h.date() for h in dirty if h.date() < today})
+        for day in days:
+            await aggregate_day(db, day)
+    except Exception:
+        # Не потерять пометки: следующий запуск через 5 минут повторит.
+        await _return_dirty_hours(dirty)
+        raise
+    return {"hours": len(targets), "late_hours": len(dirty), "days": len(days), "rows": rows}
 
 
 async def aggregate_daily_stats(

@@ -119,6 +119,10 @@ class _FakeRedis:
     async def expire(self, key, seconds):
         return True
 
+    async def sadd(self, key, *values):
+        self.values.setdefault(key, set()).update(values)
+        return len(values)
+
 
 DiskUsage = namedtuple("DiskUsage", "total used free")
 
@@ -162,3 +166,14 @@ def test_budget_without_redis_still_writes(monkeypatch):
         lambda _p: DiskUsage(100 * 1024 ** 3, 50 * 1024 ** 3, 50 * 1024 ** 3),
     )
     assert asyncio.run(internal_logs._raw_budget(10)) == 10
+
+
+def test_late_rows_mark_their_hours_dirty(fake_env):
+    """Опоздавшие строки помечают свой час — свод пересчитает и прошедший."""
+    rows = [
+        internal_logs._row(dict(LINE, timestamp="2026-09-23T02:15:00+00:00"), 6, 13, "perek.us"),
+        internal_logs._row(dict(LINE, timestamp="2026-09-23T02:45:00+00:00"), 6, 13, "perek.us"),
+        internal_logs._row(dict(LINE, timestamp="2026-09-23T05:01:00+00:00"), 6, 13, "perek.us"),
+    ]
+    asyncio.run(internal_logs._mark_dirty_hours(rows))
+    assert fake_env.values[internal_logs.DIRTY_HOURS_KEY] == {"2026-09-23T02", "2026-09-23T05"}

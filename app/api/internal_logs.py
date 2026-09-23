@@ -17,6 +17,7 @@ from app.core.redis import redis_client
 from app.models.edge_node import EdgeNode
 from app.models.domain import Domain, DomainStatus
 from app.models.log import RequestLog
+from app.services.analytics_aggregation import DIRTY_HOURS_KEY
 
 logger = logging.getLogger(__name__)
 
@@ -116,6 +117,8 @@ async def receive_logs(
         await db.commit()
 
     await _count(unmatched=unmatched, dropped=dropped)
+    if rows:
+        await _mark_dirty_hours(rows)
     return {
         "status": "ok",
         "received": len(logs),
@@ -282,6 +285,25 @@ async def _raw_budget(wanted: int) -> int:
             total, limit, wanted - allowed,
         )
     return allowed
+
+
+async def _mark_dirty_hours(rows: List[Dict[str, Any]]) -> None:
+    """Запомнить часы, в которые легли строки, — их пересчитает свод.
+
+    Нода, пока панель не отвечала, копит до 5000 строк и досылает их потом,
+    в том числе за часы, которые почасовой свод давно закрыл. Без пометки
+    такие строки есть в сырых логах, но не в сводах — и итоги экранов
+    расходятся с топами (так было после включения приёма 23.09.2026).
+    """
+    client = redis_client.redis
+    if client is None:
+        return
+    hours = {row["timestamp"].strftime("%Y-%m-%dT%H") for row in rows}
+    try:
+        await client.sadd(DIRTY_HOURS_KEY, *hours)
+        await client.expire(DIRTY_HOURS_KEY, 7 * 24 * 3600)
+    except Exception as e:  # noqa: BLE001 — свод всё равно пересчитает последние часы
+        logger.debug("Приём логов: часы не помечены: %s", e)
 
 
 async def _count(*, unmatched: int, dropped: int) -> None:
