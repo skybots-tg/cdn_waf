@@ -69,12 +69,31 @@ class AlertService:
         message: str,
         level: AlertLevel = AlertLevel.WARNING,
         tag_user: bool = False,
+        category: Optional[str] = None,
+        event: Optional[str] = None,
     ) -> bool:
+        """Оповещение в Telegram и на вебхуки из настроек.
+
+        ``category`` — переключатель вкладки «Notifications»
+        (app/services/notifications.py): выключен — оповещение не уходит.
+        Без категории (ноды CDN и DNS) оповещение уходит всегда.
+        """
+        from app.services import notifications
+
+        prefs = await notifications.load()
+        if category and not prefs.get(category, True):
+            logger.info("Alert %r skipped: %s notifications are off", title, category)
+            return False
         emoji = LEVEL_EMOJI.get(level, "")
         text = f"{emoji} <b>{title}</b>\n\n{message}"
         if tag_user:
             text += AlertService._user_mention()
-        return await AlertService.send_telegram(text)
+        sent = await AlertService.send_telegram(text)
+        await notifications.post_webhooks(
+            prefs.get("webhooks") or [], title=title, message=message,
+            level=getattr(level, "value", level), event=event or category,
+        )
+        return sent
 
     # ---- convenience shortcuts ----
 
@@ -94,6 +113,8 @@ class AlertService:
                 "Origin выведен из ротации."
             ),
             level=AlertLevel.WARNING,
+            category="downtime",
+            event="origin_down",
         )
 
     @staticmethod
@@ -110,6 +131,8 @@ class AlertService:
                 "Origin снова в ротации."
             ),
             level=AlertLevel.INFO,
+            category="downtime",
+            event="origin_recovered",
         )
 
     @staticmethod
@@ -125,6 +148,8 @@ class AlertService:
             message=msg,
             level=AlertLevel.CRITICAL,
             tag_user=True,
+            category="downtime",
+            event="all_origins_down",
         )
 
     @staticmethod
@@ -144,6 +169,8 @@ class AlertService:
             ),
             level=AlertLevel.CRITICAL,
             tag_user=True,
+            category="downtime",
+            event="prolonged_outage",
         )
 
     # ---- edge / DNS node alerts ----

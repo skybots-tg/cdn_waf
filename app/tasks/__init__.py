@@ -14,6 +14,7 @@ celery_app = Celery(
         "app.tasks.analytics_tasks",
         "app.tasks.health_tasks",
         "app.tasks.edge_health_tasks",
+        "app.tasks.notification_tasks",
     ]
 )
 
@@ -86,6 +87,23 @@ celery_app.conf.beat_schedule = {
     "aggregate-daily-stats": {
         "task": "app.tasks.analytics.aggregate_daily",
         "schedule": crontab(hour=0, minute=15),  # Daily at 00:15 UTC
+    },
+    # Уведомления (вкладка «Notifications» в настройках). Время — UTC, 06:00 = 09:00 МСК.
+    "notify-ssl-expiry-daily": {
+        "task": "app.tasks.notify.ssl_expiry",
+        "schedule": crontab(hour=6, minute=0),
+    },
+    "notify-security-spikes-hourly": {
+        "task": "app.tasks.notify.security_spikes",
+        "schedule": crontab(minute=7),  # после пересчёта свода за прошедший час
+    },
+    "notify-usage-hourly": {
+        "task": "app.tasks.notify.usage",
+        "schedule": crontab(minute=12),
+    },
+    "notify-weekly-report": {
+        "task": "app.tasks.notify.weekly_report",
+        "schedule": crontab(day_of_week=1, hour=6, minute=5),
     },
     "cleanup-old-analytics-data": {
         "task": "app.tasks.analytics.cleanup_old_data",

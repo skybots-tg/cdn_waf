@@ -11,6 +11,7 @@ from app.models.edge_node import EdgeNode
 from app.models.dns_node import DNSNode
 from app.models.log import RequestLog
 from app.models.analytics import HourlyStats, DailyStats, GeoStats, TopPathsStats, ErrorStats
+from app.models.notification import NotificationSettings
 
 # Правка настроек домена поднимает config_version edge-нод (после всех моделей).
 from app.models import edge_signal  # noqa: E402,F401

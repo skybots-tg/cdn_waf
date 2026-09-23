@@ -232,19 +232,22 @@
     <!-- Notifications Tab -->
     <div id="tab-notifications" class="settings-tab-content" style="display: none;">
         <div class="glass-card mb-3">
-            <h2 style="font-size: 20px; font-weight: 600; margin-bottom: 16px;">
-                Email Notifications
+            <h2 style="font-size: 20px; font-weight: 600; margin-bottom: 8px;">
+                Telegram Notifications
             </h2>
+            <p id="notify-channel" style="font-size: 13px; color: var(--text-secondary); margin-bottom: 16px;">
+                Loading…
+            </p>
             <div class="form-group">
                 <div style="display: flex; align-items: center; justify-content: space-between;">
                     <div>
                         <div style="font-weight: 500; margin-bottom: 4px;">Security Alerts</div>
                         <div style="font-size: 13px; color: var(--text-secondary);">
-                            Get notified about suspicious activity and security events
+                            A spike of WAF-blocked and rate-limited requests on a domain (5× the usual hour, at least 200)
                         </div>
                     </div>
                     <label class="toggle-switch">
-                        <input type="checkbox" id="notify-security" checked>
+                        <input type="checkbox" id="notify-security">
                         <span class="toggle-slider"></span>
                     </label>
                 </div>
@@ -254,7 +257,7 @@
                     <div>
                         <div style="font-weight: 500; margin-bottom: 4px;">Downtime Alerts</div>
                         <div style="font-size: 13px; color: var(--text-secondary);">
-                            Receive alerts when your sites are down or experiencing issues
+                            An origin stops responding or comes back. Edge and DNS node alerts are always sent
                         </div>
                     </div>
                     <label class="toggle-switch">
@@ -268,7 +271,7 @@
                     <div>
                         <div style="font-weight: 500; margin-bottom: 4px;">SSL Certificate Expiry</div>
                         <div style="font-size: 13px; color: var(--text-secondary);">
-                            Get reminders before your SSL certificates expire
+                            Daily reminder when a certificate expires within 14 days and auto-renewal did not replace it
                         </div>
                     </div>
                     <label class="toggle-switch">
@@ -282,7 +285,7 @@
                     <div>
                         <div style="font-weight: 500; margin-bottom: 4px;">Usage & Quota Warnings</div>
                         <div style="font-size: 13px; color: var(--text-secondary);">
-                            Alerts when approaching bandwidth or request limits
+                            Panel limits: raw request logs dropped by the hourly budget, low free disk space
                         </div>
                     </div>
                     <label class="toggle-switch">
@@ -296,7 +299,7 @@
                     <div>
                         <div style="font-weight: 500; margin-bottom: 4px;">Weekly Reports</div>
                         <div style="font-size: 13px; color: var(--text-secondary);">
-                            Receive weekly summary of your traffic and performance
+                            Every Monday at 09:00 MSK: requests, visitors, cache, threats and 5xx per domain
                         </div>
                     </div>
                     <label class="toggle-switch">
@@ -305,9 +308,14 @@
                     </label>
                 </div>
             </div>
-            <button class="btn btn-primary" onclick="saveNotificationSettings()">
-                <i class="fas fa-save"></i> Save Preferences
-            </button>
+            <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+                <button class="btn btn-primary" onclick="saveNotificationSettings()">
+                    <i class="fas fa-save"></i> Save Preferences
+                </button>
+                <button class="btn btn-secondary" onclick="sendTestNotification()">
+                    <i class="fas fa-paper-plane"></i> Send Test
+                </button>
+            </div>
         </div>
 
         <div class="glass-card">
@@ -315,11 +323,20 @@
                 Webhook Notifications
             </h2>
             <p style="color: var(--text-secondary); margin-bottom: 16px;">
-                Send notifications to external services via webhooks (Slack, Discord, etc.)
+                The same alerts are POSTed as JSON to these URLs. The body carries both
+                <code>text</code> (Slack) and <code>content</code> (Discord). Up to 5, https only.
             </p>
-            <button class="btn btn-secondary">
-                <i class="fas fa-plus"></i> Add Webhook
-            </button>
+            <div id="webhook-list" style="margin-bottom: 12px;"></div>
+            <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+                <input type="url" id="webhook-url" class="form-input" placeholder="https://hooks.slack.com/services/…"
+                       style="flex: 1; min-width: 220px;">
+                <button class="btn btn-secondary" onclick="addWebhook()">
+                    <i class="fas fa-plus"></i> Add Webhook
+                </button>
+            </div>
+            <p style="font-size: 12px; color: var(--text-muted); margin-top: 8px;">
+                Added webhooks are kept after Save Preferences.
+            </p>
         </div>
     </div>
 </div>
@@ -400,6 +417,9 @@ function loadTabData(tabName) {
         case 'security':
             loadActiveSessions();
             loadSecurityLog();
+            break;
+        case 'notifications':
+            loadNotificationSettings();
             break;
     }
 }
@@ -575,8 +595,108 @@ async function loadSecurityLog() {
     `;
 }
 
-function saveNotificationSettings() {
-    showNotification('Notification preferences saved', 'success');
+// ==================== Notifications ====================
+
+const NOTIFY_CATEGORIES = ['security', 'downtime', 'ssl', 'usage', 'weekly'];
+let notifyWebhooks = [];
+
+function notifyEscape(value) {
+    const div = document.createElement('div');
+    div.textContent = value;
+    return div.innerHTML;
+}
+
+async function loadNotificationSettings() {
+    try {
+        const response = await fetch('/api/v1/notifications/settings', {
+            headers: { 'Authorization': `Bearer ${getToken()}` }
+        });
+        if (!response.ok) throw new Error(response.status === 403 ? 'Only administrators can change notifications' : 'Failed to load');
+        const data = await response.json();
+        NOTIFY_CATEGORIES.forEach(c => { document.getElementById(`notify-${c}`).checked = !!data[c]; });
+        notifyWebhooks = data.webhooks || [];
+        renderWebhooks();
+        document.getElementById('notify-channel').textContent = data.telegram_configured
+            ? 'Alerts go to the Telegram chat configured on the server (TELEGRAM_CHAT_ID).'
+            : 'Telegram is not configured on the server (TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID) — only webhooks will receive alerts.';
+    } catch (error) {
+        document.getElementById('notify-channel').textContent = error.message;
+    }
+}
+
+function renderWebhooks() {
+    const list = document.getElementById('webhook-list');
+    if (!notifyWebhooks.length) {
+        list.innerHTML = '<p style="font-size: 13px; color: var(--text-muted);">No webhooks yet.</p>';
+        return;
+    }
+    list.innerHTML = notifyWebhooks.map((url, i) => `
+        <div style="display: flex; align-items: center; gap: 8px; padding: 8px 10px; background: var(--bg-tertiary); border-radius: var(--border-radius-sm); margin-bottom: 6px;">
+            <i class="fas fa-link" style="color: var(--text-muted);"></i>
+            <code style="flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${notifyEscape(url)}</code>
+            <button class="btn btn-secondary btn-sm" onclick="removeWebhook(${i})" title="Remove"><i class="fas fa-trash"></i></button>
+        </div>`).join('');
+}
+
+async function addWebhook() {
+    const input = document.getElementById('webhook-url');
+    const url = input.value.trim();
+    if (!url.startsWith('https://')) {
+        showNotification('Webhook must be an https:// URL', 'error');
+        return;
+    }
+    if (notifyWebhooks.length >= 5) {
+        showNotification('Up to 5 webhooks', 'error');
+        return;
+    }
+    if (!notifyWebhooks.includes(url)) notifyWebhooks.push(url);
+    input.value = '';
+    renderWebhooks();
+    await saveNotificationSettings();
+}
+
+async function removeWebhook(index) {
+    notifyWebhooks.splice(index, 1);
+    renderWebhooks();
+    await saveNotificationSettings();
+}
+
+async function saveNotificationSettings() {
+    const body = { webhooks: notifyWebhooks };
+    NOTIFY_CATEGORIES.forEach(c => { body[c] = document.getElementById(`notify-${c}`).checked; });
+    try {
+        const response = await fetch('/api/v1/notifications/settings', {
+            method: 'PUT',
+            headers: { 'Authorization': `Bearer ${getToken()}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify(body)
+        });
+        const data = await response.json();
+        if (!response.ok) {
+            const detail = Array.isArray(data.detail) ? data.detail.map(d => d.msg).join('; ') : data.detail;
+            throw new Error(detail || 'Failed to save');
+        }
+        notifyWebhooks = data.webhooks || [];
+        renderWebhooks();
+        showNotification('Notification preferences saved', 'success');
+    } catch (error) {
+        showNotification(error.message, 'error');
+        loadNotificationSettings();
+    }
+}
+
+async function sendTestNotification() {
+    try {
+        const response = await fetch('/api/v1/notifications/test', {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${getToken()}` }
+        });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.detail || 'Test failed');
+        const hooks = data.webhooks_total ? `, webhooks ${data.webhooks_delivered}/${data.webhooks_total}` : '';
+        showNotification(`Test sent: Telegram ${data.telegram ? 'OK' : 'failed'}${hooks}`, data.telegram ? 'success' : 'warning');
+    } catch (error) {
+        showNotification(error.message, 'error');
+    }
 }
 
 function confirmDeleteAccount() {
