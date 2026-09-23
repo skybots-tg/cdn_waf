@@ -3,7 +3,7 @@ from sqlalchemy import (
     Column, Integer, String, DateTime, ForeignKey, BigInteger, 
     Float, Date, UniqueConstraint, Index
 )
-from sqlalchemy.orm import relationship
+from sqlalchemy.orm import backref, relationship
 from datetime import datetime, date
 
 from app.core.database import Base
@@ -20,7 +20,7 @@ class HourlyStats(Base):
     
     # Domain reference
     domain_id = Column(Integer, ForeignKey("domains.id", ondelete="CASCADE"), nullable=True, index=True)
-    domain = relationship("Domain", backref="hourly_stats")
+    domain = relationship("Domain", backref=backref("hourly_stats", passive_deletes=True))
     
     # Edge node reference (optional, for per-node stats)
     edge_node_id = Column(Integer, ForeignKey("edge_nodes.id", ondelete="SET NULL"), nullable=True, index=True)
@@ -41,6 +41,10 @@ class HourlyStats(Base):
     cache_hits = Column(Integer, default=0)
     cache_misses = Column(Integer, default=0)
     cache_bypass = Column(Integer, default=0)
+    # Трафик, отданный из кэша ноды (HIT/STALE/UPDATING/REVALIDATED).
+    cached_bytes = Column(BigInteger, default=0, nullable=False)
+    # Ответы 429 от правил ограничения частоты — WAF их не помечает.
+    rate_limited = Column(Integer, default=0, nullable=False)
     
     # WAF metrics
     waf_blocked = Column(Integer, default=0)
@@ -70,7 +74,7 @@ class DailyStats(Base):
     
     # Domain reference
     domain_id = Column(Integer, ForeignKey("domains.id", ondelete="CASCADE"), nullable=True, index=True)
-    domain = relationship("Domain", backref="daily_stats")
+    domain = relationship("Domain", backref=backref("daily_stats", passive_deletes=True))
     
     # Request metrics
     total_requests = Column(BigInteger, default=0)
@@ -87,6 +91,10 @@ class DailyStats(Base):
     cache_hits = Column(Integer, default=0)
     cache_misses = Column(Integer, default=0)
     cache_bypass = Column(Integer, default=0)
+    # Трафик, отданный из кэша ноды (HIT/STALE/UPDATING/REVALIDATED).
+    cached_bytes = Column(BigInteger, default=0, nullable=False)
+    # Ответы 429 от правил ограничения частоты — WAF их не помечает.
+    rate_limited = Column(Integer, default=0, nullable=False)
     
     # WAF metrics
     waf_blocked = Column(Integer, default=0)
@@ -123,7 +131,7 @@ class GeoStats(Base):
     
     # Domain reference
     domain_id = Column(Integer, ForeignKey("domains.id", ondelete="CASCADE"), nullable=True, index=True)
-    domain = relationship("Domain", backref="geo_stats")
+    domain = relationship("Domain", backref=backref("geo_stats", passive_deletes=True))
     
     # Geographic info
     country_code = Column(String(2), nullable=False, index=True)
@@ -153,7 +161,7 @@ class TopPathsStats(Base):
     
     # Domain reference
     domain_id = Column(Integer, ForeignKey("domains.id", ondelete="CASCADE"), nullable=False, index=True)
-    domain = relationship("Domain", backref="top_paths_stats")
+    domain = relationship("Domain", backref=backref("top_paths_stats", passive_deletes=True))
     
     # Path info
     path = Column(String(2048), nullable=False)
@@ -191,7 +199,7 @@ class ErrorStats(Base):
     
     # Domain reference
     domain_id = Column(Integer, ForeignKey("domains.id", ondelete="CASCADE"), nullable=False, index=True)
-    domain = relationship("Domain", backref="error_stats")
+    domain = relationship("Domain", backref=backref("error_stats", passive_deletes=True))
     
     # Error info
     status_code = Column(Integer, nullable=False, index=True)

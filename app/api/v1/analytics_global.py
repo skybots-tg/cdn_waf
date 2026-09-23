@@ -1,205 +1,171 @@
-"""Global analytics endpoints (stats, geo, edge nodes, domain summaries)"""
-from fastapi import APIRouter, Depends, Query
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, desc
-from datetime import datetime, timedelta
+"""Общая аналитика: сводка по доменам, ряды, топы, ноды, события безопасности.
 
+Считает тот же слой, что и аналитика домена (``analytics_query``). Видимость —
+``visible_domain_ids``: суперпользователь видит всё, остальные — домены своих
+организаций. До 23.09.2026 сводка была только для суперпользователя, а у
+остальных экраны показывали нули из-за 403.
+"""
+from datetime import datetime
+
+from fastapi import APIRouter, Depends, Query
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.api.v1.dependencies import visible_domain_ids
 from app.core.database import get_db
-from app.core.security import (
-    get_current_active_user,
-    get_current_superuser,
-    get_allowed_domain_ids,
-)
-from app.api.v1.dependencies import get_user_org_ids
-from app.models.user import User
+from app.core.security import get_current_active_user
 from app.models.domain import Domain
 from app.models.edge_node import EdgeNode
-from app.models.log import RequestLog
-from app.models.analytics import HourlyStats, DailyStats, GeoStats
-from app.services.analytics_service import AnalyticsService
+from app.models.user import User
+from app.services import analytics_query as aq
 
 router = APIRouter()
 
 
 @router.get("/stats/global")
 async def get_global_stats(
-    range: str = Query("24h", regex="^(1h|24h|7d|30d|90d|6m)$"),
-    current_user: User = Depends(get_current_superuser),
-    db: AsyncSession = Depends(get_db)
+    range: str = Query("24h", regex=aq.RANGE_PATTERN),
+    current_user: User = Depends(get_current_active_user),
+    db: AsyncSession = Depends(get_db),
 ):
-    """
-    Get global statistics across all domains.
-    Uses aggregated data for longer time ranges for better performance.
-    """
-    return await AnalyticsService.get_global_stats_optimized(db, range)
+    """Итоги по всем видимым доменам с изменением к прошлому периоду."""
+    domain_ids = await visible_domain_ids(current_user, db)
+    data = await aq.overview(db, range, domain_ids)
+    data["total_domains"] = len(await _domains(db, domain_ids))
+    return data
 
 
 @router.get("/stats/global/timeseries")
 async def get_global_timeseries(
-    range: str = Query("24h", regex="^(1h|24h|7d|30d|90d|6m)$"),
-    metric: str = Query("requests", regex="^(requests|bandwidth)$"),
-    current_user: User = Depends(get_current_superuser),
-    db: AsyncSession = Depends(get_db)
+    range: str = Query("24h", regex=aq.RANGE_PATTERN),
+    metric: str = Query("requests", regex="^(" + "|".join(aq.SERIES) + ")$"),
+    current_user: User = Depends(get_current_active_user),
+    db: AsyncSession = Depends(get_db),
 ):
-    """Get global statistics timeseries using aggregated data"""
-    return await AnalyticsService.get_timeseries_optimized(db, range, metric)
+    domain_ids = await visible_domain_ids(current_user, db)
+    return await aq.timeseries(db, range, domain_ids, metric)
+
+
+@router.get("/stats/top")
+async def get_global_top(
+    dimension: str = Query("paths", regex=aq.DIMENSION_PATTERN),
+    range: str = Query("24h", regex=aq.RANGE_PATTERN),
+    limit: int = Query(10, ge=1, le=100),
+    current_user: User = Depends(get_current_active_user),
+    db: AsyncSession = Depends(get_db),
+):
+    domain_ids = await visible_domain_ids(current_user, db)
+    return await aq.top(db, range, dimension, domain_ids, limit)
 
 
 @router.get("/stats/domains")
 async def get_domains_stats(
-    range: str = Query("24h", regex="^(1h|24h|7d|30d)$"),
+    range: str = Query("24h", regex=aq.RANGE_PATTERN),
     current_user: User = Depends(get_current_active_user),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
 ):
-    """Get statistics for the caller's domains from aggregated data"""
-    start_time = AnalyticsService.get_time_range_start(range)
-
-    if current_user.is_superuser:
-        domains_result = await db.execute(select(Domain))
-        domains = list(domains_result.scalars().all())
-    else:
-        org_ids = await get_user_org_ids(current_user, db)
-        if org_ids:
-            domains_result = await db.execute(
-                select(Domain).where(Domain.organization_id.in_(org_ids))
-            )
-            domains = list(domains_result.scalars().all())
-        else:
-            domains = []
-
-    allowed_domain_ids = get_allowed_domain_ids(current_user)
-    if allowed_domain_ids is not None:
-        domains = [d for d in domains if d.id in allowed_domain_ids]
-
-    if range in ["7d", "30d"]:
-        start_date = start_time.date()
-        stats_query = select(
-            DailyStats.domain_id,
-            func.sum(DailyStats.total_requests).label("requests"),
-            func.sum(DailyStats.total_bytes_sent).label("bandwidth"),
-            func.sum(DailyStats.cache_hits).label("cache_hits")
-        ).where(
-            DailyStats.day >= start_date
-        ).group_by(DailyStats.domain_id)
-    else:
-        stats_query = select(
-            HourlyStats.domain_id,
-            func.sum(HourlyStats.total_requests).label("requests"),
-            func.sum(HourlyStats.total_bytes_sent).label("bandwidth"),
-            func.sum(HourlyStats.cache_hits).label("cache_hits")
-        ).where(
-            HourlyStats.hour >= start_time
-        ).group_by(HourlyStats.domain_id)
-
-    stats_result = await db.execute(stats_query)
-    stats_map = {
-        row.domain_id: {
-            "requests": row.requests or 0,
-            "bandwidth": row.bandwidth or 0,
-            "cache_hits": row.cache_hits or 0
-        }
-        for row in stats_result.all()
-    }
-
-    result = []
+    """Таблица доменов: трафик, кэш, угрозы и ошибки за период."""
+    domain_ids = await visible_domain_ids(current_user, db)
+    domains = await _domains(db, domain_ids)
+    by_domain = await aq.totals(db, aq.window(range), domain_ids, group_by="domain")
+    rows = []
     for domain in domains:
-        d_stats = stats_map.get(domain.id, {"requests": 0, "bandwidth": 0, "cache_hits": 0})
-        total_reqs = d_stats["requests"]
-        cache_hits = d_stats["cache_hits"]
-        cache_ratio = (cache_hits / total_reqs * 100) if total_reqs > 0 else 0.0
-
-        result.append({
+        m = by_domain.get(domain.id, aq.Metrics()).as_dict()
+        rows.append({
             "id": domain.id,
             "name": domain.name,
             "status": domain.status.value,
-            "requests": total_reqs,
-            "bandwidth": d_stats["bandwidth"],
-            "cache_ratio": round(cache_ratio, 1)
+            "requests": m["total_requests"],
+            "bandwidth": m["total_bandwidth"],
+            "cached_bandwidth": m["cached_bandwidth"],
+            "cache_ratio": m["cache_hit_ratio"],
+            "threats": m["threats_blocked"],
+            "errors": m["status_4xx"] + m["status_5xx"],
+            "error_rate": m["error_rate"],
+            "avg_response_time": m["avg_response_time"],
         })
-
-    return result
+    rows.sort(key=lambda r: r["requests"], reverse=True)
+    return rows
 
 
 @router.get("/stats/geo")
 async def get_geo_stats(
-    range: str = Query("24h", regex="^(1h|24h|7d|30d)$"),
-    current_user: User = Depends(get_current_superuser),
-    db: AsyncSession = Depends(get_db)
+    range: str = Query("24h", regex=aq.RANGE_PATTERN),
+    limit: int = Query(10, ge=1, le=250),
+    current_user: User = Depends(get_current_active_user),
+    db: AsyncSession = Depends(get_db),
 ):
-    """Get geographic distribution statistics from aggregated data"""
-    start_time = AnalyticsService.get_time_range_start(range)
-
-    if range in ["7d", "30d"]:
-        start_date = start_time.date()
-        query = select(
-            GeoStats.country_code,
-            func.sum(GeoStats.total_requests).label("requests")
-        ).where(
-            GeoStats.day >= start_date,
-            GeoStats.country_code.isnot(None)
-        ).group_by(
-            GeoStats.country_code
-        ).order_by(
-            desc("requests")
-        ).limit(10)
-    else:
-        query = select(
-            RequestLog.country_code,
-            func.count(RequestLog.id).label("requests")
-        ).where(
-            RequestLog.timestamp >= start_time,
-            RequestLog.country_code.isnot(None)
-        ).group_by(
-            RequestLog.country_code
-        ).order_by(
-            desc("requests")
-        ).limit(10)
-
-    result = await db.execute(query)
-
+    domain_ids = await visible_domain_ids(current_user, db)
+    result = await aq.top(db, range, "countries", domain_ids, limit)
     return [
-        {"country": row.country_code, "requests": row.requests}
-        for row in result.all()
+        {"country": i["key"], "requests": i["requests"], "visitors": i.get("visitors", 0),
+         "bytes": i["bytes"], "percentage": i["percentage"]}
+        for i in result["items"]
     ]
+
+
+@router.get("/stats/security")
+async def get_global_security_events(
+    range: str = Query("24h", regex=aq.RANGE_PATTERN),
+    limit: int = Query(50, ge=1, le=500),
+    current_user: User = Depends(get_current_active_user),
+    db: AsyncSession = Depends(get_db),
+):
+    domain_ids = await visible_domain_ids(current_user, db)
+    events = await aq.security_events(db, range, domain_ids, limit)
+    names = {d.id: d.name for d in await _domains(db, domain_ids)}
+    for event in events:
+        event["domain"] = names.get(event["domain_id"])
+    return events
 
 
 @router.get("/stats/edge-nodes")
 async def get_edge_nodes_stats(
-    current_user: User = Depends(get_current_superuser),
-    db: AsyncSession = Depends(get_db)
+    range: str = Query("24h", regex=aq.RANGE_PATTERN),
+    current_user: User = Depends(get_current_active_user),
+    db: AsyncSession = Depends(get_db),
 ):
-    """Get edge nodes performance statistics"""
-    result = await db.execute(select(EdgeNode))
-    nodes = result.scalars().all()
+    """Ноды: трафик и время ответа за период плюс состояние из heartbeat.
 
-    hour_ago = datetime.utcnow() - timedelta(hours=1)
-
-    rps_query = select(
-        HourlyStats.edge_node_id,
-        func.sum(HourlyStats.total_requests).label("count"),
-        func.avg(HourlyStats.avg_response_time).label("avg_latency")
-    ).where(
-        HourlyStats.hour >= hour_ago
-    ).group_by(HourlyStats.edge_node_id)
-
-    rps_result = await db.execute(rps_query)
-    rps_map = {
-        row.edge_node_id: {
-            "rps": round((row.count or 0) / 3600, 1),
-            "latency": round(row.avg_latency or 0, 1)
-        }
-        for row in rps_result.all()
-    }
-
-    return [
-        {
+    Раньше брался «последний час» из почасового свода, а текущий час туда
+    ещё не попадал — у всех нод всегда был 0.
+    """
+    domain_ids = await visible_domain_ids(current_user, db)
+    w = aq.window(range)
+    by_node = await aq.totals(db, w, domain_ids, group_by="node")
+    seconds = max((w.end - w.start).total_seconds(), 1)
+    nodes = (await db.execute(select(EdgeNode).order_by(EdgeNode.id))).scalars().all()
+    rows = []
+    for node in nodes:
+        m = by_node.get(node.id, aq.Metrics()).as_dict()
+        rows.append({
             "id": node.id,
             "name": node.name,
+            "ip_address": node.ip_address,
             "location": node.location_code,
+            "city": node.city,
             "status": node.status,
-            "requests": rps_map.get(node.id, {}).get("rps", 0),
-            "avg_latency": rps_map.get(node.id, {}).get("latency", 0),
-            "cpu_usage": node.cpu_usage or 0
-        }
-        for node in nodes
-    ]
+            "enabled": node.enabled,
+            "requests": m["total_requests"],
+            "rps": round(m["total_requests"] / seconds, 2),
+            "bandwidth": m["total_bandwidth"],
+            "cache_ratio": m["cache_hit_ratio"],
+            "error_rate": m["error_rate"],
+            "avg_latency": m["avg_response_time"],
+            "cpu_usage": node.cpu_usage or 0,
+            "memory_usage": node.memory_usage or 0,
+            "disk_usage": node.disk_usage or 0,
+            "last_heartbeat": aq.iso(node.last_heartbeat),
+            "heartbeat_age": (
+                int((datetime.utcnow() - node.last_heartbeat).total_seconds())
+                if node.last_heartbeat else None
+            ),
+        })
+    return rows
+
+
+async def _domains(db: AsyncSession, domain_ids):
+    q = select(Domain).order_by(Domain.name)
+    if domain_ids is not None:
+        q = q.where(Domain.id.in_(domain_ids or [-1]))
+    return list((await db.execute(q)).scalars().all())

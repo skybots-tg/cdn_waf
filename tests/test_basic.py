@@ -79,11 +79,14 @@ def test_parse_waf_conditions():
 
 
 def test_analytics_time_range():
-    """AnalyticsService.get_time_range_start returns valid offsets."""
-    from app.services.analytics_service import AnalyticsService
+    """analytics_query.window: начало периода выровнено по шагу графика."""
+    from app.services.analytics_query import window
     from datetime import datetime, timedelta
-    now = datetime.utcnow()
-    start_24h = AnalyticsService.get_time_range_start("24h")
-    assert (now - start_24h).total_seconds() < 86400 + 5
-    start_7d = AnalyticsService.get_time_range_start("7d")
-    assert (now - start_7d).days <= 7
+    now = datetime(2026, 9, 23, 10, 37, 12)
+    w24 = window("24h", now)
+    assert w24.start == datetime(2026, 9, 22, 10, 0) and w24.bucket == "hour"
+    w7 = window("7d", now)
+    assert w7.start == datetime(2026, 9, 16, 10, 0)
+    assert window("30d", now).start == datetime(2026, 8, 24)
+    assert window("1h", now).start == datetime(2026, 9, 23, 9, 37)
+    assert window("24h", now).previous().end == w24.start

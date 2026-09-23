@@ -170,18 +170,13 @@ class EdgeNodeService:
         )
         maintenance = maintenance_result.scalar() or 0
         
-        # Calculate real bandwidth (sum bytes_sent)
-        bandwidth_result = await db.execute(
-            select(func.sum(RequestLog.bytes_sent))
-        )
-        total_bytes = bandwidth_result.scalar() or 0
-        total_bandwidth_gb = round(total_bytes / (1024 * 1024 * 1024), 2)
+        # Трафик за последние сутки из сводов. Раньше здесь был полный проход
+        # по request_logs на каждый заход на страницу нод.
+        from app.services import analytics_query as aq
 
-        # Calculate real total requests
-        requests_result = await db.execute(
-            select(func.count(RequestLog.id))
-        )
-        total_requests = requests_result.scalar() or 0
+        day = (await aq.totals(db, aq.window("24h")))[None].as_dict()
+        total_bandwidth_gb = round(day["total_bandwidth"] / (1024 * 1024 * 1024), 2)
+        total_requests = day["total_requests"]
         
         return EdgeNodeStats(
             total_nodes=total,

@@ -72,9 +72,11 @@ celery_app.conf.beat_schedule = {
         "schedule": crontab(minute="*/3"),
     },
     # Analytics tasks
+    # Каждые 5 минут пересчитываем текущий и последние часы: экраны берут
+    # прошедшие часы из свода, и раз в час свод отставал на час целиком.
     "aggregate-hourly-stats": {
         "task": "app.tasks.analytics.aggregate_hourly",
-        "schedule": crontab(minute=5),  # Every hour at :05 (after logs are collected)
+        "schedule": crontab(minute="*/5"),
     },
     "aggregate-daily-stats": {
         "task": "app.tasks.analytics.aggregate_daily",

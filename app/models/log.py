@@ -1,5 +1,5 @@
 from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, BigInteger
-from sqlalchemy.orm import relationship
+from sqlalchemy.orm import backref, relationship
 from datetime import datetime
 
 from app.core.database import Base
@@ -11,8 +11,9 @@ class RequestLog(Base):
     timestamp = Column(DateTime, default=datetime.utcnow, index=True)
     
     # Relationships
-    domain_id = Column(Integer, ForeignKey("domains.id"), nullable=True, index=True)
-    domain = relationship("Domain", backref="logs")
+    domain_id = Column(Integer, ForeignKey("domains.id", ondelete="CASCADE"), nullable=True, index=True)
+    # passive_deletes: логи удаляет каскад в БД, а не ORM построчно.
+    domain = relationship("Domain", backref=backref("logs", passive_deletes=True))
     
     edge_node_id = Column(Integer, ForeignKey("edge_nodes.id", ondelete="SET NULL"), nullable=True)
     edge_node = relationship("EdgeNode", backref="logs")

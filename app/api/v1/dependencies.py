@@ -6,7 +6,7 @@ through one of them, which checks that the object's domain belongs to an
 organization the caller is a member of (404 on mismatch, so ids can't be probed)
 and then applies API-token domain scoping via ``require_domain_access``.
 """
-from typing import Set
+from typing import List, Optional, Set
 from fastapi import Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -61,6 +61,31 @@ async def get_user_org_ids(
     members = {row[0] for row in member_result.fetchall()}
 
     return owned | members
+
+
+async def visible_domain_ids(user: User, db: AsyncSession) -> Optional[List[int]]:
+    """Домены, чью аналитику видит пользователь; ``None`` — все.
+
+    Суперпользователь видит всё (если его API-токен не ограничен доменами),
+    остальные — домены своих организаций. Раньше общая аналитика была только
+    для суперпользователя, и у остальных все карточки показывали 403 как нули.
+    """
+    from app.core.security import get_allowed_domain_ids
+
+    allowed = get_allowed_domain_ids(user)
+    if user.is_superuser:
+        return None if allowed is None else sorted(allowed)
+    org_ids = await get_user_org_ids(user, db)
+    if not org_ids:
+        return []
+    ids = [
+        row[0] for row in (await db.execute(
+            select(Domain.id).where(Domain.organization_id.in_(org_ids))
+        )).all()
+    ]
+    if allowed is not None:
+        ids = [i for i in ids if i in allowed]
+    return ids
 
 
 async def get_or_create_primary_org(user: User, db: AsyncSession) -> int:
