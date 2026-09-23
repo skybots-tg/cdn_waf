@@ -3,7 +3,7 @@ from datetime import datetime, timedelta
 from typing import Optional, Dict, Any
 from passlib.context import CryptContext
 from jose import JWTError, jwt
-from fastapi import HTTPException, Security, Depends
+from fastapi import HTTPException, Request, Security, Depends
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
@@ -61,6 +61,7 @@ def decode_token(token: str) -> Dict[str, Any]:
 
 
 async def get_current_user(
+    request: Request,
     credentials: Optional[HTTPAuthorizationCredentials] = Security(security),
     db: AsyncSession = Depends(get_db)
 ):
@@ -77,14 +78,22 @@ async def get_current_user(
     # Import here to avoid circular dependency
     from app.services.user_service import UserService
 
-    if not credentials:
+    token = credentials.credentials if credentials else None
+    if not token and request.method in ("GET", "HEAD"):
+        # Страницы панели авторизованы cookie access_token (её ставит вход),
+        # а их скрипты зовут API через fetch. Если скрипт не подставил Bearer
+        # (старый main.js из кэша браузера, пустой localStorage), чтение
+        # падало с 401 при живой сессии. Только чтение: изменяющие запросы
+        # без заголовка по-прежнему отклоняются, иначе открылся бы CSRF.
+        cookie = request.cookies.get("access_token")
+        if cookie and not cookie.startswith("fck_"):
+            token = cookie
+    if not token:
         raise HTTPException(
             status_code=401,
             detail="Not authenticated",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    
-    token = credentials.credentials
     
     # Check if this is an API key (starts with 'fck_')
     if token.startswith('fck_'):
@@ -244,6 +253,7 @@ async def get_current_superuser(current_user = Depends(get_current_user)):
 
 
 async def get_optional_current_user(
+    request: Request,
     credentials: Optional[HTTPAuthorizationCredentials] = Security(security),
     db: AsyncSession = Depends(get_db)
 ):
@@ -256,4 +266,4 @@ async def get_optional_current_user(
     ``get_current_user`` so every caller is authenticated; the remaining
     references are being migrated to ``get_current_active_user`` directly.
     """
-    return await get_current_user(credentials=credentials, db=db)
+    return await get_current_user(request=request, credentials=credentials, db=db)

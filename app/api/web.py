@@ -19,6 +19,27 @@ router = APIRouter()
 templates = Jinja2Templates(directory="app/templates")
 
 
+def _asset_version() -> str:
+    """Версия статики для ?v= в шаблонах: меняется, когда меняются файлы.
+
+    Скрипты подключались без версии, и браузер часами держал старый main.js
+    после выкатки: 23.09.2026 новые экраны аналитики получили 401, потому что
+    подстановка токена жила в новом main.js, а выполнялся закэшированный.
+    """
+    import hashlib
+    from pathlib import Path
+
+    digest = hashlib.blake2b(digest_size=6)
+    for path in sorted(Path("app/static").rglob("*")):
+        if path.is_file():
+            stat = path.stat()
+            digest.update(f"{path.as_posix()}:{stat.st_size}:{stat.st_mtime_ns}".encode())
+    return digest.hexdigest()
+
+
+templates.env.globals["asset_v"] = _asset_version()
+
+
 async def get_current_web_user(request: Request, db: AsyncSession = Depends(get_db)):
     """Extract user from the ``access_token`` cookie, falling back to DEBUG admin."""
     token = request.cookies.get("access_token")
