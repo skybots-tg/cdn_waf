@@ -64,10 +64,6 @@ class CacheService:
         db.add(rule)
         await db.commit()
         await db.refresh(rule)
-        
-        # Trigger config update for edge nodes
-        await CacheService._trigger_config_update(domain_id)
-        
         return rule
     
     @staticmethod
@@ -97,10 +93,6 @@ class CacheService:
         
         await db.commit()
         await db.refresh(rule)
-        
-        # Trigger config update
-        await CacheService._trigger_config_update(rule.domain_id)
-        
         return rule
     
     @staticmethod
@@ -110,11 +102,8 @@ class CacheService:
         if not rule:
             return False
         
-        domain_id = rule.domain_id
         await db.delete(rule)
         await db.commit()
-        
-        await CacheService._trigger_config_update(domain_id)
         return True
     
     @staticmethod
@@ -281,14 +270,3 @@ class CacheService:
         
         result = await db.execute(query)
         return list(result.scalars().all())
-    
-    @staticmethod
-    async def _trigger_config_update(domain_id: int):
-        """Trigger configuration update for edge nodes"""
-        import json
-        
-        # Publish update notification via Redis (JSON-serialize dict)
-        await redis_client.publish(
-            "config_update",
-            json.dumps({"domain_id": domain_id, "timestamp": datetime.utcnow().isoformat()})
-        )
