@@ -2,7 +2,7 @@
 import json
 import logging
 from typing import List, Optional
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -235,7 +235,9 @@ class CacheService:
         app.tasks.edge.sync_dev_mode.
         """
         duration_minutes = max(1, min(duration_minutes, DEV_MODE_MAX_MINUTES))
-        expires_at = datetime.utcnow() + timedelta(minutes=duration_minutes)
+        # Срок с пометкой UTC: без неё браузер читает время как местное и
+        # показывает окончание режима на несколько часов раньше.
+        expires_at = datetime.now(timezone.utc) + timedelta(minutes=duration_minutes)
         
         # Store in Redis with TTL
         await redis_client.setex(
@@ -267,7 +269,8 @@ class CacheService:
         """Get dev mode expiration time"""
         expires_str = await redis_client.get(f"dev_mode:{domain_id}")
         if expires_str:
-            return datetime.fromisoformat(expires_str)
+            expires = datetime.fromisoformat(expires_str)
+            return expires if expires.tzinfo else expires.replace(tzinfo=timezone.utc)
         return None
     
     @staticmethod
