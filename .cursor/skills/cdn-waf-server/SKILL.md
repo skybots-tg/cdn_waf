@@ -1,13 +1,13 @@
 ---
 name: cdn-waf-server
-description: Deploy and troubleshoot the CDN WAF project on production server 188.116.24.50. Use when the user asks to deploy, update, restart, check logs, or diagnose issues on the CDN WAF server, or mentions deploy, production, сервер, деплой.
+description: Deploy and troubleshoot the CDN WAF project on production server 159.195.254.197. Use when the user asks to deploy, update, restart, check logs, or diagnose issues on the CDN WAF server, or mentions deploy, production, сервер, деплой.
 ---
 
 # CDN WAF Server Operations
 
 ## Server Details
 
-- **IP**: 188.116.24.50
+- **IP**: 159.195.254.197
 - **User**: root
 - **SSH key**: `~/.ssh/qufa`
 - **SSH alias**: `cdn_waf` (in `~/.ssh/config`)
@@ -18,7 +18,7 @@ description: Deploy and troubleshoot the CDN WAF project on production server 18
 ## SSH Access
 
 ```bash
-ssh -i ~/.ssh/qufa root@188.116.24.50
+ssh -i ~/.ssh/ai_agent_key root@159.195.254.197
 ```
 
 Or via SSH MCP (connectionName: `cdn_waf`) if configured.
