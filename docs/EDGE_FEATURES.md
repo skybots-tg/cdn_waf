@@ -116,7 +116,7 @@ Slack и `content` для Discord.
 | TimeWeb СПб (3) | 213.171.4.136 | есть | новый |
 
 Доступ по ключу `ai_agent_key`. Агент выкатывается вручную на все четыре ноды:
-бэкап `/opt/cdn_waf/*.py`, scp, `sed -i 's/$//'`, `py_compile`,
+бэкап `/opt/cdn_waf/*.py`, scp, `sed -i 's/\r$//'`, `py_compile`,
 `systemctl restart cdn-waf-agent`. Файлы на ноде должны совпадать с
 `edge_node/` без CR (сверять md5).
 
