@@ -16,7 +16,15 @@ class RequestLog(Base):
     
     edge_node_id = Column(Integer, ForeignKey("edge_nodes.id", ondelete="SET NULL"), nullable=True)
     edge_node = relationship("EdgeNode", backref="logs")
-    
+
+    # Хост запроса как есть (app.example.com): зона живёт в domain_id, а
+    # разбивка по поддоменам — здесь.
+    host = Column(String(255), nullable=True)
+    # Отпечаток строки лога. Нода повторяет партию, если не дождалась ответа,
+    # и без уникального отпечатка каждая такая партия ложилась в таблицу ещё
+    # раз (21% дублей за 1–3.09.2026). Вставка — ON CONFLICT DO NOTHING.
+    fingerprint = Column(BigInteger, nullable=True, unique=True)
+
     # Request details
     method = Column(String(10))
     path = Column(String(2048))

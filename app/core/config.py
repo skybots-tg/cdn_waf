@@ -85,6 +85,13 @@ class Settings(BaseSettings):
     ANALYTICS_RAW_LOGS_RETENTION: int = 30  # Raw request logs
     ANALYTICS_HOURLY_RETENTION: int = 90    # Hourly aggregated stats
     ANALYTICS_DAILY_RETENTION: int = 365    # Daily aggregated stats (1 year)
+
+    # Предохранители приёма сырых логов (app/api/internal_logs.py). 03.09.2026
+    # лавина повторных партий забила диск, и вместе с Postgres упали все
+    # проекты сервера. Выше лимита строки отбрасываются, а ноде всё равно
+    # отвечаем 200 — ошибка заставила бы её повторять ту же партию.
+    RAW_LOGS_MAX_PER_HOUR: int = 300_000
+    RAW_LOGS_MIN_FREE_DISK_GB: float = 8.0
     
     # MaxMind GeoIP (for geo analytics on edge nodes)
     # Get free account at: https://www.maxmind.com/en/geolite2/signup
