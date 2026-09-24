@@ -7,10 +7,11 @@ description: Deploy and troubleshoot the CDN WAF project on production server 15
 
 ## Server Details
 
-- **IP**: 159.195.254.197
+- **Host**: penguin, **IP**: 159.195.254.197 (shared host; the old server qufa /
+  188.116.24.50 was retired on 23.09.2026 and everything moved here)
 - **User**: root
-- **SSH key**: `~/.ssh/qufa`
-- **SSH alias**: `cdn_waf` (in `~/.ssh/config`)
+- **SSH key**: `~/.ssh/ai_agent_key` (the old `~/.ssh/qufa` key is accepted too)
+- **SSH alias**: `penguin`; `cdn_waf` and `qufa` in `~/.ssh/config` are kept as synonyms
 - **Project path**: `/root/cdn_waf`
 - **Python venv**: `/root/cdn_waf/venv`
 - **Git remote**: `https://github.com/skybots-tg/cdn_waf` (branch: `main`)
@@ -18,10 +19,12 @@ description: Deploy and troubleshoot the CDN WAF project on production server 15
 ## SSH Access
 
 ```bash
+ssh penguin
+# or explicitly:
 ssh -i ~/.ssh/ai_agent_key root@159.195.254.197
 ```
 
-Or via SSH MCP (connectionName: `cdn_waf`) if configured.
+Or via SSH MCP (connectionName: `penguin`) if configured.
 
 ## Systemd Services
 
