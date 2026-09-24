@@ -32,6 +32,11 @@
             <div style="font-size: 13px; color: var(--text-muted);" id="period-note">—</div>
         </div>
         <div style="display: flex; gap: 12px;">
+            <select class="form-select" id="traffic" style="max-width: 160px;" title="Who sent the requests: people or bots">
+                <option value="all" selected>All traffic</option>
+                <option value="people">People</option>
+                <option value="bots">Bots</option>
+            </select>
             <select class="form-select" id="time-range" style="max-width: 200px;">
                 <option value="1h">Last Hour</option>
                 <option value="24h" selected>Last 24 Hours</option>
@@ -149,20 +154,31 @@
 
     <div class="grid grid-2 gap-3 mb-4">
         <div class="glass-card">
-            <h3 class="card-title"><i class="fas fa-desktop"></i> Browsers &amp; Clients</h3>
-            <div id="top-browsers"></div>
+            <h3 class="card-title"><i class="fas fa-user-check"></i> Who Visits</h3>
+            <div id="top-traffic"></div>
+            <p style="font-size: 12px; color: var(--text-muted); margin-top: 8px;">
+                By user agent, network (ASN) and behaviour. Browsers in data centers are bots
+                in disguise or people on a VPN; those who browse like a person count as people.
+            </p>
         </div>
         <div class="glass-card">
-            <h3 class="card-title"><i class="fas fa-network-wired"></i> Top Client IPs</h3>
-            <div id="top-ips"></div>
+            <h3 class="card-title"><i class="fas fa-desktop"></i> Browsers &amp; Clients</h3>
+            <div id="top-browsers"></div>
         </div>
     </div>
 
     <div class="grid grid-2 gap-3 mb-4">
         <div class="glass-card">
+            <h3 class="card-title"><i class="fas fa-network-wired"></i> Top Client IPs</h3>
+            <div id="top-ips"></div>
+        </div>
+        <div class="glass-card">
             <h3 class="card-title"><i class="fas fa-exclamation-triangle"></i> Top Errors</h3>
             <div id="top-errors"></div>
         </div>
+    </div>
+
+    <div class="mb-4">
         <div class="glass-card">
             <div class="flex-between" style="margin-bottom: 16px;">
                 <h3 class="card-title" style="margin: 0;"><i class="fas fa-user-shield"></i> Security Events</h3>
@@ -203,12 +219,13 @@ let chartMetric = 'requests';
 let trafficChart = null;
 let lastSeries = null;
 let currentRange = '24h';
+let currentTraffic = 'all';
 
 function setText(id, value) { const el = document.getElementById(id); if (el) el.textContent = value; }
 function setHtml(id, value) { const el = document.getElementById(id); if (el) el.innerHTML = value; }
 
 async function loadOverview(range) {
-    const s = await FC.get(`${DOMAIN_API}/stats/overview?range=${range}`);
+    const s = await FC.get(`${DOMAIN_API}/stats/overview?range=${range}&traffic=${currentTraffic}`);
     setText('total-requests', FC.num(s.total_requests));
     setText('requests-split', `${FC.num(s.cached_requests)} cached · ${FC.num(s.uncached_requests)} uncached`);
     setHtml('requests-change', FC.change(s.changes.requests));
@@ -231,7 +248,7 @@ async function loadOverview(range) {
     setText('avg-response', FC.ms(s.avg_response_time));
     setText('response-percentiles', `p50 ${FC.ms(s.p50_response_time)} · p95 ${FC.ms(s.p95_response_time)}`
         + (s.avg_origin_time != null ? ` · origin ${FC.ms(s.avg_origin_time)}` : ''));
-    setText('period-note', `${FC.localTime(s.start)} — ${FC.localTime(s.end)} (your local time)`);
+    setText('period-note', `${FC.localTime(s.start)} — ${FC.localTime(s.end)} (your local time)${FC.trafficNote(s.traffic, s.partial)}`);
 
     const total = s.total_requests || 0;
     const classes = [
@@ -250,7 +267,7 @@ async function loadOverview(range) {
 }
 
 async function loadChart(range) {
-    lastSeries = await FC.get(`${DOMAIN_API}/stats/timeseries?range=${range}`);
+    lastSeries = await FC.get(`${DOMAIN_API}/stats/timeseries?range=${range}&traffic=${currentTraffic}`);
     trafficChart = FC.trafficChart(document.getElementById('traffic-chart'), trafficChart, lastSeries, chartMetric);
 }
 
@@ -265,7 +282,7 @@ async function loadTop(dimension, elementId, opts) {
     const el = document.getElementById(elementId);
     FC.loading(el);
     try {
-        const data = await FC.get(`${DOMAIN_API}/stats/top?dimension=${dimension}&range=${currentRange}&limit=${(opts && opts.limit) || 10}`);
+        const data = await FC.get(`${DOMAIN_API}/stats/top?dimension=${dimension}&range=${currentRange}&limit=${(opts && opts.limit) || 10}&traffic=${currentTraffic}`);
         FC.renderTop(el, data.items, { ...(opts || {}), partial: data.partial });
     } catch (e) { FC.error(el, e); }
 }
@@ -301,7 +318,7 @@ async function loadRecentLogs() {
             <td class="mono" style="word-break: break-all;"><strong>${FC.escape(l.method)}</strong> ${FC.escape(l.host || '')}${FC.escape(l.path)}</td>
             <td style="color:${FC.statusColor(l.status)}; font-weight:600;">${FC.escape(l.status)}</td>
             <td>${FC.cacheBadge(l.cache_status)}</td>
-            <td style="white-space:nowrap;">${FC.flag(l.country_code)} <span class="mono">${FC.escape(l.client_ip)}</span></td>
+            <td style="white-space:nowrap;">${FC.flag(l.country_code)} <span class="mono">${FC.escape(l.client_ip)}</span>${l.client_class ? ` <span class="badge" style="opacity:.75;" title="${FC.escape(l.traffic_label || '')}">${FC.escape(l.client_class)}</span>` : ''}</td>
             <td style="white-space:nowrap;">${FC.bytes(l.bytes_sent)}</td>
             <td style="white-space:nowrap;">${FC.ms(l.request_time)}</td>
             </tr>`).join('')}</tbody></table>`;
@@ -322,8 +339,9 @@ async function loadAnalytics(range) {
         loadTop('countries', 'geo-distribution', { format: i => FC.country(i.key) }),
         loadTop('referrers', 'top-referrers', { emptyText: 'No referrer headers in this period' }),
         loadTop('hosts', 'top-hosts'),
+        loadTop('traffic', 'top-traffic', { limit: 15, format: FC.trafficLabel }),
         loadTop('browsers', 'top-browsers'),
-        loadTop('ips', 'top-ips', { format: i => `<span class="mono">${FC.escape(i.key)}</span>`, value: i => `${FC.num(i.requests)} req · ${FC.bytes(i.bytes)}` }),
+        loadTop('ips', 'top-ips', { format: FC.ipLabel, value: i => `${FC.num(i.requests)} req · ${FC.bytes(i.bytes)}` }),
         loadTop('errors', 'top-errors', {
             color: 'var(--error)',
             format: i => `<span style="color:${FC.statusColor(i.status)}; font-weight:600;">${i.status}</span> <span class="mono">${FC.escape(i.path)}</span>`,
@@ -335,12 +353,17 @@ async function loadAnalytics(range) {
 }
 
 function exportData(format) {
-    FC.download(`${DOMAIN_API}/export?range=${currentRange}&format=${format}`,
-        `{{ domain.name }}_analytics_${currentRange}.${format}`);
+    const suffix = currentTraffic === 'all' ? '' : `_${currentTraffic}`;
+    FC.download(`${DOMAIN_API}/export?range=${currentRange}&format=${format}&traffic=${currentTraffic}`,
+        `{{ domain.name }}_analytics_${currentRange}${suffix}.${format}`);
 }
 
 document.addEventListener('DOMContentLoaded', () => {
     const select = document.getElementById('time-range');
+    currentTraffic = FC.initTraffic(document.getElementById('traffic'), (value) => {
+        currentTraffic = value;
+        loadAnalytics(currentRange);
+    });
     currentRange = FC.initRange(select, loadAnalytics);
     loadAnalytics(currentRange);
     // Как у Cloudflare для коротких периодов: цифры обновляются сами.

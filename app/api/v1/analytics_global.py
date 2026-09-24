@@ -26,12 +26,13 @@ router = APIRouter()
 @router.get("/stats/global")
 async def get_global_stats(
     range: str = Query("24h", regex=aq.RANGE_PATTERN),
+    traffic: str = Query("all", regex=aq.TRAFFIC_PATTERN),
     current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Итоги по всем видимым доменам с изменением к прошлому периоду."""
     domain_ids = await visible_domain_ids(current_user, db)
-    data = await aq.overview(db, range, domain_ids)
+    data = await aq.overview(db, range, domain_ids, traffic)
     data["total_domains"] = len(await _domains(db, domain_ids))
     return data
 
@@ -40,11 +41,12 @@ async def get_global_stats(
 async def get_global_timeseries(
     range: str = Query("24h", regex=aq.RANGE_PATTERN),
     metric: str = Query("requests", regex="^(" + "|".join(aq.SERIES) + ")$"),
+    traffic: str = Query("all", regex=aq.TRAFFIC_PATTERN),
     current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db),
 ):
     domain_ids = await visible_domain_ids(current_user, db)
-    return await aq.timeseries(db, range, domain_ids, metric)
+    return await aq.timeseries(db, range, domain_ids, metric, traffic)
 
 
 @router.get("/stats/top")
@@ -52,23 +54,25 @@ async def get_global_top(
     dimension: str = Query("paths", regex=aq.DIMENSION_PATTERN),
     range: str = Query("24h", regex=aq.RANGE_PATTERN),
     limit: int = Query(10, ge=1, le=100),
+    traffic: str = Query("all", regex=aq.TRAFFIC_PATTERN),
     current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db),
 ):
     domain_ids = await visible_domain_ids(current_user, db)
-    return await aq.top(db, range, dimension, domain_ids, limit)
+    return await aq.top(db, range, dimension, domain_ids, limit, traffic)
 
 
 @router.get("/stats/domains")
 async def get_domains_stats(
     range: str = Query("24h", regex=aq.RANGE_PATTERN),
+    traffic: str = Query("all", regex=aq.TRAFFIC_PATTERN),
     current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Таблица доменов: трафик, кэш, угрозы и ошибки за период."""
     domain_ids = await visible_domain_ids(current_user, db)
     domains = await _domains(db, domain_ids)
-    by_domain = await aq.totals(db, aq.window(range), domain_ids, group_by="domain")
+    by_domain = await aq.totals(db, aq.window(range), domain_ids, group_by="domain", traffic=traffic)
     rows = []
     for domain in domains:
         m = by_domain.get(domain.id, aq.Metrics()).as_dict()

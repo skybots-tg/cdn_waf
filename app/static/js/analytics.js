@@ -236,5 +236,44 @@
         return select.value;
     };
 
+    // Фильтр «кто прислал запрос» (?traffic=people): all — всё, people — люди,
+    // bots — боты. Классы считает панель (app/services/traffic_class.py).
+    FC.initTraffic = function (select, onChange) {
+        const params = new URLSearchParams(window.location.search);
+        let saved = params.get('traffic');
+        try { saved = saved || localStorage.getItem('analytics_traffic'); } catch (e) { /* приватный режим */ }
+        if (saved && [...select.options].some(o => o.value === saved)) select.value = saved;
+        select.addEventListener('change', function () {
+            try { localStorage.setItem('analytics_traffic', select.value); } catch (e) { /* приватный режим */ }
+            const p = new URLSearchParams(window.location.search);
+            if (select.value === 'all') p.delete('traffic'); else p.set('traffic', select.value);
+            const query = p.toString();
+            history.replaceState(null, '', window.location.pathname + (query ? '?' + query : ''));
+            onChange(select.value);
+        });
+        return select.value;
+    };
+
+    // Строка топа «Who Visits»: люди — зелёные, боты — серые.
+    FC.trafficLabel = function (item) {
+        const icon = item.people
+            ? '<i class="fas fa-user" style="color:var(--success);width:16px;"></i>'
+            : '<i class="fas fa-robot" style="color:var(--text-muted);width:16px;"></i>';
+        return icon + ' ' + FC.escape(item.label || item.key);
+    };
+
+    // Адрес с сетью и классом: «37.99.96.137 · Kar-Tel LLC · People».
+    FC.ipLabel = function (item) {
+        const parts = [item.network, item.traffic_label].filter(Boolean).map(FC.escape);
+        return '<span class="mono">' + FC.escape(item.key) + '</span>' +
+            (parts.length ? ' <span style="color:var(--text-muted);font-size:12px;">' + parts.join(' · ') + '</span>' : '');
+    };
+
+    FC.trafficNote = function (traffic, partial) {
+        if (!traffic || traffic === 'all') return '';
+        return (traffic === 'people' ? ' · people only' : ' · bots only') +
+            (partial ? ' (traffic filter covers the last 30 days)' : '');
+    };
+
     global.FC = FC;
 })(window);

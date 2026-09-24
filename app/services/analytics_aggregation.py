@@ -14,7 +14,7 @@
 import logging
 from typing import Optional, Dict, List
 from datetime import datetime, timedelta, date
-from sqlalchemy import select, func, case, desc, delete, and_, literal_column
+from sqlalchemy import select, func, case, desc, delete, and_, literal_column, text
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -183,6 +183,80 @@ async def _return_dirty_hours(hours: List[datetime]) -> None:
         await _close(client)
 
 
+# Страница, а не файл: без расширения или .html. Ассеты — то, что грузит
+# только настоящий браузер.
+_PAGE_SQL = (
+    "method = 'GET' AND status_code < 400 "
+    r"AND (path !~ '\.[A-Za-z0-9]{1,5}$' OR path ~* '\.html?$')"
+)
+_VPN_SQL = f"""
+WITH s AS (
+    SELECT domain_id, client_ip, coalesce(user_agent, '') AS ua,
+           count(DISTINCT path) FILTER (WHERE {_PAGE_SQL}) AS pages,
+           count(*) FILTER (WHERE path ~* '\\.(css|js|mjs)$') AS assets,
+           extract(epoch FROM max(timestamp) FILTER (WHERE {_PAGE_SQL})
+                            - min(timestamp) FILTER (WHERE {_PAGE_SQL})) AS span
+    FROM request_logs
+    WHERE timestamp >= :start AND timestamp < :end AND client_class = 'hosted'
+    GROUP BY 1, 2, 3
+), people AS (
+    SELECT domain_id, client_ip, ua FROM s
+    WHERE pages >= 2 AND (
+        (assets >= 3 AND span >= 20 AND pages <= 12 * greatest(span / 60.0, 1))
+        OR (span >= 120 AND pages <= 2 * greatest(span / 60.0, 1))
+    )
+)
+UPDATE request_logs r SET client_class = 'vpn'
+FROM people p
+WHERE r.timestamp >= :start AND r.timestamp < :end AND r.client_class = 'hosted'
+  AND r.domain_id = p.domain_id AND r.client_ip = p.client_ip
+  AND coalesce(r.user_agent, '') = p.ua
+"""
+
+
+async def refine_traffic_classes(db: AsyncSession, start: datetime, end: datetime) -> Dict[str, int]:
+    """Досказать классы трафика, которые видны только по нескольким запросам.
+
+    При приёме строка классифицируется одна (``traffic_class.classify``).
+    Здесь — по всем запросам адреса за период:
+
+    * адрес из сети хостинга, который хоть раз искал ``/.env`` или
+      ``wp-login.php``, — сканер во всех своих запросах. Домашние и
+      мобильные адреса не трогаем: за одним IP оператора сидят тысячи людей,
+      сканером считается только сам запрос-проба;
+    * браузер из дата-центра, который листает страницы как человек (две и
+      больше, с паузами, с загрузкой CSS и JS, не десятки в минуту), — это
+      человек через VPN. Так ходят многие посетители из России. Боты под
+      браузером открывают одну страницу или обходят сайт пачкой за секунды.
+      Пороги подобраны на логах всех доменов за 1–24.09.2026.
+    """
+    from app.services import ip_networks, traffic_class as tc
+
+    scanners = (await db.execute(
+        select(RequestLog.client_ip).where(
+            RequestLog.timestamp >= start, RequestLog.timestamp < end,
+            RequestLog.client_class == tc.SCANNER,
+        ).distinct()
+    )).scalars().all()
+    hosted = [ip for ip in scanners if ip_networks.is_hosting(*ip_networks.lookup(ip))]
+    flagged = 0
+    if hosted:
+        result = await db.execute(
+            RequestLog.__table__.update()
+            .where(
+                RequestLog.timestamp >= start, RequestLog.timestamp < end,
+                RequestLog.client_ip.in_(hosted),
+                RequestLog.client_class.in_((tc.HUMAN, tc.VPN, tc.HOSTED, tc.BOT)),
+            )
+            .values(client_class=tc.SCANNER)
+        )
+        flagged = result.rowcount or 0
+    result = await db.execute(text(_VPN_SQL), {"start": start, "end": end})
+    promoted = result.rowcount or 0
+    await db.commit()
+    return {"scanner_rows": flagged, "vpn_rows": promoted}
+
+
 async def aggregate_recent_hours(db: AsyncSession, hours: int = RECENT_HOURS) -> Dict[str, int]:
     """Пересчитать последние часы и все часы, куда дошли опоздавшие логи.
 
@@ -195,6 +269,12 @@ async def aggregate_recent_hours(db: AsyncSession, hours: int = RECENT_HOURS) ->
     dirty = await pop_dirty_hours()
     targets |= set(dirty)
     try:
+        # Классы трафика — не повод остановить свод: ошибка пересмотра только в лог.
+        try:
+            await refine_traffic_classes(db, min(targets), datetime.utcnow())
+        except Exception:
+            logger.exception("Классы трафика не пересмотрены")
+            await db.rollback()
         rows = 0
         for hour in sorted(targets):
             rows += await aggregate_hourly_stats(db, hour)

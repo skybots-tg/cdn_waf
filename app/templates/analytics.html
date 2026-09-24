@@ -9,6 +9,11 @@
             <p style="color: var(--text-secondary); font-size: 14px;" id="period-note">Traffic across all your domains</p>
         </div>
         <div style="display: flex; gap: 12px;">
+            <select class="form-select" id="traffic" style="max-width: 160px;" title="Who sent the requests: people or bots">
+                <option value="all" selected>All traffic</option>
+                <option value="people">People</option>
+                <option value="bots">Bots</option>
+            </select>
             <select class="form-select" id="time-range" style="max-width: 200px;">
                 <option value="1h">Last Hour</option>
                 <option value="24h" selected>Last 24 Hours</option>
@@ -124,9 +129,16 @@
 
     <div class="grid grid-2 gap-3 mb-4">
         <div class="glass-card">
+            <h3 class="card-title"><i class="fas fa-user-check"></i> Who Visits</h3>
+            <div id="global-traffic"></div>
+        </div>
+        <div class="glass-card">
             <h3 class="card-title"><i class="fas fa-desktop"></i> Browsers &amp; Clients</h3>
             <div id="global-browsers"></div>
         </div>
+    </div>
+
+    <div class="mb-4">
         <div class="glass-card">
             <h3 class="card-title"><i class="fas fa-user-shield"></i> Security Events</h3>
             <div id="global-security"></div>
@@ -151,6 +163,7 @@
 <script src="/static/js/analytics.js?v={{ asset_v }}"></script>
 <script>
 let currentRange = '24h';
+let currentTraffic = 'all';
 let chartMetric = 'requests';
 let chart = null;
 let lastSeries = null;
@@ -161,7 +174,7 @@ function setText(id, v) { const el = document.getElementById(id); if (el) el.tex
 function setHtml(id, v) { const el = document.getElementById(id); if (el) el.innerHTML = v; }
 
 async function loadOverview(range) {
-    const s = await FC.get(`/api/v1/stats/global?range=${range}`);
+    const s = await FC.get(`/api/v1/stats/global?range=${range}&traffic=${currentTraffic}`);
     setText('global-requests', FC.num(s.total_requests));
     setText('global-requests-split', `${FC.num(s.cached_requests)} cached · ${FC.num(s.uncached_requests)} uncached`);
     setHtml('global-requests-change', FC.change(s.changes.requests));
@@ -185,7 +198,7 @@ async function loadOverview(range) {
     setText('global-response', FC.ms(s.avg_response_time));
     setText('global-percentiles', `p50 ${FC.ms(s.p50_response_time)} · p95 ${FC.ms(s.p95_response_time)}`
         + (s.avg_origin_time != null ? ` · origin ${FC.ms(s.avg_origin_time)}` : ''));
-    setText('period-note', `All your domains · ${FC.localTime(s.start)} — ${FC.localTime(s.end)}`);
+    setText('period-note', `All your domains · ${FC.localTime(s.start)} — ${FC.localTime(s.end)}${FC.trafficNote(s.traffic, s.partial)}`);
 
     const total = s.total_requests || 0;
     const el = document.getElementById('global-status-codes');
@@ -203,7 +216,7 @@ async function loadOverview(range) {
 }
 
 async function loadChart(range) {
-    lastSeries = await FC.get(`/api/v1/stats/global/timeseries?range=${range}`);
+    lastSeries = await FC.get(`/api/v1/stats/global/timeseries?range=${range}&traffic=${currentTraffic}`);
     chart = FC.trafficChart(document.getElementById('global-traffic-chart'), chart, lastSeries, chartMetric);
 }
 
@@ -247,7 +260,7 @@ async function loadDomainPerformance(range) {
     const el = document.getElementById('domain-performance');
     FC.loading(el);
     try {
-        domainRows = await FC.get(`/api/v1/stats/domains?range=${range}`);
+        domainRows = await FC.get(`/api/v1/stats/domains?range=${range}&traffic=${currentTraffic}`);
         renderDomainTable();
     } catch (e) { FC.error(el, e); }
 }
@@ -289,7 +302,7 @@ async function loadTop(dimension, elementId, opts) {
     const el = document.getElementById(elementId);
     FC.loading(el);
     try {
-        const data = await FC.get(`/api/v1/stats/top?dimension=${dimension}&range=${currentRange}&limit=10`);
+        const data = await FC.get(`/api/v1/stats/top?dimension=${dimension}&range=${currentRange}&limit=${(opts && opts.limit) || 10}&traffic=${currentTraffic}`);
         FC.renderTop(el, data.items, { ...(opts || {}), partial: data.partial });
     } catch (e) { FC.error(el, e); }
 }
@@ -323,16 +336,23 @@ async function loadGlobalAnalytics(range) {
         loadTop('countries', 'global-geo', { format: i => FC.country(i.key) }),
         loadTop('paths', 'global-paths', { format: i => `<span class="mono">${FC.escape(i.key)}</span>` }),
         loadTop('referrers', 'global-referrers', { emptyText: 'No referrer headers in this period' }),
+        loadTop('traffic', 'global-traffic', { limit: 15, format: FC.trafficLabel }),
         loadTop('browsers', 'global-browsers'),
         loadSecurity(range),
     ]);
 }
 
 function exportGlobalData(format) {
-    FC.download(`/api/v1/export/global?range=${currentRange}&format=${format}`, `global_analytics_${currentRange}.${format}`);
+    const suffix = currentTraffic === 'all' ? '' : `_${currentTraffic}`;
+    FC.download(`/api/v1/export/global?range=${currentRange}&format=${format}&traffic=${currentTraffic}`,
+        `global_analytics_${currentRange}${suffix}.${format}`);
 }
 
 document.addEventListener('DOMContentLoaded', () => {
+    currentTraffic = FC.initTraffic(document.getElementById('traffic'), (value) => {
+        currentTraffic = value;
+        loadGlobalAnalytics(currentRange);
+    });
     currentRange = FC.initRange(document.getElementById('time-range'), loadGlobalAnalytics);
     loadGlobalAnalytics(currentRange);
     setInterval(() => { if (currentRange === '1h' || currentRange === '24h') loadGlobalAnalytics(currentRange); }, 60000);

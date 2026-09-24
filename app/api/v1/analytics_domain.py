@@ -30,11 +30,15 @@ router = APIRouter()
 async def get_domain_overview(
     domain_id: int,
     range: str = Query("24h", regex=aq.RANGE_PATTERN),
+    traffic: str = Query("all", regex=aq.TRAFFIC_PATTERN),
     domain: Domain = Depends(get_domain_for_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Итоги периода: запросы, трафик, кэш, угрозы, посетители, время ответа."""
-    return await aq.overview(db, range, [domain.id])
+    """Итоги периода: запросы, трафик, кэш, угрозы, посетители, время ответа.
+
+    ``traffic``: all — всё, people — только люди, bots — только боты.
+    """
+    return await aq.overview(db, range, [domain.id], traffic)
 
 
 @router.get("/domains/{domain_id}/stats/timeseries")
@@ -42,10 +46,11 @@ async def get_domain_timeseries(
     domain_id: int,
     range: str = Query("24h", regex=aq.RANGE_PATTERN),
     metric: str = Query("requests", regex="^(" + "|".join(aq.SERIES) + ")$"),
+    traffic: str = Query("all", regex=aq.TRAFFIC_PATTERN),
     domain: Domain = Depends(get_domain_for_user),
     db: AsyncSession = Depends(get_db),
 ):
-    return await aq.timeseries(db, range, [domain.id], metric)
+    return await aq.timeseries(db, range, [domain.id], metric, traffic)
 
 
 @router.get("/domains/{domain_id}/stats/top")
@@ -54,11 +59,12 @@ async def get_domain_top(
     dimension: str = Query("paths", regex=aq.DIMENSION_PATTERN),
     range: str = Query("24h", regex=aq.RANGE_PATTERN),
     limit: int = Query(10, ge=1, le=100),
+    traffic: str = Query("all", regex=aq.TRAFFIC_PATTERN),
     domain: Domain = Depends(get_domain_for_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Топ по измерению: страницы, хосты, страны, источники, IP, браузеры…"""
-    return await aq.top(db, range, dimension, [domain.id], limit)
+    """Топ по измерению: страницы, хосты, страны, источники, IP, браузеры, классы трафика…"""
+    return await aq.top(db, range, dimension, [domain.id], limit, traffic)
 
 
 @router.get("/domains/{domain_id}/stats/top_paths")
@@ -137,6 +143,7 @@ async def get_domain_logs(
     ip: Optional[str] = Query(None, max_length=45),
     cache_status: Optional[str] = Query(None, max_length=20),
     country: Optional[str] = Query(None, max_length=2),
+    traffic: Optional[str] = Query(None, regex=aq.TRAFFIC_PATTERN),
     domain: Domain = Depends(get_domain_for_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -168,6 +175,7 @@ async def get_domain_logs(
             where.append(RequestLog.cache_status == cache_status.upper())
     if country:
         where.append(RequestLog.country_code == country.upper())
+    where.extend(aq.traffic_filter(traffic))
 
     total = (await db.execute(select(func.count(RequestLog.id)).where(*where))).scalar() or 0
     response.headers["X-Total-Count"] = str(total)
@@ -201,6 +209,9 @@ def _log_dict(log: RequestLog) -> dict:
         "waf_status": log.waf_status,
         "waf_rule_id": log.waf_rule_id,
         "user_agent": log.user_agent,
+        "asn": log.asn,
+        "client_class": log.client_class,
+        "traffic_label": aq.tc.LABELS.get(log.client_class) if log.client_class else None,
     }
 
 
@@ -209,30 +220,37 @@ async def export_domain_analytics(
     domain_id: int,
     range: str = Query("24h", regex=aq.RANGE_PATTERN),
     format: str = Query("csv", regex="^(csv|json)$"),
+    traffic: str = Query("all", regex=aq.TRAFFIC_PATTERN),
     domain: Domain = Depends(get_domain_for_user),
     db: AsyncSession = Depends(get_db),
 ):
-    return await _export(db, range, format, [domain.id], f"{domain.name}_analytics_{range}")
+    return await _export(db, range, format, [domain.id], _filename(domain.name, range, traffic), traffic)
 
 
 @router.get("/export/global")
 async def export_global_analytics(
     range: str = Query("24h", regex=aq.RANGE_PATTERN),
     format: str = Query("csv", regex="^(csv|json)$"),
+    traffic: str = Query("all", regex=aq.TRAFFIC_PATTERN),
     current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db),
 ):
     domain_ids = await visible_domain_ids(current_user, db)
-    return await _export(db, range, format, domain_ids, f"global_analytics_{range}")
+    return await _export(db, range, format, domain_ids, _filename("global", range, traffic), traffic)
 
 
-async def _export(db, range_str, fmt, domain_ids, filename):
+def _filename(name: str, range_str: str, traffic: str) -> str:
+    suffix = "" if traffic == "all" else f"_{traffic}"
+    return f"{name}_analytics_{range_str}{suffix}"
+
+
+async def _export(db, range_str, fmt, domain_ids, filename, traffic="all"):
     """Выгрузка: итоги, ряд по шагам и основные топы."""
-    overview = await aq.overview(db, range_str, domain_ids)
-    series = await aq.timeseries(db, range_str, domain_ids)
+    overview = await aq.overview(db, range_str, domain_ids, traffic)
+    series = await aq.timeseries(db, range_str, domain_ids, traffic=traffic)
     tops = {
-        dim: (await aq.top(db, range_str, dim, domain_ids, 20))["items"]
-        for dim in ("paths", "countries", "referrers", "status_codes", "browsers")
+        dim: (await aq.top(db, range_str, dim, domain_ids, 20, traffic))["items"]
+        for dim in ("paths", "countries", "referrers", "status_codes", "browsers", "traffic")
     }
     if fmt == "json":
         body = json.dumps(

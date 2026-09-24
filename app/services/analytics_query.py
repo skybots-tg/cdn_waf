@@ -16,6 +16,11 @@
 Время везде UTC без зоны (как в БД); наружу отдаётся ISO с «Z», а переводит
 его в местное время браузер.
 
+Фильтр трафика (``traffic``: people/bots, с 24.09.2026) опирается на класс
+строки в сырых логах, а в сводах его нет. С фильтром весь период считается
+по сырым логам, то есть за последние 30 дней (флаг ``partial`` у 90 дней и
+полугода).
+
 Группировки по выражениям (date_trunc, CASE, regexp) идут по номеру колонки:
 asyncpg передаёт литералы параметрами, и одно и то же выражение в SELECT и в
 GROUP BY для Postgres — разные выражения (GroupingError, сломавший почасовой
@@ -33,9 +38,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.models.analytics import DailyStats, ErrorStats, GeoStats, HourlyStats, TopPathsStats
 from app.models.log import RequestLog
+from app.services import ip_networks, traffic_class as tc
 from app.services.analytics_aggregation import raw_metrics
 
 RANGE_PATTERN = r"^(1h|24h|7d|30d|90d|6m)$"
+TRAFFIC_PATTERN = r"^(all|people|bots)$"
 
 # Длина периода и шаг графика.
 RANGES: Dict[str, tuple] = {
@@ -95,11 +102,14 @@ def window(range_str: str, now: Optional[datetime] = None) -> Window:
     return Window(range_str, floor(now - span, bucket), now, bucket)
 
 
-def _parts(w: Window, now: Optional[datetime] = None) -> Dict[str, tuple]:
+def _parts(w: Window, now: Optional[datetime] = None, traffic: Optional[str] = None) -> Dict[str, tuple]:
     """Какой источник покрывает какой отрезок периода."""
     now = now or datetime.utcnow()
     if w.bucket == "minute":
         return {"raw": (w.start, w.end)}
+    if _filtered(traffic):
+        start = max(w.start, raw_floor(now))
+        return {"raw": (start, w.end)} if start < w.end else {}
     current_hour = floor(now, "hour")
     hourly_floor = floor(now - timedelta(days=HOURLY_RETENTION_DAYS - 1), "day")
     parts: Dict[str, tuple] = {}
@@ -118,6 +128,19 @@ def raw_floor(now: Optional[datetime] = None) -> datetime:
     """С какого момента сырые логи ещё хранятся."""
     now = now or datetime.utcnow()
     return floor(now - timedelta(days=RAW_RETENTION_DAYS), "hour")
+
+
+def _filtered(traffic: Optional[str]) -> bool:
+    return traffic in ("people", "bots")
+
+
+def traffic_filter(traffic: Optional[str]) -> list:
+    """Условие на сырые логи: только люди, только боты или всё."""
+    if traffic == "people":
+        return [RequestLog.client_class.in_(tc.PEOPLE)]
+    if traffic == "bots":
+        return [func.coalesce(RequestLog.client_class, literal_column("''")).notin_(tc.PEOPLE)]
+    return []
 
 
 def iso(dt: Optional[datetime]) -> Optional[str]:
@@ -217,6 +240,7 @@ async def totals(
     w: Window,
     domain_ids: Optional[Sequence[int]] = None,
     group_by: Optional[str] = None,
+    traffic: Optional[str] = None,
 ) -> Dict[Any, Metrics]:
     """Итоги периода; ``group_by`` — 'domain' или 'node' (ключ словаря)."""
     out: Dict[Any, Metrics] = {}
@@ -226,7 +250,7 @@ async def totals(
             key = getattr(row, "key", None) if group_by else None
             out.setdefault(key, Metrics()).add(row)
 
-    parts = _parts(w)
+    parts = _parts(w, traffic=traffic)
     if "hourly" in parts:
         s, e = parts["hourly"]
         keys = _key_col(HourlyStats, group_by)
@@ -263,6 +287,7 @@ async def totals(
             RequestLog.timestamp >= s, RequestLog.timestamp < e,
             RequestLog.domain_id.isnot(None),
             *_domain_filter(RequestLog.domain_id, domain_ids),
+            *traffic_filter(traffic),
         )
         if keys:
             q = q.group_by(*keys)
@@ -273,7 +298,8 @@ async def totals(
 
 
 async def unique_visitors(
-    db: AsyncSession, w: Window, domain_ids: Optional[Sequence[int]] = None
+    db: AsyncSession, w: Window, domain_ids: Optional[Sequence[int]] = None,
+    traffic: Optional[str] = None,
 ) -> int:
     """Уникальные IP за период.
 
@@ -288,9 +314,10 @@ async def unique_visitors(
             RequestLog.timestamp >= raw_start, RequestLog.timestamp < w.end,
             RequestLog.domain_id.isnot(None),
             *_domain_filter(RequestLog.domain_id, domain_ids),
+            *traffic_filter(traffic),
         )
     )).scalar() or 0
-    if w.start < floor_raw:
+    if w.start < floor_raw and not _filtered(traffic):
         count += (await db.execute(
             select(func.coalesce(func.sum(DailyStats.unique_visitors), 0)).where(
                 DailyStats.day >= w.start.date(), DailyStats.day < floor_raw.date(),
@@ -301,7 +328,8 @@ async def unique_visitors(
 
 
 async def response_percentiles(
-    db: AsyncSession, w: Window, domain_ids: Optional[Sequence[int]] = None
+    db: AsyncSession, w: Window, domain_ids: Optional[Sequence[int]] = None,
+    traffic: Optional[str] = None,
 ) -> Dict[str, Optional[float]]:
     """p50/p95 времени ответа ноды (мс) по сырым логам доступной части периода."""
     row = (await db.execute(
@@ -314,6 +342,7 @@ async def response_percentiles(
             RequestLog.request_time.isnot(None),
             RequestLog.domain_id.isnot(None),
             *_domain_filter(RequestLog.domain_id, domain_ids),
+            *traffic_filter(traffic),
         )
     )).first()
     return {
@@ -324,19 +353,20 @@ async def response_percentiles(
 
 
 async def overview(
-    db: AsyncSession, range_str: str, domain_ids: Optional[Sequence[int]] = None
+    db: AsyncSession, range_str: str, domain_ids: Optional[Sequence[int]] = None,
+    traffic: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Всё для карточек: итоги, посетители, время ответа, изменение к прошлому."""
     w = window(range_str)
     prev = w.previous()
-    current = (await totals(db, w, domain_ids))[None]
-    previous = (await totals(db, prev, domain_ids))[None]
-    visitors = await unique_visitors(db, w, domain_ids)
-    visitors_prev = await unique_visitors(db, prev, domain_ids)
+    current = (await totals(db, w, domain_ids, traffic=traffic))[None]
+    previous = (await totals(db, prev, domain_ids, traffic=traffic))[None]
+    visitors = await unique_visitors(db, w, domain_ids, traffic)
+    visitors_prev = await unique_visitors(db, prev, domain_ids, traffic)
 
     data = current.as_dict()
     prev_data = previous.as_dict()
-    data.update(await response_percentiles(db, w, domain_ids))
+    data.update(await response_percentiles(db, w, domain_ids, traffic))
     data["unique_visitors"] = visitors
     data["previous"] = {**prev_data, "unique_visitors": visitors_prev}
     data["changes"] = {
@@ -355,6 +385,9 @@ async def overview(
         ),
     }
     data.update(range=range_str, start=iso(w.start), end=iso(w.end), bucket=w.bucket)
+    data["traffic"] = traffic or "all"
+    # С фильтром всё считается по сырым логам — за 90 дней и полгода только 30.
+    data["partial"] = _filtered(traffic) and w.start < raw_floor()
     return data
 
 
@@ -381,6 +414,7 @@ async def timeseries(
     range_str: str,
     domain_ids: Optional[Sequence[int]] = None,
     metric: str = "requests",
+    traffic: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Ряды по шагам периода, пустые шаги — нулями."""
     w = window(range_str)
@@ -391,7 +425,7 @@ async def timeseries(
             key = row.bucket.replace(tzinfo=None) if row.bucket.tzinfo else row.bucket
             buckets.setdefault(floor(key, w.bucket), Metrics()).add(row)
 
-    parts = _parts(w)
+    parts = _parts(w, traffic=traffic)
     if "hourly" in parts:
         s, e = parts["hourly"]
         bucket_col = HourlyStats.hour if w.bucket == "hour" else _trunc(w.bucket, HourlyStats.hour)
@@ -425,6 +459,7 @@ async def timeseries(
             RequestLog.timestamp >= s, RequestLog.timestamp < e,
             RequestLog.domain_id.isnot(None),
             *_domain_filter(RequestLog.domain_id, domain_ids),
+            *traffic_filter(traffic),
         ).group_by(literal_column("1"))
         put((await db.execute(q)).all())
 
@@ -459,8 +494,21 @@ def referrer_host_expr():
 
 
 def browser_expr():
+    """Браузер по User-Agent; боты, скрипты и сканеры — по классу строки.
+
+    До 24.09.2026 «Scripts» проверялись последними, и headless Chrome или
+    python-requests с браузерным UA попадали в Chrome.
+    """
     ua = func.lower(func.coalesce(RequestLog.user_agent, literal_column("''")))
+    cls = RequestLog.client_class
+    by_class = [
+        (cls.in_(tc.DECLARED + (tc.BOT,)), literal_column("'Bots'")),
+        (cls == literal_column(f"'{tc.SCANNER}'"), literal_column("'Scanners'")),
+        (cls == literal_column(f"'{tc.TOOL}'"), literal_column("'Scripts'")),
+        (cls == literal_column(f"'{tc.APP}'"), literal_column("'Mobile apps'")),
+    ]
     rules = (
+        (("%headlesschrome%", "%lighthouse%", "%phantomjs%"), "Scripts"),
         (("%bot%", "%crawl%", "%spider%", "%slurp%"), "Bots"),
         (("% max/%",), "MAX app"),
         (("%telegram%",), "Telegram"),
@@ -472,7 +520,7 @@ def browser_expr():
         (("%safari%",), "Safari"),
         (("%curl%", "%python%", "%go-http%", "%wget%", "%httpx%", "%okhttp%"), "Scripts"),
     )
-    whens = []
+    whens = list(by_class)
     for patterns, label in rules:
         cond = None
         for p in patterns:
@@ -494,8 +542,9 @@ DIMENSIONS = {
     "status_codes": lambda: RequestLog.status_code,
     "cache_status": lambda: func.coalesce(RequestLog.cache_status, literal_column("'DYNAMIC'")),
     "methods": lambda: RequestLog.method,
+    "traffic": lambda: func.coalesce(RequestLog.client_class, literal_column("'unknown'")),
 }
-DIMENSION_PATTERN = r"^(paths|hosts|countries|referrers|ips|user_agents|browsers|status_codes|cache_status|methods|errors)$"
+DIMENSION_PATTERN = r"^(paths|hosts|countries|referrers|ips|user_agents|browsers|status_codes|cache_status|methods|traffic|errors)$"
 
 
 async def top(
@@ -504,12 +553,15 @@ async def top(
     dimension: str,
     domain_ids: Optional[Sequence[int]] = None,
     limit: int = 10,
+    traffic: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Топ значений измерения за период с долей от всех запросов.
 
     Сырые логи хранятся 30 дней. Для страниц, стран и ошибок дни старше
     добираются из суточных топов; остальные измерения за 90 дней и полгода
-    считаются по последним 30 дням (флаг ``partial``).
+    считаются по последним 30 дням (флаг ``partial``). С фильтром трафика
+    суточные топы не подходят — в них нет класса, — и все измерения берутся
+    за последние 30 дней.
     """
     w = window(range_str)
     floor_raw = raw_floor()
@@ -519,7 +571,9 @@ async def top(
         RequestLog.timestamp >= start, RequestLog.timestamp < w.end,
         RequestLog.domain_id.isnot(None),
         *_domain_filter(RequestLog.domain_id, domain_ids),
+        *traffic_filter(traffic),
     ]
+    mergeable = ("paths", "countries", "errors") if not _filtered(traffic) else ()
 
     total = (await db.execute(select(func.count(RequestLog.id)).where(*where))).scalar() or 0
 
@@ -562,17 +616,43 @@ async def top(
                 "visitors": int(r.visitors),
             }
 
-    if partial and dimension in ("paths", "countries", "errors"):
+    if partial and dimension in mergeable:
         total += await _merge_daily_tops(db, dimension, w.start, floor_raw, domain_ids, items)
 
     ranked = sorted(items.values(), key=lambda i: i["requests"], reverse=True)[:limit]
     for item in ranked:
         item["percentage"] = _ratio(item["requests"], total)
+    if dimension == "traffic":
+        for item in ranked:
+            item["label"] = tc.LABELS.get(item["key"], "Not classified")
+            item["people"] = item["key"] in tc.PEOPLE
+    elif dimension == "ips" and ranked:
+        await _describe_ips(db, where, ranked)
     return {
         "range": range_str, "dimension": dimension, "total_requests": int(total),
-        "partial": partial and dimension not in ("paths", "countries", "errors"),
+        "traffic": traffic or "all",
+        "partial": partial and dimension not in mergeable,
         "items": ranked,
     }
+
+
+async def _describe_ips(db: AsyncSession, where: list, items: List[Dict[str, Any]]) -> None:
+    """Кто за адресом: сеть (владелец AS) и самый частый класс его запросов."""
+    ips = [i["key"] for i in items]
+    rows = (await db.execute(
+        select(
+            RequestLog.client_ip,
+            func.mode().within_group(RequestLog.client_class).label("cls"),
+        ).where(*where, RequestLog.client_ip.in_(ips)).group_by(RequestLog.client_ip)
+    )).all()
+    classes = {r.client_ip: r.cls for r in rows}
+    for item in items:
+        asn, org = ip_networks.lookup(item["key"])
+        cls = classes.get(item["key"])
+        item.update(
+            asn=asn, network=org, traffic_class=cls,
+            traffic_label=tc.LABELS.get(cls) if cls else None,
+        )
 
 
 async def _merge_daily_tops(db, dimension, start, end, domain_ids, items) -> int:

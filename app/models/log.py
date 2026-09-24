@@ -52,3 +52,9 @@ class RequestLog(Base):
     # Geo
     country_code = Column(String(2), nullable=True)
 
+    # Кто прислал запрос (app/services/traffic_class.py): human, vpn, app —
+    # люди; search, ai, seo, preview, monitor, archive, bot, tool, scanner,
+    # hosted — боты. Сеть клиента — номер AS из GeoLite2-ASN.
+    asn = Column(Integer, nullable=True)
+    client_class = Column(String(10), nullable=True)
+

@@ -17,6 +17,7 @@ from app.core.redis import redis_client
 from app.models.edge_node import EdgeNode
 from app.models.domain import Domain, DomainStatus
 from app.models.log import RequestLog
+from app.services import ip_networks, traffic_class
 from app.services.analytics_aggregation import DIRTY_HOURS_KEY
 
 logger = logging.getLogger(__name__)
@@ -218,6 +219,14 @@ def _row(log_data: Dict[str, Any], node_id: int, domain_id: int, host: str) -> D
     if cache_status in ("", "-", None):
         cache_status = None
 
+    client_ip = _fit(log_data.get("client_ip"), "client_ip")
+    user_agent = _fit(log_data.get("user_agent") or None, "user_agent")
+    status_code = _as_int(log_data.get("status"))
+    asn, org = ip_networks.lookup(client_ip)
+    client_class = traffic_class.classify(
+        user_agent, path, status_code, ip_networks.is_hosting(asn, org)
+    )
+
     return {
         "timestamp": timestamp,
         "domain_id": domain_id,
@@ -227,11 +236,11 @@ def _row(log_data: Dict[str, Any], node_id: int, domain_id: int, host: str) -> D
         "method": _fit(log_data.get("method"), "method"),
         "path": _fit(path or "/", "path"),
         "query_string": _fit(query_string or None, "query_string"),
-        "status_code": _as_int(log_data.get("status")),
+        "status_code": status_code,
         "bytes_sent": _as_int(log_data.get("bytes_sent"), 0),
-        "client_ip": _fit(log_data.get("client_ip"), "client_ip"),
+        "client_ip": client_ip,
         "cache_status": _fit(cache_status, "cache_status"),
-        "user_agent": _fit(log_data.get("user_agent") or None, "user_agent"),
+        "user_agent": user_agent,
         "referer": _fit(log_data.get("referer") or None, "referer"),
         "request_time": request_time_ms,
         "country_code": _fit(log_data.get("country_code") or None, "country_code"),
@@ -240,6 +249,8 @@ def _row(log_data: Dict[str, Any], node_id: int, domain_id: int, host: str) -> D
         "upstream_time": _upstream_ms(log_data.get("upstream_time")),
         "upstream_status": _upstream_status(log_data.get("upstream_status")),
         "bytes_received": _as_int(log_data.get("request_length")),
+        "asn": asn,
+        "client_class": client_class,
     }
 
 

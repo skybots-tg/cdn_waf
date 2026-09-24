@@ -105,6 +105,11 @@ celery_app.conf.beat_schedule = {
         "task": "app.tasks.notify.weekly_report",
         "schedule": crontab(day_of_week=1, hour=6, minute=5),
     },
+    # GeoLite2-ASN для классов трафика: MaxMind обновляет её по вторникам и пятницам.
+    "update-asn-database": {
+        "task": "app.tasks.analytics.update_asn_database",
+        "schedule": crontab(day_of_week="2,5", hour=4, minute=30),
+    },
     "cleanup-old-analytics-data": {
         "task": "app.tasks.analytics.cleanup_old_data",
         "schedule": crontab(hour=3, minute=0),  # Daily at 03:00 UTC (low traffic time)

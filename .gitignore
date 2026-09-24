@@ -81,3 +81,7 @@ uploads/
 !.env.example
 *.save
 proportion_backup.sql
+
+# GeoLite2-ASN (app/services/ip_networks.py), скачивается на сервере
+data/*.mmdb
+data/*.mmdb.tmp

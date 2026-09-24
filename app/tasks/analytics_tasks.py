@@ -67,3 +67,17 @@ def backfill_aggregations(days: int = 7):
     """Пересчитать своды по сырым логам за последние ``days`` дней."""
     since = datetime.utcnow() - timedelta(days=days)
     return _run(lambda db: agg.backfill(db, since), "backfill_aggregations")
+
+
+@shared_task(name="app.tasks.analytics.update_asn_database")
+def update_asn_database():
+    """Свежая GeoLite2-ASN для классов трафика (app/services/ip_networks.py)."""
+    from app.services import ip_networks
+
+    try:
+        result = ip_networks.download_database()
+    except Exception:
+        logger.exception("update_asn_database: задача упала")
+        raise
+    logger.info("update_asn_database: %s", result)
+    return result
