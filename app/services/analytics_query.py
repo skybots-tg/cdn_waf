@@ -688,6 +688,10 @@ async def top(
         if dimension == "referrers":
             filters.append(RequestLog.referer.isnot(None))
             filters.append(RequestLog.referer != "")
+        if dimension == "paths" and metric != "requests":
+            # Посетителей и просмотры считаем у страниц: у каждого шрифта и
+            # скрипта тоже есть «уникальные IP», и топ состоял бы из файлов.
+            filters.append(page_view_expr())
         rows = (await db.execute(
             select(
                 expr.label("key"),

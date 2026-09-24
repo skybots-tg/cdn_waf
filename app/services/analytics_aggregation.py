@@ -60,9 +60,9 @@ def cache_bypass_expr():
 def page_view_expr():
     """Просмотр страницы: GET страницы, а не файла, с ответом 2xx или 304.
 
-    Страница — путь без расширения или .html; /api/ — не страницы, а вызовы
-    приложений. 304 — страница из кэша браузера при повторном заходе: это
-    тоже просмотр. Регулярки — литералами: asyncpg передал бы строки
+    Страница — путь без расширения или .html; /api/ и запросы мобильных
+    приложений (класс app) — не страницы, а вызовы API. 304 — страница из
+    кэша браузера при повторном заходе: это тоже просмотр. Регулярки — литералами: asyncpg передал бы строки
     параметрами (см. ловушку GROUP BY в analytics_query).
     """
     path = RequestLog.path
@@ -74,6 +74,7 @@ def page_view_expr():
             path.op("~*")(literal_column(r"'\.html?$'")),
         ),
         ~path.like(literal_column("'/api/%'")),
+        func.coalesce(RequestLog.client_class, literal_column("''")) != literal_column("'app'"),
     )
 
 

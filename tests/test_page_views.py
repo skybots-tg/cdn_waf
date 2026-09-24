@@ -42,6 +42,8 @@ def test_page_view_rule():
     assert r"'\.[A-Za-z0-9]{1,12}$'" in sql and r"'\.html?$'" in sql
     # psycopg2-диалект теста удваивает %, asyncpg в проде — нет
     assert "NOT LIKE '/api/%" in sql
+    # вызовы API мобильных приложений — не просмотры
+    assert "coalesce(request_logs.client_class, '') != 'app'" in sql
 
 
 def test_page_view_path_regex_matches_postgres_intent():
