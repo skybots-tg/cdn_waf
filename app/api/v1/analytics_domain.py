@@ -45,7 +45,7 @@ async def get_domain_overview(
 async def get_domain_timeseries(
     domain_id: int,
     range: str = Query("24h", regex=aq.RANGE_PATTERN),
-    metric: str = Query("requests", regex="^(" + "|".join(aq.SERIES) + ")$"),
+    metric: str = Query("requests", regex=aq.SERIES_PATTERN),
     traffic: str = Query("all", regex=aq.TRAFFIC_PATTERN),
     domain: Domain = Depends(get_domain_for_user),
     db: AsyncSession = Depends(get_db),
@@ -60,11 +60,16 @@ async def get_domain_top(
     range: str = Query("24h", regex=aq.RANGE_PATTERN),
     limit: int = Query(10, ge=1, le=100),
     traffic: str = Query("all", regex=aq.TRAFFIC_PATTERN),
+    metric: str = Query("requests", regex=aq.TOP_METRIC_PATTERN),
     domain: Domain = Depends(get_domain_for_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Топ по измерению: страницы, хосты, страны, источники, IP, браузеры, классы трафика…"""
-    return await aq.top(db, range, dimension, [domain.id], limit, traffic)
+    """Топ по измерению: страницы, хосты, страны, источники, IP, браузеры, классы трафика…
+
+    ``metric`` — по чему ранжировать: requests, views (просмотры страниц),
+    visitors (уникальные IP).
+    """
+    return await aq.top(db, range, dimension, [domain.id], limit, traffic, metric)
 
 
 @router.get("/domains/{domain_id}/stats/top_paths")
@@ -265,8 +270,9 @@ async def _export(db, range_str, fmt, domain_ids, filename, traffic="all"):
     out = io.StringIO()
     writer = csv.writer(out)
     writer.writerow(["Metric", "Value"])
-    for key in ("total_requests", "cached_requests", "total_bandwidth", "cached_bandwidth",
-                "cache_hit_ratio", "unique_visitors", "threats_blocked", "rate_limited",
+    for key in ("unique_visitors", "page_views",
+                "total_requests", "cached_requests", "total_bandwidth", "cached_bandwidth",
+                "cache_hit_ratio", "threats_blocked", "rate_limited",
                 "status_2xx", "status_3xx", "status_4xx", "status_5xx",
                 "avg_response_time", "p50_response_time", "p95_response_time"):
         writer.writerow([key, overview.get(key)])
@@ -277,9 +283,10 @@ async def _export(db, range_str, fmt, domain_ids, filename, traffic="all"):
         writer.writerow([ts] + [series["series"][n][i] for n in names])
     for dim, items in tops.items():
         writer.writerow([])
-        writer.writerow([f"Top {dim}", "Requests", "Percentage"])
+        writer.writerow([f"Top {dim}", "Visitors", "Page views", "Requests", "Percentage"])
         for item in items:
-            writer.writerow([item["key"], item["requests"], item["percentage"]])
+            writer.writerow([item["key"], item.get("visitors"), item.get("views"),
+                             item["requests"], item["percentage"]])
     out.seek(0)
     return StreamingResponse(
         iter([out.getvalue()]), media_type="text/csv",

@@ -40,7 +40,7 @@ async def get_global_stats(
 @router.get("/stats/global/timeseries")
 async def get_global_timeseries(
     range: str = Query("24h", regex=aq.RANGE_PATTERN),
-    metric: str = Query("requests", regex="^(" + "|".join(aq.SERIES) + ")$"),
+    metric: str = Query("requests", regex=aq.SERIES_PATTERN),
     traffic: str = Query("all", regex=aq.TRAFFIC_PATTERN),
     current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db),
@@ -55,11 +55,12 @@ async def get_global_top(
     range: str = Query("24h", regex=aq.RANGE_PATTERN),
     limit: int = Query(10, ge=1, le=100),
     traffic: str = Query("all", regex=aq.TRAFFIC_PATTERN),
+    metric: str = Query("requests", regex=aq.TOP_METRIC_PATTERN),
     current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db),
 ):
     domain_ids = await visible_domain_ids(current_user, db)
-    return await aq.top(db, range, dimension, domain_ids, limit, traffic)
+    return await aq.top(db, range, dimension, domain_ids, limit, traffic, metric)
 
 
 @router.get("/stats/domains")
@@ -72,7 +73,9 @@ async def get_domains_stats(
     """Таблица доменов: трафик, кэш, угрозы и ошибки за период."""
     domain_ids = await visible_domain_ids(current_user, db)
     domains = await _domains(db, domain_ids)
-    by_domain = await aq.totals(db, aq.window(range), domain_ids, group_by="domain", traffic=traffic)
+    w = aq.window(range)
+    by_domain = await aq.totals(db, w, domain_ids, group_by="domain", traffic=traffic)
+    visitors = await aq.visitors_by_domain(db, w, domain_ids, traffic)
     rows = []
     for domain in domains:
         m = by_domain.get(domain.id, aq.Metrics()).as_dict()
@@ -80,6 +83,8 @@ async def get_domains_stats(
             "id": domain.id,
             "name": domain.name,
             "status": domain.status.value,
+            "visitors": visitors.get(domain.id, 0),
+            "page_views": m["page_views"],
             "requests": m["total_requests"],
             "bandwidth": m["total_bandwidth"],
             "cached_bandwidth": m["cached_bandwidth"],

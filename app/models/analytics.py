@@ -47,6 +47,8 @@ class HourlyStats(Base):
     rate_limited = Column(Integer, default=0, nullable=False)
     # Запросы, дошедшие до origin с замером, и их среднее время (мс).
     origin_requests = Column(Integer, default=0, nullable=False)
+    # Просмотры страниц (analytics_aggregation.page_view_expr), с 24.09.2026.
+    page_views = Column(Integer, default=0, nullable=False)
     avg_origin_time = Column(Float, default=0, nullable=False)
     
     # WAF metrics
@@ -100,6 +102,8 @@ class DailyStats(Base):
     rate_limited = Column(Integer, default=0, nullable=False)
     # Запросы, дошедшие до origin с замером, и их среднее время (мс).
     origin_requests = Column(Integer, default=0, nullable=False)
+    # Просмотры страниц (analytics_aggregation.page_view_expr), с 24.09.2026.
+    page_views = Column(Integer, default=0, nullable=False)
     avg_origin_time = Column(Float, default=0, nullable=False)
     
     # WAF metrics

@@ -37,6 +37,11 @@
                 <option value="people">People</option>
                 <option value="bots">Bots</option>
             </select>
+            <select class="form-select" id="top-count" style="max-width: 190px;" title="What the top lists count">
+                <option value="visitors" selected>Count unique IPs</option>
+                <option value="views">Count page views</option>
+                <option value="requests">Count requests</option>
+            </select>
             <select class="form-select" id="time-range" style="max-width: 200px;">
                 <option value="1h">Last Hour</option>
                 <option value="24h" selected>Last 24 Hours</option>
@@ -51,7 +56,19 @@
     </div>
 
     <!-- Key Metrics: traffic -->
-    <div class="grid grid-4 gap-3 mb-3">
+    <div class="grid grid-5 gap-3 mb-3">
+        <div class="glass-card metric">
+            <div class="metric-title"><i class="fas fa-users"></i> Unique Visitors</div>
+            <div class="metric-value" id="unique-visitors">-</div>
+            <div class="metric-sub">Distinct client IPs</div>
+            <div class="metric-change" id="visitors-change">-</div>
+        </div>
+        <div class="glass-card metric">
+            <div class="metric-title"><i class="fas fa-file-alt"></i> Page Views</div>
+            <div class="metric-value" id="page-views">-</div>
+            <div class="metric-sub" id="page-views-sub">-</div>
+            <div class="metric-change" id="page-views-change">-</div>
+        </div>
         <div class="glass-card metric">
             <div class="metric-title"><i class="fas fa-exchange-alt"></i> Requests</div>
             <div class="metric-value" id="total-requests">-</div>
@@ -63,12 +80,6 @@
             <div class="metric-value" id="total-bandwidth">-</div>
             <div class="metric-sub" id="bandwidth-split">-</div>
             <div class="metric-change" id="bandwidth-change">-</div>
-        </div>
-        <div class="glass-card metric">
-            <div class="metric-title"><i class="fas fa-users"></i> Unique Visitors</div>
-            <div class="metric-value" id="unique-visitors">-</div>
-            <div class="metric-sub">Distinct client IPs</div>
-            <div class="metric-change" id="visitors-change">-</div>
         </div>
         <div class="glass-card metric">
             <div class="metric-title"><i class="fas fa-shield-alt"></i> Threats</div>
@@ -109,7 +120,9 @@
         <div class="flex-between mb-3">
             <h2 style="font-size: 20px; font-weight: 600;">Traffic</h2>
             <div class="flex gap-2">
-                <button id="btn-metric-requests" class="btn btn-sm btn-primary" onclick="changeChartMetric('requests')">Requests</button>
+                <button id="btn-metric-visitors" class="btn btn-sm btn-primary" onclick="changeChartMetric('visitors')">Visitors</button>
+                <button id="btn-metric-page_views" class="btn btn-sm btn-secondary" onclick="changeChartMetric('page_views')">Page views</button>
+                <button id="btn-metric-requests" class="btn btn-sm btn-secondary" onclick="changeChartMetric('requests')">Requests</button>
                 <button id="btn-metric-bandwidth" class="btn btn-sm btn-secondary" onclick="changeChartMetric('bandwidth')">Bandwidth</button>
             </div>
         </div>
@@ -215,11 +228,12 @@
 <script>
 const DOMAIN_ID = {{ domain.id }};
 const DOMAIN_API = `/api/v1/domains/${DOMAIN_ID}`;
-let chartMetric = 'requests';
+let chartMetric = 'visitors';
 let trafficChart = null;
 let lastSeries = null;
 let currentRange = '24h';
 let currentTraffic = 'all';
+let currentCount = 'visitors';
 
 function setText(id, value) { const el = document.getElementById(id); if (el) el.textContent = value; }
 function setHtml(id, value) { const el = document.getElementById(id); if (el) el.innerHTML = value; }
@@ -233,6 +247,9 @@ async function loadOverview(range) {
     setText('bandwidth-split', `${FC.bytes(s.cached_bandwidth)} cached · ${FC.bytes(s.uncached_bandwidth)} uncached`);
     setHtml('bandwidth-change', FC.change(s.changes.bandwidth));
     setText('unique-visitors', FC.num(s.unique_visitors));
+    setText('page-views', FC.num(s.page_views));
+    setText('page-views-sub', s.unique_visitors ? `${(s.page_views / s.unique_visitors).toFixed(1)} per visitor` : 'Pages, not files');
+    setHtml('page-views-change', FC.change(s.changes.page_views));
     setHtml('visitors-change', FC.change(s.changes.visitors));
     setText('threats-blocked', FC.num(s.threats_blocked));
     setText('threats-split', `${FC.num(s.waf_blocked)} blocked · ${FC.num(s.waf_challenged)} challenged · ${FC.num(s.rate_limited)} rate-limited`);
@@ -273,8 +290,9 @@ async function loadChart(range) {
 
 function changeChartMetric(metric) {
     chartMetric = metric;
-    document.getElementById('btn-metric-requests').className = 'btn btn-sm ' + (metric === 'requests' ? 'btn-primary' : 'btn-secondary');
-    document.getElementById('btn-metric-bandwidth').className = 'btn btn-sm ' + (metric === 'bandwidth' ? 'btn-primary' : 'btn-secondary');
+    ['visitors', 'page_views', 'requests', 'bandwidth'].forEach(m => {
+        document.getElementById('btn-metric-' + m).className = 'btn btn-sm ' + (metric === m ? 'btn-primary' : 'btn-secondary');
+    });
     if (lastSeries) trafficChart = FC.trafficChart(document.getElementById('traffic-chart'), trafficChart, lastSeries, chartMetric);
 }
 
@@ -282,8 +300,9 @@ async function loadTop(dimension, elementId, opts) {
     const el = document.getElementById(elementId);
     FC.loading(el);
     try {
-        const data = await FC.get(`${DOMAIN_API}/stats/top?dimension=${dimension}&range=${currentRange}&limit=${(opts && opts.limit) || 10}&traffic=${currentTraffic}`);
-        FC.renderTop(el, data.items, { ...(opts || {}), partial: data.partial });
+        const data = await FC.get(`${DOMAIN_API}/stats/top?dimension=${dimension}&range=${currentRange}&limit=${(opts && opts.limit) || 10}&traffic=${currentTraffic}&metric=${(opts && opts.count) ? currentCount : 'requests'}`);
+        const counted = opts && opts.count ? { metric: data.metric, value: opts.value || FC.countValue(data.metric) } : {};
+        FC.renderTop(el, data.items, { ...(opts || {}), ...counted, partial: data.partial });
     } catch (e) { FC.error(el, e); }
 }
 
@@ -335,13 +354,13 @@ async function loadAnalytics(range) {
             format: i => `<span style="color:${FC.statusColor(i.key)}; font-weight:600;">${FC.escape(i.key)}</span>`,
         }),
         loadTop('cache_status', 'cache-status', { format: i => FC.cacheBadge(i.key === 'DYNAMIC' ? null : i.key) }),
-        loadTop('paths', 'top-pages', { format: i => `<span class="mono">${FC.escape(i.key)}</span>` }),
-        loadTop('countries', 'geo-distribution', { format: i => FC.country(i.key) }),
-        loadTop('referrers', 'top-referrers', { emptyText: 'No referrer headers in this period' }),
-        loadTop('hosts', 'top-hosts'),
-        loadTop('traffic', 'top-traffic', { limit: 15, format: FC.trafficLabel }),
-        loadTop('browsers', 'top-browsers'),
-        loadTop('ips', 'top-ips', { format: FC.ipLabel, value: i => `${FC.num(i.requests)} req · ${FC.bytes(i.bytes)}` }),
+        loadTop('paths', 'top-pages', { count: true, format: i => `<span class="mono">${FC.escape(i.key)}</span>` }),
+        loadTop('countries', 'geo-distribution', { count: true, format: i => FC.country(i.key) }),
+        loadTop('referrers', 'top-referrers', { count: true, emptyText: 'No referrer headers in this period' }),
+        loadTop('hosts', 'top-hosts', { count: true }),
+        loadTop('traffic', 'top-traffic', { count: true, limit: 15, format: FC.trafficLabel }),
+        loadTop('browsers', 'top-browsers', { count: true }),
+        loadTop('ips', 'top-ips', { count: true, format: FC.ipLabel, value: i => `${FC.num(i.views)} views · ${FC.num(i.requests)} req · ${FC.bytes(i.bytes)}` }),
         loadTop('errors', 'top-errors', {
             color: 'var(--error)',
             format: i => `<span style="color:${FC.statusColor(i.status)}; font-weight:600;">${i.status}</span> <span class="mono">${FC.escape(i.path)}</span>`,
@@ -362,6 +381,10 @@ document.addEventListener('DOMContentLoaded', () => {
     const select = document.getElementById('time-range');
     currentTraffic = FC.initTraffic(document.getElementById('traffic'), (value) => {
         currentTraffic = value;
+        loadAnalytics(currentRange);
+    });
+    currentCount = FC.initCount(document.getElementById('top-count'), (value) => {
+        currentCount = value;
         loadAnalytics(currentRange);
     });
     currentRange = FC.initRange(select, loadAnalytics);

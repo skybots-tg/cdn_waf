@@ -14,7 +14,7 @@
 import logging
 from typing import Optional, Dict, List
 from datetime import datetime, timedelta, date
-from sqlalchemy import select, func, case, desc, delete, and_, literal_column, text
+from sqlalchemy import select, func, case, desc, delete, and_, or_, literal_column, text
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -57,10 +57,31 @@ def cache_bypass_expr():
     return RequestLog.cache_status.in_(CACHE_BYPASS_STATUSES)
 
 
+def page_view_expr():
+    """Просмотр страницы: GET страницы, а не файла, с ответом 2xx или 304.
+
+    Страница — путь без расширения или .html; /api/ — не страницы, а вызовы
+    приложений. 304 — страница из кэша браузера при повторном заходе: это
+    тоже просмотр. Регулярки — литералами: asyncpg передал бы строки
+    параметрами (см. ловушку GROUP BY в analytics_query).
+    """
+    path = RequestLog.path
+    return and_(
+        RequestLog.method == "GET",
+        or_(RequestLog.status_code.between(200, 299), RequestLog.status_code == 304),
+        or_(
+            ~path.op("~")(literal_column(r"'\.[A-Za-z0-9]{1,5}$'")),
+            path.op("~*")(literal_column(r"'\.html?$'")),
+        ),
+        ~path.like(literal_column("'/api/%'")),
+    )
+
+
 def raw_metrics():
     """Метрики сводов, посчитанные по сырым логам (для часа и для «сейчас»)."""
     return (
         func.count(RequestLog.id).label("total_requests"),
+        func.count(case((page_view_expr(), 1))).label("page_views"),
         func.coalesce(func.sum(RequestLog.bytes_sent), 0).label("total_bytes_sent"),
         func.count(case((RequestLog.status_code.between(200, 299), 1))).label("status_2xx"),
         func.count(case((RequestLog.status_code.between(300, 399), 1))).label("status_3xx"),
@@ -83,7 +104,7 @@ def raw_metrics():
 
 
 _HOURLY_FIELDS = (
-    "total_requests", "total_bytes_sent", "status_2xx", "status_3xx",
+    "total_requests", "page_views", "total_bytes_sent", "status_2xx", "status_3xx",
     "status_4xx", "status_5xx", "cache_hits", "cache_misses", "cache_bypass",
     "cached_bytes", "waf_blocked", "waf_challenged", "rate_limited",
     "total_bytes_received", "origin_requests",

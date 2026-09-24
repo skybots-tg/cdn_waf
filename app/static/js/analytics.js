@@ -165,10 +165,12 @@
         opts = opts || {};
         if (!el) return;
         if (!items || !items.length) return FC.empty(el, opts.emptyText);
-        const max = Math.max(...items.map(i => i.requests || 0), 1);
+        const field = (COUNT_UNITS[opts.metric] || COUNT_UNITS.requests)[0];
+        const size = i => (i[field] != null ? i[field] : i.requests) || 0;
+        const max = Math.max(...items.map(size), 1);
         el.innerHTML = items.map(function (item) {
             const label = opts.format ? opts.format(item) : FC.escape(item.key == null ? '—' : item.key);
-            const width = Math.max(2, Math.round((item.requests || 0) / max * 100));
+            const width = Math.max(2, Math.round(size(item) / max * 100));
             const right = opts.value ? opts.value(item) : FC.num(item.requests);
             const pct = item.percentage != null ? '<span style="color:var(--text-muted);font-size:12px;margin-left:8px;">' + FC.pct(item.percentage) + '</span>' : '';
             return '<div style="margin-bottom:10px;">' +
@@ -184,22 +186,27 @@
     FC.trafficChart = function (canvas, previous, data, metric) {
         if (previous) previous.destroy();
         const isBytes = metric === 'bandwidth';
-        const total = isBytes ? data.series.bandwidth : data.series.requests;
-        const cached = isBytes ? data.series.cached_bandwidth : data.series.cached_requests;
         const labels = data.timestamps.map(t => FC.bucketLabel(t, data.bucket));
         const styles = getComputedStyle(document.documentElement);
         const accent = styles.getPropertyValue('--accent-primary').trim() || '#f38020';
         const success = styles.getPropertyValue('--success').trim() || '#10b981';
+        const line = (label, values, color) => ({
+            label: label, data: values, borderColor: color, backgroundColor: color + '22',
+            fill: true, tension: 0.3, pointRadius: 0, borderWidth: 2,
+        });
+        // Просмотры и посетители — одна линия; у запросов и трафика — ещё «из кэша».
+        const single = { page_views: 'Page views', visitors: 'Unique visitors (IP)' }[metric];
+        const datasets = single
+            ? [line(single, data.series[metric] || [], accent)]
+            : [
+                line(isBytes ? 'Total bandwidth' : 'Total requests', isBytes ? data.series.bandwidth : data.series.requests, accent),
+                line(isBytes ? 'Served from cache' : 'Cached requests', isBytes ? data.series.cached_bandwidth : data.series.cached_requests, success),
+            ];
         return new Chart(canvas.getContext('2d'), {
             type: 'line',
             data: {
                 labels: labels,
-                datasets: [
-                    { label: isBytes ? 'Total bandwidth' : 'Total requests', data: total, borderColor: accent,
-                      backgroundColor: accent + '22', fill: true, tension: 0.3, pointRadius: 0, borderWidth: 2 },
-                    { label: isBytes ? 'Served from cache' : 'Cached requests', data: cached, borderColor: success,
-                      backgroundColor: success + '22', fill: true, tension: 0.3, pointRadius: 0, borderWidth: 2 },
-                ],
+                datasets: datasets,
             },
             options: {
                 responsive: true, maintainAspectRatio: false,
@@ -252,6 +259,37 @@
             onChange(select.value);
         });
         return select.value;
+    };
+
+    // Что считают топы (?count=visitors): уникальные IP, просмотры страниц
+    // или запросы. Одна страница — это десятки запросов за CSS и картинками.
+    FC.initCount = function (select, onChange) {
+        const params = new URLSearchParams(window.location.search);
+        let saved = params.get('count');
+        try { saved = saved || localStorage.getItem('analytics_count'); } catch (e) { /* приватный режим */ }
+        if (saved && [...select.options].some(o => o.value === saved)) select.value = saved;
+        select.addEventListener('change', function () {
+            try { localStorage.setItem('analytics_count', select.value); } catch (e) { /* приватный режим */ }
+            const p = new URLSearchParams(window.location.search);
+            p.set('count', select.value);
+            history.replaceState(null, '', window.location.pathname + '?' + p.toString());
+            onChange(select.value);
+        });
+        return select.value;
+    };
+
+    const COUNT_UNITS = { visitors: ['visitors', 'IP'], views: ['views', 'views'], requests: ['requests', 'req'] };
+
+    // Число справа в строке топа: выбранная метрика крупно, остальные мелко.
+    FC.countValue = function (metric, opts) {
+        opts = opts || {};
+        return function (item) {
+            const order = [metric].concat(['visitors', 'views', 'requests'].filter(m => m !== metric))
+                .filter(m => !(opts.skip || []).includes(m) && item[COUNT_UNITS[m][0]] != null);
+            const text = m => FC.num(item[COUNT_UNITS[m][0]]) + ' ' + COUNT_UNITS[m][1];
+            const rest = order.slice(1).map(text).join(' · ');
+            return text(order[0]) + (rest ? ' <span style="color:var(--text-muted);font-weight:400;font-size:12px;">· ' + rest + '</span>' : '');
+        };
     };
 
     // Строка топа «Who Visits»: люди — зелёные, боты — серые.

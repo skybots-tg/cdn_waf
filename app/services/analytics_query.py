@@ -39,10 +39,12 @@ from app.core.config import settings
 from app.models.analytics import DailyStats, ErrorStats, GeoStats, HourlyStats, TopPathsStats
 from app.models.log import RequestLog
 from app.services import ip_networks, traffic_class as tc
-from app.services.analytics_aggregation import raw_metrics
+from app.services.analytics_aggregation import page_view_expr, raw_metrics
 
 RANGE_PATTERN = r"^(1h|24h|7d|30d|90d|6m)$"
 TRAFFIC_PATTERN = r"^(all|people|bots)$"
+# Что считают топы: запросы, просмотры страниц или посетителей (уникальные IP).
+TOP_METRIC_PATTERN = r"^(requests|views|visitors)$"
 
 # Длина периода и шаг графика.
 RANGES: Dict[str, tuple] = {
@@ -58,7 +60,7 @@ RAW_RETENTION_DAYS = getattr(settings, "ANALYTICS_RAW_LOGS_RETENTION", 30)
 HOURLY_RETENTION_DAYS = getattr(settings, "ANALYTICS_HOURLY_RETENTION", 90)
 
 FIELDS = (
-    "total_requests", "total_bytes_sent", "status_2xx", "status_3xx",
+    "total_requests", "page_views", "total_bytes_sent", "status_2xx", "status_3xx",
     "status_4xx", "status_5xx", "cache_hits", "cache_misses", "cache_bypass",
     "cached_bytes", "waf_blocked", "waf_challenged", "rate_limited",
     "total_bytes_received", "origin_requests",
@@ -178,6 +180,7 @@ class Metrics:
         threats = v["waf_blocked"] + v["waf_challenged"]
         return {
             "total_requests": requests,
+            "page_views": v["page_views"],
             "cached_requests": v["cache_hits"],
             "uncached_requests": max(requests - v["cache_hits"], 0),
             "total_bandwidth": bandwidth,
@@ -327,6 +330,23 @@ async def unique_visitors(
     return int(count)
 
 
+async def visitors_by_domain(
+    db: AsyncSession, w: Window, domain_ids: Optional[Sequence[int]] = None,
+    traffic: Optional[str] = None,
+) -> Dict[int, int]:
+    """Уникальные IP каждого домена за доступную в сырых логах часть периода."""
+    rows = (await db.execute(
+        select(RequestLog.domain_id, func.count(func.distinct(RequestLog.client_ip)).label("n"))
+        .where(
+            RequestLog.timestamp >= max(w.start, raw_floor()), RequestLog.timestamp < w.end,
+            RequestLog.domain_id.isnot(None),
+            *_domain_filter(RequestLog.domain_id, domain_ids),
+            *traffic_filter(traffic),
+        ).group_by(RequestLog.domain_id)
+    )).all()
+    return {r.domain_id: int(r.n) for r in rows}
+
+
 async def response_percentiles(
     db: AsyncSession, w: Window, domain_ids: Optional[Sequence[int]] = None,
     traffic: Optional[str] = None,
@@ -371,6 +391,7 @@ async def overview(
     data["previous"] = {**prev_data, "unique_visitors": visitors_prev}
     data["changes"] = {
         "requests": _change(data["total_requests"], prev_data["total_requests"]),
+        "page_views": _change(data["page_views"], prev_data["page_views"]),
         "bandwidth": _change(data["total_bandwidth"], prev_data["total_bandwidth"]),
         "visitors": _change(visitors, visitors_prev),
         "threats": _change(data["threats_blocked"], prev_data["threats_blocked"]),
@@ -395,6 +416,7 @@ async def overview(
 
 SERIES = {
     "requests": lambda v: v["total_requests"],
+    "page_views": lambda v: v["page_views"],
     "cached_requests": lambda v: v["cache_hits"],
     "bandwidth": lambda v: v["total_bytes_sent"],
     "cached_bandwidth": lambda v: v["cached_bytes"],
@@ -403,6 +425,10 @@ SERIES = {
     "errors_4xx": lambda v: v["status_4xx"],
     "errors_5xx": lambda v: v["status_5xx"],
 }
+
+
+# Ряды графика: из сводов плюс посетители по шагам (из сырых логов).
+SERIES_PATTERN = "^(" + "|".join([*SERIES, "visitors"]) + ")$"
 
 
 def _trunc(unit: str, column):
@@ -474,6 +500,8 @@ async def timeseries(
         name: [fn((buckets.get(p) or empty).values) for p in points]
         for name, fn in SERIES.items()
     }
+    visitors = await _visitor_buckets(db, w, domain_ids, traffic)
+    series["visitors"] = [visitors.get(p, 0) for p in points]
     fmt = {"minute": "%H:%M", "hour": "%d.%m %H:00", "day": "%d.%m"}[w.bucket]
     return {
         "range": range_str,
@@ -484,6 +512,45 @@ async def timeseries(
         # Старый формат для экранов, которые просят одну метрику.
         "data": series.get(metric, series["requests"]),
     }
+
+
+async def _visitor_buckets(
+    db: AsyncSession, w: Window, domain_ids: Optional[Sequence[int]], traffic: Optional[str]
+) -> Dict[datetime, int]:
+    """Уникальные IP по шагам периода.
+
+    Их нельзя сложить из почасового свода (один человек за день — в каждом
+    часе), поэтому шаги в пределах 30 дней считаются по сырым логам, а дни
+    старше — из суточного свода, где уникальные посчитаны за сутки.
+    """
+    out: Dict[datetime, int] = {}
+    floor_raw = raw_floor()
+    start = max(w.start, floor_raw)
+    if start < w.end:
+        rows = (await db.execute(
+            select(
+                _trunc(w.bucket, RequestLog.timestamp).label("bucket"),
+                func.count(func.distinct(RequestLog.client_ip)).label("n"),
+            ).where(
+                RequestLog.timestamp >= start, RequestLog.timestamp < w.end,
+                RequestLog.domain_id.isnot(None),
+                *_domain_filter(RequestLog.domain_id, domain_ids),
+                *traffic_filter(traffic),
+            ).group_by(literal_column("1"))
+        )).all()
+        for row in rows:
+            key = row.bucket.replace(tzinfo=None) if row.bucket.tzinfo else row.bucket
+            out[floor(key, w.bucket)] = out.get(floor(key, w.bucket), 0) + int(row.n)
+    if w.bucket == "day" and w.start < floor_raw and not _filtered(traffic):
+        rows = (await db.execute(
+            select(DailyStats.day, func.coalesce(func.sum(DailyStats.unique_visitors), 0).label("n"))
+            .where(DailyStats.day >= w.start.date(), DailyStats.day < floor_raw.date(),
+                   *_domain_filter(DailyStats.domain_id, domain_ids))
+            .group_by(DailyStats.day)
+        )).all()
+        for row in rows:
+            out[datetime.combine(row.day, datetime.min.time())] = int(row.n)
+    return out
 
 
 # --- топы ------------------------------------------------------------------
@@ -554,8 +621,14 @@ async def top(
     domain_ids: Optional[Sequence[int]] = None,
     limit: int = 10,
     traffic: Optional[str] = None,
+    metric: str = "requests",
 ) -> Dict[str, Any]:
     """Топ значений измерения за период с долей от всех запросов.
+
+    ``metric`` — по чему ранжировать и считать долю: requests, views
+    (просмотры страниц) или visitors (уникальные IP). У каждой строки есть
+    все три числа. У адресов «посетитель» всегда один, их топ по visitors
+    строится по просмотрам; ошибки — всегда по запросам.
 
     Сырые логи хранятся 30 дней. Для страниц, стран и ошибок дни старше
     добираются из суточных топов; остальные измерения за 90 дней и полгода
@@ -573,9 +646,24 @@ async def top(
         *_domain_filter(RequestLog.domain_id, domain_ids),
         *traffic_filter(traffic),
     ]
-    mergeable = ("paths", "countries", "errors") if not _filtered(traffic) else ()
+    if dimension == "errors":
+        metric = "requests"
+    elif dimension == "ips" and metric == "visitors":
+        metric = "views"
+    # Суточные топы знают только запросы и не знают класс трафика.
+    mergeable = ("paths", "countries", "errors") if not _filtered(traffic) and metric == "requests" else ()
+    key_of = {"requests": "requests", "views": "views", "visitors": "visitors"}[metric]
 
-    total = (await db.execute(select(func.count(RequestLog.id)).where(*where))).scalar() or 0
+    totals_row = (await db.execute(
+        select(
+            func.count(RequestLog.id).label("requests"),
+            func.count(case((page_view_expr(), 1))).label("views"),
+            func.count(func.distinct(RequestLog.client_ip)).label("visitors"),
+        ).where(*where)
+    )).first()
+    total = int(totals_row.requests or 0)
+    total_views = int(totals_row.views or 0)
+    total_visitors = int(totals_row.visitors or 0)
 
     items: Dict[Any, Dict[str, Any]] = {}
     if dimension == "errors":
@@ -606,22 +694,26 @@ async def top(
                 func.count(RequestLog.id).label("requests"),
                 func.coalesce(func.sum(RequestLog.bytes_sent), 0).label("bytes"),
                 func.count(func.distinct(RequestLog.client_ip)).label("visitors"),
+                func.count(case((page_view_expr(), 1))).label("views"),
             ).where(*filters)
             .group_by(literal_column("1"))
-            .order_by(desc("requests")).limit(limit * 3)
+            .order_by(desc(key_of), desc("requests")).limit(limit * 3)
         )).all()
         for r in rows:
             items[r.key] = {
                 "key": r.key, "requests": int(r.requests), "bytes": int(r.bytes),
-                "visitors": int(r.visitors),
+                "visitors": int(r.visitors), "views": int(r.views),
             }
 
     if partial and dimension in mergeable:
         total += await _merge_daily_tops(db, dimension, w.start, floor_raw, domain_ids, items)
 
-    ranked = sorted(items.values(), key=lambda i: i["requests"], reverse=True)[:limit]
+    base = {"requests": total, "views": total_views, "visitors": total_visitors}[metric]
+    ranked = sorted(
+        items.values(), key=lambda i: (i.get(key_of, 0), i["requests"]), reverse=True
+    )[:limit]
     for item in ranked:
-        item["percentage"] = _ratio(item["requests"], total)
+        item["percentage"] = _ratio(item.get(key_of, 0), base)
     if dimension == "traffic":
         for item in ranked:
             item["label"] = tc.LABELS.get(item["key"], "Not classified")
@@ -630,6 +722,7 @@ async def top(
         await _describe_ips(db, where, ranked)
     return {
         "range": range_str, "dimension": dimension, "total_requests": int(total),
+        "total_views": total_views, "total_visitors": total_visitors, "metric": metric,
         "traffic": traffic or "all",
         "partial": partial and dimension not in mergeable,
         "items": ranked,
