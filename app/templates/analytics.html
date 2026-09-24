@@ -9,7 +9,7 @@
             <p style="color: var(--text-secondary); font-size: 14px;" id="period-note">Traffic across all your domains</p>
         </div>
         <div style="display: flex; gap: 12px;">
-            <select class="form-select" id="traffic" style="max-width: 160px;" title="Who sent the requests: people or bots">
+            <select class="form-select" id="traffic" style="min-width: 130px; max-width: 160px;" title="Who sent the requests: people or bots">
                 <option value="all" selected>All traffic</option>
                 <option value="people">People</option>
                 <option value="bots">Bots</option>
@@ -19,7 +19,7 @@
                 <option value="views">Count page views</option>
                 <option value="requests">Count requests</option>
             </select>
-            <select class="form-select" id="time-range" style="max-width: 200px;">
+            <select class="form-select" id="time-range" style="min-width: 165px; max-width: 200px;">
                 <option value="1h">Last Hour</option>
                 <option value="24h" selected>Last 24 Hours</option>
                 <option value="7d">Last 7 Days</option>
