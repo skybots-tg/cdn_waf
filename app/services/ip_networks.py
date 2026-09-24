@@ -63,7 +63,7 @@ _HOSTING_NAME = re.compile(
     r"pq hosting|firstbyte|beget|serverius|ionos|interserver|"
     # VPN и сканеры в сетях, по названию которых хостинг не узнать
     r"vseek|techoff|bucklog|akenai|turunc smart|global connectivity solutions|"
-    r"digital transformation plus|gthost|interkvm",
+    r"digital transformation plus|gthost|interkvm|logicweb|jsc iot",
     re.I,
 )
 

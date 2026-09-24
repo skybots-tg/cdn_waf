@@ -72,6 +72,9 @@ CUBOT = (
      "HeadlessChrome/153.0.0.0 Safari/537.36", tc.TOOL),
     # Обрезанный UA без версии браузера — скрипт, а не браузер.
     ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36", tc.TOOL),
+    # Версия Chrome не из четырёх чисел — так пишут скрипты, не браузер.
+    ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) "
+     "Chrome/120.0 Safari/537.36", tc.TOOL),
     ("", tc.TOOL),
     (None, tc.TOOL),
     ("Happ/4.4.1/Android/17891107313301967518", tc.APP),
@@ -135,6 +138,7 @@ def test_people_and_labels():
     (99999, "Hostkey B.v.", True),
     (99998, "Serv.host Group Ltd", True),
     (99997, "Ouiheberg SARL", True),
+    (64286, "LogicWeb Inc.", True),
     (21299, "Kar-Tel LLC", False),
     (3216, "PJSC Vimpelcom", False),
     (8402, "Corbina Telecom", False),

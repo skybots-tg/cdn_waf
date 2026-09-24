@@ -133,9 +133,10 @@ _BOT_UA = _rx(
     r"(bot|crawl|spider|slurp|fetcher|scraper)[\w.-]*/\d",
     r"\+https?://", r"compatible;[^)]*(bot|crawler|spider)",
 )
-# У настоящего браузера в UA есть движок с версией.
+# У настоящего браузера в UA есть движок с версией. У Chrome она всегда из
+# четырёх чисел (Chrome/153.0.0.0): «Chrome/120.0» пишут скрипты.
 _BROWSER_UA = _rx(
-    r"Chrome/\d", r"CriOS/\d", r"Firefox/\d", r"FxiOS/\d", r"Version/\d[^ ]* (Mobile/\S+ )?Safari/",
+    r"Chrome/\d+\.\d+\.\d+\.\d+", r"CriOS/\d", r"Firefox/\d", r"FxiOS/\d", r"Version/\d[^ ]* (Mobile/\S+ )?Safari/",
     r"Edg[A-Z]?/\d", r"OPR/\d", r"YaBrowser/\d", r"Mobile/\d+[A-Z]\d+", r"Trident/",
 )
 

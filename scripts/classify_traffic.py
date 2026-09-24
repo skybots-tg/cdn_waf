@@ -7,6 +7,9 @@
 
     cd /root/cdn_waf && venv/bin/python scripts/classify_traffic.py
 
+С ``--all`` размечает заново все строки — после правки правил в
+app/services/traffic_class.py или ip_networks.py.
+
 Скачивает GeoLite2-ASN, если её нет, проставляет asn и client_class пачками
 по id, затем проходит пересмотр (``refine_traffic_classes``) окнами по 4
 часа за весь срок хранения сырых логов. Повторный запуск безвреден: он
@@ -31,7 +34,7 @@ BATCH = 5000
 WINDOW = timedelta(hours=4)
 
 
-async def main() -> None:
+async def main(everything: bool = False) -> None:
     if not ip_networks.DB_PATH.exists():
         print("GeoLite2-ASN:", ip_networks.download_database())
     engine, Session = create_task_db_session()
@@ -49,7 +52,8 @@ async def main() -> None:
                 rows = (await db.execute(
                     select(RequestLog.id, RequestLog.client_ip, RequestLog.user_agent,
                            RequestLog.path, RequestLog.status_code)
-                    .where(RequestLog.id > last_id, RequestLog.client_class.is_(None))
+                    .where(RequestLog.id > last_id,
+                           *(() if everything else (RequestLog.client_class.is_(None),)))
                     .order_by(RequestLog.id).limit(BATCH)
                 )).all()
                 if not rows:
@@ -83,4 +87,4 @@ async def main() -> None:
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    asyncio.run(main(everything="--all" in sys.argv[1:]))
