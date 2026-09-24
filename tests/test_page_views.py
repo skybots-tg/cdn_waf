@@ -39,17 +39,19 @@ def test_page_view_rule():
     # 2xx и 304 (страница из кэша браузера), но не 301 и не 404
     assert "BETWEEN 200 AND 299" in sql and "status_code = 304" in sql
     # страница — без расширения или .html; /api/ — не страницы
-    assert r"'\.[A-Za-z0-9]{1,5}$'" in sql and r"'\.html?$'" in sql
+    assert r"'\.[A-Za-z0-9]{1,12}$'" in sql and r"'\.html?$'" in sql
     # psycopg2-диалект теста удваивает %, asyncpg в проде — нет
     assert "NOT LIKE '/api/%" in sql
 
 
 def test_page_view_path_regex_matches_postgres_intent():
-    # Та же регулярка, что уходит в Postgres: файл — расширение до 5 символов.
-    is_file = re.compile(r"\.[A-Za-z0-9]{1,5}$")
+    # Та же регулярка, что уходит в Postgres: файл — расширение до 12 символов.
+    is_file = re.compile(r"\.[A-Za-z0-9]{1,12}$")
     for page in ("/", "/ru/journal/app-cost/", "/work", "/brief/view/abc"):
         assert not is_file.search(page)
-    for asset in ("/_astro/Lamp.BDjW_UKr.css", "/media/work/perek/log-en.mp4", "/favicon.ico", "/robots.txt"):
+    # manifest.webmanifest браузер берёт с каждой страницей — это не просмотр
+    for asset in ("/_astro/Lamp.BDjW_UKr.css", "/media/work/perek/log-en.mp4", "/favicon.ico",
+                  "/robots.txt", "/manifest.webmanifest"):
         assert is_file.search(asset)
 
 

@@ -70,7 +70,7 @@ def page_view_expr():
         RequestLog.method == "GET",
         or_(RequestLog.status_code.between(200, 299), RequestLog.status_code == 304),
         or_(
-            ~path.op("~")(literal_column(r"'\.[A-Za-z0-9]{1,5}$'")),
+            ~path.op("~")(literal_column(r"'\.[A-Za-z0-9]{1,12}$'")),
             path.op("~*")(literal_column(r"'\.html?$'")),
         ),
         ~path.like(literal_column("'/api/%'")),
@@ -208,7 +208,7 @@ async def _return_dirty_hours(hours: List[datetime]) -> None:
 # только настоящий браузер.
 _PAGE_SQL = (
     "method = 'GET' AND status_code < 400 "
-    r"AND (path !~ '\.[A-Za-z0-9]{1,5}$' OR path ~* '\.html?$')"
+    r"AND (path !~ '\.[A-Za-z0-9]{1,12}$' OR path ~* '\.html?$')"
 )
 _VPN_SQL = f"""
 WITH s AS (
