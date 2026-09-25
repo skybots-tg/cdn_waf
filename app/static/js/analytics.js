@@ -289,7 +289,11 @@
         return function (item) {
             const order = [metric].concat(['visits', 'visitors', 'views', 'requests'].filter(m => m !== metric))
                 .filter(m => !(opts.skip || []).includes(m) && item[COUNT_UNITS[m][0]] != null);
-            const text = m => FC.num(item[COUNT_UNITS[m][0]]) + ' ' + COUNT_UNITS[m][1];
+            const one = { visits: 'visit', views: 'view' };
+            const text = m => {
+                const n = item[COUNT_UNITS[m][0]];
+                return FC.num(n) + ' ' + (n === 1 && one[m] ? one[m] : COUNT_UNITS[m][1]);
+            };
             const rest = order.slice(1).map(text).join(' · ');
             return text(order[0]) + (rest ? ' <span style="color:var(--text-muted);font-weight:400;font-size:12px;">· ' + rest + '</span>' : '');
         };
