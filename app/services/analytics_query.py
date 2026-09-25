@@ -350,23 +350,44 @@ async def visit_quality(
     последнего: CDN не видит, сколько человек читал последнюю страницу,
     поэтому оно короче метриковского, а у визита из одной страницы — ноль.
     """
-    sessions = visit_sessions(
+    sessions = _sessions(w, domain_ids, traffic)
+    return _quality((await db.execute(select(*_quality_columns(sessions)))).first())
+
+
+async def visit_quality_by_domain(
+    db: AsyncSession, w: Window, domain_ids: Optional[Sequence[int]] = None,
+    traffic: Optional[str] = None,
+) -> Dict[int, Dict[str, Optional[float]]]:
+    """То же по каждому домену — для таблицы доменов общей аналитики."""
+    sessions = _sessions(w, domain_ids, traffic)
+    rows = (await db.execute(
+        select(sessions.c.domain_id, *_quality_columns(sessions)).group_by(sessions.c.domain_id)
+    )).all()
+    return {r.domain_id: _quality(r) for r in rows}
+
+
+def _sessions(w: Window, domain_ids, traffic):
+    return visit_sessions(
         max(w.start, raw_floor()), w.end,
         *_domain_filter(RequestLog.domain_id, domain_ids), *traffic_filter(traffic),
     )
-    row = (await db.execute(
-        select(
-            func.count().label("visits"),
-            func.count(case((sessions.c.pages == 1, 1))).label("bounces"),
-            func.avg(sessions.c.pages).label("depth"),
-            func.avg(extract("epoch", sessions.c.last - sessions.c.first)).label("duration"),
-        )
-    )).first()
-    visits = int(row.visits or 0)
+
+
+def _quality_columns(sessions) -> tuple:
+    return (
+        func.count().label("visits"),
+        func.count(case((sessions.c.pages == 1, 1))).label("bounces"),
+        func.avg(sessions.c.pages).label("depth"),
+        func.avg(extract("epoch", sessions.c.last - sessions.c.first)).label("duration"),
+    )
+
+
+def _quality(row) -> Dict[str, Optional[float]]:
+    visits = int(row.visits or 0) if row else 0
     return {
         "bounce_rate": _ratio(int(row.bounces or 0), visits) if visits else None,
-        "visit_depth": round(float(row.depth), 2) if row.depth is not None else None,
-        "visit_duration": round(float(row.duration), 1) if row.duration is not None else None,
+        "visit_depth": round(float(row.depth), 2) if visits and row.depth is not None else None,
+        "visit_duration": round(float(row.duration), 1) if visits and row.duration is not None else None,
     }
 
 

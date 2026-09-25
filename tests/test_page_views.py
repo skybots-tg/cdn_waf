@@ -98,3 +98,13 @@ def test_visit_start_query():
     assert "'2026-09-24 09:30:00'" in sql
     # только просмотры страниц
     assert "request_logs.method = 'GET'" in sql
+
+
+def test_visit_quality_by_domain():
+    from datetime import datetime
+
+    # У визита есть домен — по нему таблица доменов считает отказы и время.
+    sessions = agg.visit_sessions(datetime(2026, 9, 24, 10), datetime(2026, 9, 24, 11))
+    assert {"domain_id", "first", "last", "pages"} <= set(sessions.c.keys())
+    empty = aq._quality(None)
+    assert empty == {"bounce_rate": None, "visit_depth": None, "visit_duration": None}

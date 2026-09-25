@@ -76,6 +76,7 @@ async def get_domains_stats(
     w = aq.window(range)
     by_domain = await aq.totals(db, w, domain_ids, group_by="domain", traffic=traffic)
     visitors = await aq.visitors_by_domain(db, w, domain_ids, traffic)
+    quality = await aq.visit_quality_by_domain(db, w, domain_ids, traffic)
     rows = []
     for domain in domains:
         m = by_domain.get(domain.id, aq.Metrics()).as_dict()
@@ -84,6 +85,8 @@ async def get_domains_stats(
             "name": domain.name,
             "status": domain.status.value,
             "visits": m["visits"],
+            # Отказы и время визита — по сырым логам (последние 30 дней).
+            **quality.get(domain.id, aq._quality(None)),
             "visitors": visitors.get(domain.id, 0),
             "page_views": m["page_views"],
             "requests": m["total_requests"],

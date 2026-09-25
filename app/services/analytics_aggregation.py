@@ -171,6 +171,7 @@ def visit_sessions(start: datetime, end: datetime, *where):
         ).label("n"),
     ).subquery()
     visits = select(
+        numbered.c.d.label("domain_id"),
         func.min(numbered.c.ts).label("first"),
         func.max(numbered.c.ts).label("last"),
         func.count().label("pages"),
