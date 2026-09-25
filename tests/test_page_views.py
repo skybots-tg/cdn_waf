@@ -75,3 +75,26 @@ def test_series_and_top_metrics():
     top = re.compile(aq.TOP_METRIC_PATTERN)
     assert all(top.match(m) for m in ("requests", "views", "visitors"))
     assert not top.match("bytes")
+
+
+def test_visits_like_metrica():
+    # Визит рвётся после 30 минут тишины, как в Метрике.
+    assert agg.VISIT_TIMEOUT.total_seconds() == 30 * 60
+    # Визиты складываются из часов в сутки и видны на экранах.
+    assert "visits" in agg._SUMMED_FIELDS and "visits" not in agg._HOURLY_FIELDS
+    assert "visits" in aq.FIELDS
+    assert re.compile(aq.SERIES_PATTERN).match("visits")
+    assert re.compile(aq.TOP_METRIC_PATTERN).match("visits")
+
+
+def test_visit_start_query():
+    from datetime import datetime
+
+    starts = agg.visit_starts(datetime(2026, 9, 24, 10), datetime(2026, 9, 24, 11))
+    sql = _sql(starts.select())
+    # предыдущий просмотр того же посетителя (сайт, IP, User-Agent)
+    assert "lag(request_logs.timestamp) OVER (PARTITION BY request_logs.domain_id, request_logs.client_ip" in sql
+    # просмотры за полчаса до часа — чтобы продолжение визита не считалось новым
+    assert "'2026-09-24 09:30:00'" in sql
+    # только просмотры страниц
+    assert "request_logs.method = 'GET'" in sql

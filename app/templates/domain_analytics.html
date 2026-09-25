@@ -38,7 +38,8 @@
                 <option value="bots">Bots</option>
             </select>
             <select class="form-select" id="top-count" style="min-width: 190px; max-width: 210px;" title="What the top lists count">
-                <option value="visitors" selected>Count unique IPs</option>
+                <option value="visits" selected>Count visits</option>
+                <option value="visitors">Count unique IPs</option>
                 <option value="views">Count page views</option>
                 <option value="requests">Count requests</option>
             </select>
@@ -57,6 +58,12 @@
 
     <!-- Key Metrics: traffic -->
     <div class="grid grid-5 gap-3 mb-3">
+        <div class="glass-card metric">
+            <div class="metric-title"><i class="fas fa-route"></i> Visits</div>
+            <div class="metric-value" id="visits">-</div>
+            <div class="metric-sub" id="visits-sub">-</div>
+            <div class="metric-change" id="visits-change">-</div>
+        </div>
         <div class="glass-card metric">
             <div class="metric-title"><i class="fas fa-users"></i> Unique Visitors</div>
             <div class="metric-value" id="unique-visitors">-</div>
@@ -81,16 +88,16 @@
             <div class="metric-sub" id="bandwidth-split">-</div>
             <div class="metric-change" id="bandwidth-change">-</div>
         </div>
+    </div>
+
+    <!-- Key Metrics: quality -->
+    <div class="grid grid-5 gap-3 mb-4">
         <div class="glass-card metric">
             <div class="metric-title"><i class="fas fa-shield-alt"></i> Threats</div>
             <div class="metric-value" style="color: var(--error);" id="threats-blocked">-</div>
             <div class="metric-sub" id="threats-split">-</div>
             <div class="metric-change" id="threats-change">-</div>
         </div>
-    </div>
-
-    <!-- Key Metrics: quality -->
-    <div class="grid grid-4 gap-3 mb-4">
         <div class="glass-card metric">
             <div class="metric-title"><i class="fas fa-bolt"></i> Percent Cached</div>
             <div class="metric-value" style="color: var(--success);" id="cache-ratio">-</div>
@@ -120,7 +127,8 @@
         <div class="flex-between mb-3">
             <h2 style="font-size: 20px; font-weight: 600;">Traffic</h2>
             <div class="flex gap-2">
-                <button id="btn-metric-visitors" class="btn btn-sm btn-primary" onclick="changeChartMetric('visitors')">Visitors</button>
+                <button id="btn-metric-visits" class="btn btn-sm btn-primary" onclick="changeChartMetric('visits')">Visits</button>
+                <button id="btn-metric-visitors" class="btn btn-sm btn-secondary" onclick="changeChartMetric('visitors')">Visitors</button>
                 <button id="btn-metric-page_views" class="btn btn-sm btn-secondary" onclick="changeChartMetric('page_views')">Page views</button>
                 <button id="btn-metric-requests" class="btn btn-sm btn-secondary" onclick="changeChartMetric('requests')">Requests</button>
                 <button id="btn-metric-bandwidth" class="btn btn-sm btn-secondary" onclick="changeChartMetric('bandwidth')">Bandwidth</button>
@@ -228,12 +236,12 @@
 <script>
 const DOMAIN_ID = {{ domain.id }};
 const DOMAIN_API = `/api/v1/domains/${DOMAIN_ID}`;
-let chartMetric = 'visitors';
+let chartMetric = 'visits';
 let trafficChart = null;
 let lastSeries = null;
 let currentRange = '24h';
 let currentTraffic = 'all';
-let currentCount = 'visitors';
+let currentCount = 'visits';
 
 function setText(id, value) { const el = document.getElementById(id); if (el) el.textContent = value; }
 function setHtml(id, value) { const el = document.getElementById(id); if (el) el.innerHTML = value; }
@@ -246,6 +254,9 @@ async function loadOverview(range) {
     setText('total-bandwidth', FC.bytes(s.total_bandwidth));
     setText('bandwidth-split', `${FC.bytes(s.cached_bandwidth)} cached · ${FC.bytes(s.uncached_bandwidth)} uncached`);
     setHtml('bandwidth-change', FC.change(s.changes.bandwidth));
+    setText('visits', FC.num(s.visits));
+    setText('visits-sub', FC.visitStats(s));
+    setHtml('visits-change', FC.change(s.changes.visits));
     setText('unique-visitors', FC.num(s.unique_visitors));
     setText('page-views', FC.num(s.page_views));
     setText('page-views-sub', s.unique_visitors ? `${(s.page_views / s.unique_visitors).toFixed(1)} per visitor` : 'Pages, not files');
@@ -290,7 +301,7 @@ async function loadChart(range) {
 
 function changeChartMetric(metric) {
     chartMetric = metric;
-    ['visitors', 'page_views', 'requests', 'bandwidth'].forEach(m => {
+    ['visits', 'visitors', 'page_views', 'requests', 'bandwidth'].forEach(m => {
         document.getElementById('btn-metric-' + m).className = 'btn btn-sm ' + (metric === m ? 'btn-primary' : 'btn-secondary');
     });
     if (lastSeries) trafficChart = FC.trafficChart(document.getElementById('traffic-chart'), trafficChart, lastSeries, chartMetric);
@@ -360,7 +371,7 @@ async function loadAnalytics(range) {
         loadTop('hosts', 'top-hosts', { count: true }),
         loadTop('traffic', 'top-traffic', { count: true, limit: 15, format: FC.trafficLabel }),
         loadTop('browsers', 'top-browsers', { count: true }),
-        loadTop('ips', 'top-ips', { count: true, format: FC.ipLabel, value: i => `${FC.num(i.views)} views · ${FC.num(i.requests)} req · ${FC.bytes(i.bytes)}` }),
+        loadTop('ips', 'top-ips', { count: true, format: FC.ipLabel, value: i => `${FC.num(i.visits)} visits · ${FC.num(i.views)} views · ${FC.num(i.requests)} req · ${FC.bytes(i.bytes)}` }),
         loadTop('errors', 'top-errors', {
             color: 'var(--error)',
             format: i => `<span style="color:${FC.statusColor(i.status)}; font-weight:600;">${i.status}</span> <span class="mono">${FC.escape(i.path)}</span>`,

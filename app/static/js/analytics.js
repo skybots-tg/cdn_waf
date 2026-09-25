@@ -195,7 +195,7 @@
             fill: true, tension: 0.3, pointRadius: 0, borderWidth: 2,
         });
         // Просмотры и посетители — одна линия; у запросов и трафика — ещё «из кэша».
-        const single = { page_views: 'Page views', visitors: 'Unique visitors (IP)' }[metric];
+        const single = { visits: 'Visits', page_views: 'Page views', visitors: 'Unique visitors (IP)' }[metric];
         const datasets = single
             ? [line(single, data.series[metric] || [], accent)]
             : [
@@ -278,18 +278,34 @@
         return select.value;
     };
 
-    const COUNT_UNITS = { visitors: ['visitors', 'IP'], views: ['views', 'views'], requests: ['requests', 'req'] };
+    const COUNT_UNITS = {
+        visits: ['visits', 'visits'], visitors: ['visitors', 'IP'],
+        views: ['views', 'views'], requests: ['requests', 'req'],
+    };
 
     // Число справа в строке топа: выбранная метрика крупно, остальные мелко.
     FC.countValue = function (metric, opts) {
         opts = opts || {};
         return function (item) {
-            const order = [metric].concat(['visitors', 'views', 'requests'].filter(m => m !== metric))
+            const order = [metric].concat(['visits', 'visitors', 'views', 'requests'].filter(m => m !== metric))
                 .filter(m => !(opts.skip || []).includes(m) && item[COUNT_UNITS[m][0]] != null);
             const text = m => FC.num(item[COUNT_UNITS[m][0]]) + ' ' + COUNT_UNITS[m][1];
             const rest = order.slice(1).map(text).join(' · ');
             return text(order[0]) + (rest ? ' <span style="color:var(--text-muted);font-weight:400;font-size:12px;">· ' + rest + '</span>' : '');
         };
+    };
+
+    // Время визита «1:05» (секунды → минуты:секунды), как в Метрике.
+    FC.duration = function (seconds) {
+        if (seconds == null) return '—';
+        const s = Math.round(Number(seconds) || 0);
+        return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0');
+    };
+
+    // Подпись под визитами: отказы, глубина, время — по сырым логам.
+    FC.visitStats = function (s) {
+        if (!s.visits) return 'Page views with less than 30 min between them';
+        return FC.pct(s.bounce_rate) + ' bounce · ' + (s.visit_depth || 0).toFixed(1) + ' pages · ' + FC.duration(s.visit_duration);
     };
 
     // Строка топа «Who Visits»: люди — зелёные, боты — серые.

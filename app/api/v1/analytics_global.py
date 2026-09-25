@@ -83,6 +83,7 @@ async def get_domains_stats(
             "id": domain.id,
             "name": domain.name,
             "status": domain.status.value,
+            "visits": m["visits"],
             "visitors": visitors.get(domain.id, 0),
             "page_views": m["page_views"],
             "requests": m["total_requests"],

@@ -110,6 +110,72 @@ _HOURLY_FIELDS = (
     "cached_bytes", "waf_blocked", "waf_challenged", "rate_limited",
     "total_bytes_received", "origin_requests",
 )
+# Суммируются из часов в сутки: всё из сырых логов плюс визиты.
+_SUMMED_FIELDS = _HOURLY_FIELDS + ("visits",)
+
+# Визит — как в Яндекс Метрике: просмотры страниц одного посетителя, пока
+# между ними меньше 30 минут. Посетитель — IP и User-Agent (cookie CDN не
+# видит). Визит считается в часе, где он начался, поэтому визиты складываются
+# из часов в сутки и периоды, как запросы.
+VISIT_TIMEOUT = timedelta(minutes=30)
+
+
+def _visitor_key():
+    return (
+        RequestLog.domain_id,
+        RequestLog.client_ip,
+        func.coalesce(RequestLog.user_agent, literal_column("''")),
+    )
+
+
+def visit_starts(start: datetime, end: datetime, *where):
+    """id просмотров, с которых начались визиты в [start, end).
+
+    Смотрим и на 30 минут до start: просмотр, до которого у посетителя был
+    другой за полчаса до начала периода, — продолжение визита, а не новый.
+    ``where`` — те же фильтры, что у экрана (домены, люди/боты).
+    """
+    prev = func.lag(RequestLog.timestamp).over(
+        partition_by=_visitor_key(), order_by=RequestLog.timestamp
+    )
+    views = select(
+        RequestLog.id.label("id"), RequestLog.timestamp.label("ts"), prev.label("prev"),
+    ).where(
+        RequestLog.timestamp >= start - VISIT_TIMEOUT, RequestLog.timestamp < end,
+        RequestLog.domain_id.isnot(None), page_view_expr(), *where,
+    ).subquery()
+    return select(views.c.id).where(
+        views.c.ts >= start,
+        or_(views.c.prev.is_(None), views.c.ts - views.c.prev > VISIT_TIMEOUT),
+    ).subquery()
+
+
+def visit_sessions(start: datetime, end: datetime, *where):
+    """Визиты, начавшиеся в [start, end): первый и последний просмотр, число страниц."""
+    key = _visitor_key()
+    prev = func.lag(RequestLog.timestamp).over(partition_by=key, order_by=RequestLog.timestamp)
+    views = select(
+        key[0].label("d"), key[1].label("ip"), key[2].label("ua"),
+        RequestLog.timestamp.label("ts"), prev.label("prev"),
+    ).where(
+        RequestLog.timestamp >= start - VISIT_TIMEOUT, RequestLog.timestamp < end,
+        RequestLog.domain_id.isnot(None), page_view_expr(), *where,
+    ).subquery()
+    is_start = case(
+        (or_(views.c.prev.is_(None), views.c.ts - views.c.prev > VISIT_TIMEOUT), 1), else_=0
+    )
+    numbered = select(
+        views.c.d, views.c.ip, views.c.ua, views.c.ts,
+        func.sum(is_start).over(
+            partition_by=(views.c.d, views.c.ip, views.c.ua), order_by=views.c.ts
+        ).label("n"),
+    ).subquery()
+    visits = select(
+        func.min(numbered.c.ts).label("first"),
+        func.max(numbered.c.ts).label("last"),
+        func.count().label("pages"),
+    ).group_by(numbered.c.d, numbered.c.ip, numbered.c.ua, numbered.c.n).subquery()
+    return select(visits).where(visits.c.first >= start).subquery()
 
 
 async def aggregate_hourly_stats(
@@ -139,9 +205,21 @@ async def aggregate_hourly_stats(
 
     rows = (await db.execute(query)).all()
 
+    # Визиты, начавшиеся в этом часе, — по домену и ноде первого просмотра.
+    starts = visit_starts(hour_start, hour_end)
+    visits = {
+        (r.domain_id, r.edge_node_id): int(r.n)
+        for r in (await db.execute(
+            select(RequestLog.domain_id, RequestLog.edge_node_id, func.count().label("n"))
+            .join(starts, starts.c.id == RequestLog.id)
+            .group_by(RequestLog.domain_id, RequestLog.edge_node_id)
+        )).all()
+    }
+
     now = datetime.utcnow()
     for row in rows:
         values = {name: int(getattr(row, name) or 0) for name in _HOURLY_FIELDS}
+        values["visits"] = visits.get((row.domain_id, row.edge_node_id), 0)
         values["avg_response_time"] = float(row.avg_response_time or 0)
         values["avg_origin_time"] = float(row.avg_origin_time or 0)
         stmt = insert(HourlyStats).values(
@@ -327,7 +405,7 @@ async def aggregate_daily_stats(
     per_hour = select(
         HourlyStats.domain_id.label("domain_id"),
         HourlyStats.hour.label("hour"),
-        *[func.sum(getattr(HourlyStats, f)).label(f) for f in _HOURLY_FIELDS],
+        *[func.sum(getattr(HourlyStats, f)).label(f) for f in _SUMMED_FIELDS],
         func.sum(HourlyStats.avg_response_time * HourlyStats.total_requests).label("rt_weighted"),
         func.sum(HourlyStats.avg_origin_time * HourlyStats.origin_requests).label("ot_weighted"),
     ).where(
@@ -338,7 +416,7 @@ async def aggregate_daily_stats(
 
     query = select(
         per_hour.c.domain_id,
-        *[func.sum(per_hour.c[f]).label(f) for f in _HOURLY_FIELDS],
+        *[func.sum(per_hour.c[f]).label(f) for f in _SUMMED_FIELDS],
         func.sum(per_hour.c.rt_weighted).label("rt_weighted"),
         func.sum(per_hour.c.ot_weighted).label("ot_weighted"),
         func.max(per_hour.c.total_requests).label("peak_requests_hour"),
@@ -360,7 +438,7 @@ async def aggregate_daily_stats(
         # Среднее время ответа — взвешенное по запросам, а не среднее средних:
         # тихий час с одним медленным запросом не должен весить как пиковый.
         avg_rt = float(row.rt_weighted or 0) / requests if requests else 0.0
-        values = {name: int(getattr(row, name) or 0) for name in _HOURLY_FIELDS}
+        values = {name: int(getattr(row, name) or 0) for name in _SUMMED_FIELDS}
         origin = int(row.origin_requests or 0)
         values.update(
             avg_response_time=avg_rt,

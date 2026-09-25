@@ -15,7 +15,8 @@
                 <option value="bots">Bots</option>
             </select>
             <select class="form-select" id="top-count" style="min-width: 190px; max-width: 210px;" title="What the top lists count">
-                <option value="visitors" selected>Count unique IPs</option>
+                <option value="visits" selected>Count visits</option>
+                <option value="visitors">Count unique IPs</option>
                 <option value="views">Count page views</option>
                 <option value="requests">Count requests</option>
             </select>
@@ -34,6 +35,12 @@
 
     <!-- Traffic -->
     <div class="grid grid-5 gap-3 mb-3">
+        <div class="glass-card">
+            <div class="metric-title"><i class="fas fa-route"></i> Visits</div>
+            <div class="metric-value" id="global-visits">-</div>
+            <div class="metric-sub" id="global-visits-sub">-</div>
+            <div class="metric-change" id="global-visits-change">-</div>
+        </div>
         <div class="glass-card">
             <div class="metric-title"><i class="fas fa-users"></i> Unique Visitors</div>
             <div class="metric-value" id="global-visitors">-</div>
@@ -58,16 +65,16 @@
             <div class="metric-sub" id="global-bandwidth-split">-</div>
             <div class="metric-change" id="global-bandwidth-change">-</div>
         </div>
+    </div>
+
+    <!-- Quality -->
+    <div class="grid grid-5 gap-3 mb-4">
         <div class="glass-card">
             <div class="metric-title"><i class="fas fa-shield-alt"></i> Threats</div>
             <div class="metric-value" style="color: var(--error);" id="global-threats">-</div>
             <div class="metric-sub" id="global-threats-split">-</div>
             <div class="metric-change" id="global-threats-change">-</div>
         </div>
-    </div>
-
-    <!-- Quality -->
-    <div class="grid grid-4 gap-3 mb-4">
         <div class="glass-card">
             <div class="metric-title"><i class="fas fa-bolt"></i> Percent Cached</div>
             <div class="metric-value" style="color: var(--success);" id="global-cache">-</div>
@@ -97,7 +104,8 @@
         <div class="flex-between mb-3">
             <h2 style="font-size: 20px; font-weight: 600;">Traffic</h2>
             <div class="flex gap-2">
-                <button id="btn-metric-visitors" class="btn btn-sm btn-primary" onclick="changeGlobalChartMetric('visitors')">Visitors</button>
+                <button id="btn-metric-visits" class="btn btn-sm btn-primary" onclick="changeGlobalChartMetric('visits')">Visits</button>
+                <button id="btn-metric-visitors" class="btn btn-sm btn-secondary" onclick="changeGlobalChartMetric('visitors')">Visitors</button>
                 <button id="btn-metric-page_views" class="btn btn-sm btn-secondary" onclick="changeGlobalChartMetric('page_views')">Page views</button>
                 <button id="btn-metric-requests" class="btn btn-sm btn-secondary" onclick="changeGlobalChartMetric('requests')">Requests</button>
                 <button id="btn-metric-bandwidth" class="btn btn-sm btn-secondary" onclick="changeGlobalChartMetric('bandwidth')">Bandwidth</button>
@@ -177,12 +185,12 @@
 <script>
 let currentRange = '24h';
 let currentTraffic = 'all';
-let currentCount = 'visitors';
-let chartMetric = 'visitors';
+let currentCount = 'visits';
+let chartMetric = 'visits';
 let chart = null;
 let lastSeries = null;
 let domainRows = [];
-let domainSort = { key: 'visitors', desc: true };
+let domainSort = { key: 'visits', desc: true };
 
 function setText(id, v) { const el = document.getElementById(id); if (el) el.textContent = v; }
 function setHtml(id, v) { const el = document.getElementById(id); if (el) el.innerHTML = v; }
@@ -195,6 +203,9 @@ async function loadOverview(range) {
     setText('global-bandwidth', FC.bytes(s.total_bandwidth));
     setText('global-bandwidth-split', `${FC.bytes(s.cached_bandwidth)} cached · ${FC.bytes(s.uncached_bandwidth)} uncached`);
     setHtml('global-bandwidth-change', FC.change(s.changes.bandwidth));
+    setText('global-visits', FC.num(s.visits));
+    setText('global-visits-sub', FC.visitStats(s));
+    setHtml('global-visits-change', FC.change(s.changes.visits));
     setText('global-visitors', FC.num(s.unique_visitors));
     setText('global-page-views', FC.num(s.page_views));
     setText('global-page-views-sub', s.unique_visitors ? `${(s.page_views / s.unique_visitors).toFixed(1)} per visitor` : 'Pages, not files');
@@ -239,7 +250,7 @@ async function loadChart(range) {
 
 function changeGlobalChartMetric(metric) {
     chartMetric = metric;
-    ['visitors', 'page_views', 'requests', 'bandwidth'].forEach(m => {
+    ['visits', 'visitors', 'page_views', 'requests', 'bandwidth'].forEach(m => {
         document.getElementById('btn-metric-' + m).className = 'btn btn-sm ' + (metric === m ? 'btn-primary' : 'btn-secondary');
     });
     if (lastSeries) chart = FC.trafficChart(document.getElementById('global-traffic-chart'), chart, lastSeries, chartMetric);
@@ -248,6 +259,7 @@ function changeGlobalChartMetric(metric) {
 const DOMAIN_COLUMNS = [
     { key: 'name', title: 'Domain', render: d => `<a href="/domains/${d.id}/analytics?range=${currentRange}&traffic=${currentTraffic}&count=${currentCount}" style="font-weight:600;">${FC.escape(d.name)}</a>` },
     { key: 'status', title: 'Status', render: d => `<span class="badge ${d.status === 'active' ? 'badge-success' : 'badge-warning'}">${FC.escape(d.status)}</span>` },
+    { key: 'visits', title: 'Visits', render: d => FC.num(d.visits) },
     { key: 'visitors', title: 'Visitors', render: d => FC.num(d.visitors) },
     { key: 'page_views', title: 'Page views', render: d => FC.num(d.page_views) },
     { key: 'requests', title: 'Requests', render: d => FC.num(d.requests) },
