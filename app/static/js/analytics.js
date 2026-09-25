@@ -88,9 +88,11 @@
     let regionNames = null;
     try { regionNames = new Intl.DisplayNames(['en'], { type: 'region' }); } catch (e) { regionNames = null; }
 
+    // Код страны меткой: флаги-эмодзи Windows рисует двумя буквами, и в
+    // списке это выглядело как опечатка (стиль .cc — в style.css).
     FC.flag = function (code) {
-        if (!code || !/^[A-Za-z]{2}$/.test(code)) return '🏳️';
-        return String.fromCodePoint(...code.toUpperCase().split('').map(c => 0x1F1E6 + c.charCodeAt(0) - 65));
+        if (!code || !/^[A-Za-z]{2}$/.test(code)) return '<span class="cc">··</span>';
+        return '<span class="cc">' + code.toUpperCase() + '</span>';
     };
 
     FC.country = function (code) {
@@ -159,65 +161,56 @@
             FC.escape((err && err.message) || err || 'Failed to load') + '</p>';
     };
 
-    // Список «значение — доля — число» с полоской, как топы у Cloudflare.
-    // format(item) → HTML подписи; value(item) → число справа.
-    FC.renderTop = function (el, items, opts) {
-        opts = opts || {};
-        if (!el) return;
-        if (!items || !items.length) return FC.empty(el, opts.emptyText);
-        const field = (COUNT_UNITS[opts.metric] || COUNT_UNITS.requests)[0];
-        const size = i => (i[field] != null ? i[field] : i.requests) || 0;
-        const max = Math.max(...items.map(size), 1);
-        el.innerHTML = items.map(function (item) {
-            const label = opts.format ? opts.format(item) : FC.escape(item.key == null ? '—' : item.key);
-            const width = Math.max(2, Math.round(size(item) / max * 100));
-            const right = opts.value ? opts.value(item) : FC.num(item.requests);
-            const pct = item.percentage != null ? '<span style="color:var(--text-muted);font-size:12px;margin-left:8px;">' + FC.pct(item.percentage) + '</span>' : '';
-            return '<div style="margin-bottom:10px;">' +
-                '<div class="flex-between" style="gap:12px;font-size:14px;">' +
-                '<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;" title="' + FC.escape(item.key) + '">' + label + '</span>' +
-                '<span style="font-weight:600;white-space:nowrap;">' + right + pct + '</span></div>' +
-                '<div style="height:4px;background:var(--bg-tertiary);border-radius:2px;margin-top:4px;">' +
-                '<div style="height:4px;width:' + width + '%;background:' + (opts.color || 'var(--accent-primary)') + ';border-radius:2px;"></div></div></div>';
-        }).join('') + (opts.partial ? '<p style="font-size:12px;color:var(--text-muted);margin-top:8px;">Raw logs are kept for 30 days — this list covers the last 30 days.</p>' : '');
-    };
+    // Цвета графика из темы: подписи и сетка не спорят с данными.
+    function themeColors() {
+        const st = getComputedStyle(document.documentElement);
+        const v = (name, fallback) => st.getPropertyValue(name).trim() || fallback;
+        return {
+            accent: v('--accent-primary', '#ff6b35'), second: v('--accent-secondary', '#339af0'),
+            text: v('--text-muted', '#868e96'), grid: v('--glass-border', 'rgba(128,128,128,.2)'),
+        };
+    }
 
-    // График «всего / из кэша» по шагам периода (Chart.js).
+    // График по шагам периода (Chart.js). Одна линия — без легенды: её
+    // называет кнопка над графиком. У запросов и трафика вторая линия —
+    // «из кэша», тогда легенда нужна.
     FC.trafficChart = function (canvas, previous, data, metric) {
         if (previous) previous.destroy();
         const isBytes = metric === 'bandwidth';
+        const c = themeColors();
         const labels = data.timestamps.map(t => FC.bucketLabel(t, data.bucket));
-        const styles = getComputedStyle(document.documentElement);
-        const accent = styles.getPropertyValue('--accent-primary').trim() || '#f38020';
-        const success = styles.getPropertyValue('--success').trim() || '#10b981';
-        const line = (label, values, color) => ({
-            label: label, data: values, borderColor: color, backgroundColor: color + '22',
-            fill: true, tension: 0.3, pointRadius: 0, borderWidth: 2,
+        const line = (label, values, color, fill) => ({
+            label: label, data: values, borderColor: color, backgroundColor: color + '26',
+            fill: fill, cubicInterpolationMode: 'monotone', pointRadius: 0, pointHoverRadius: 4,
+            pointHoverBackgroundColor: color, borderWidth: 2,
         });
-        // Просмотры и посетители — одна линия; у запросов и трафика — ещё «из кэша».
         const single = { visits: 'Visits', page_views: 'Page views', visitors: 'Unique visitors (IP)' }[metric];
         const datasets = single
-            ? [line(single, data.series[metric] || [], accent)]
+            ? [line(single, data.series[metric] || [], c.accent, true)]
             : [
-                line(isBytes ? 'Total bandwidth' : 'Total requests', isBytes ? data.series.bandwidth : data.series.requests, accent),
-                line(isBytes ? 'Served from cache' : 'Cached requests', isBytes ? data.series.cached_bandwidth : data.series.cached_requests, success),
+                line(isBytes ? 'Total' : 'All requests', isBytes ? data.series.bandwidth : data.series.requests, c.accent, true),
+                line(isBytes ? 'From cache' : 'From cache', isBytes ? data.series.cached_bandwidth : data.series.cached_requests, c.second, false),
             ];
         return new Chart(canvas.getContext('2d'), {
             type: 'line',
-            data: {
-                labels: labels,
-                datasets: datasets,
-            },
+            data: { labels: labels, datasets: datasets },
             options: {
                 responsive: true, maintainAspectRatio: false,
                 interaction: { mode: 'index', intersect: false },
                 plugins: {
-                    legend: { display: true, labels: { boxWidth: 12 } },
-                    tooltip: { callbacks: { label: c => c.dataset.label + ': ' + (isBytes ? FC.bytes(c.parsed.y) : FC.num(c.parsed.y)) } },
+                    legend: {
+                        display: datasets.length > 1, align: 'end',
+                        labels: { boxWidth: 10, boxHeight: 10, color: c.text, usePointStyle: true, pointStyle: 'rectRounded' },
+                    },
+                    tooltip: { callbacks: { label: t => ' ' + t.dataset.label + ': ' + (isBytes ? FC.bytes(t.parsed.y) : FC.num(t.parsed.y)) } },
                 },
                 scales: {
-                    x: { ticks: { maxTicksLimit: 10, autoSkip: true }, grid: { display: false } },
-                    y: { beginAtZero: true, ticks: { callback: v => isBytes ? FC.bytes(v) : FC.num(v) } },
+                    x: { ticks: { maxTicksLimit: 8, autoSkip: true, color: c.text, maxRotation: 0 }, grid: { display: false }, border: { color: c.grid } },
+                    y: {
+                        beginAtZero: true, border: { display: false }, grid: { color: c.grid },
+                        // Визиты и просмотры — целые: деления «0.5» бессмысленны.
+                        ticks: { color: c.text, precision: 0, maxTicksLimit: 6, callback: v => isBytes ? FC.bytes(v) : FC.num(v) },
+                    },
                 },
             },
         });
@@ -228,75 +221,60 @@
                   '90d': 'last 90 days', '6m': 'last 6 months' })[range] || range;
     };
 
+    function remember(param, storage, value, fallback) {
+        try { localStorage.setItem(storage, value); } catch (e) { /* приватный режим */ }
+        const p = new URLSearchParams(window.location.search);
+        if (value === fallback) p.delete(param); else p.set(param, value);
+        const query = p.toString();
+        history.replaceState(null, '', window.location.pathname + (query ? '?' + query : ''));
+    }
+
     // Период в адресе (?range=7d): страницу можно обновить или переслать.
     FC.initRange = function (select, onChange) {
         const params = new URLSearchParams(window.location.search);
-        const saved = params.get('range') || localStorage.getItem('analytics_range');
+        let saved = params.get('range');
+        try { saved = saved || localStorage.getItem('analytics_range'); } catch (e) { /* приватный режим */ }
         if (saved && [...select.options].some(o => o.value === saved)) select.value = saved;
         select.addEventListener('change', function () {
-            try { localStorage.setItem('analytics_range', select.value); } catch (e) { /* приватный режим */ }
-            const p = new URLSearchParams(window.location.search);
-            p.set('range', select.value);
-            history.replaceState(null, '', window.location.pathname + '?' + p.toString());
+            remember('range', 'analytics_range', select.value, null);
             onChange(select.value);
         });
         return select.value;
     };
 
-    // Фильтр «кто прислал запрос» (?traffic=people): all — всё, people — люди,
-    // bots — боты. Классы считает панель (app/services/traffic_class.py).
-    FC.initTraffic = function (select, onChange) {
-        const params = new URLSearchParams(window.location.search);
-        let saved = params.get('traffic');
-        try { saved = saved || localStorage.getItem('analytics_traffic'); } catch (e) { /* приватный режим */ }
-        if (saved && [...select.options].some(o => o.value === saved)) select.value = saved;
-        select.addEventListener('change', function () {
-            try { localStorage.setItem('analytics_traffic', select.value); } catch (e) { /* приватный режим */ }
-            const p = new URLSearchParams(window.location.search);
-            if (select.value === 'all') p.delete('traffic'); else p.set('traffic', select.value);
-            const query = p.toString();
-            history.replaceState(null, '', window.location.pathname + (query ? '?' + query : ''));
-            onChange(select.value);
-        });
-        return select.value;
+    // Переключатель из кнопок (.seg): значение в адресе (?traffic=people,
+    // ?count=views) и в памяти браузера, как у периода.
+    //   traffic — кто прислал запрос: all, people, bots (классы — app/services/traffic_class.py);
+    //   count   — что считают отчёты: visits, visitors, views, requests.
+    FC.initSeg = function (el, param, fallback, onChange) {
+        const storage = 'analytics_' + param;
+        const buttons = [...el.querySelectorAll('button[data-value]')];
+        const valid = v => buttons.some(b => b.dataset.value === v);
+        let value = new URLSearchParams(window.location.search).get(param);
+        try { value = value || localStorage.getItem(storage); } catch (e) { /* приватный режим */ }
+        if (!valid(value)) value = fallback;
+        const paint = () => buttons.forEach(b => b.setAttribute('aria-pressed', String(b.dataset.value === value)));
+        paint();
+        buttons.forEach(b => b.addEventListener('click', () => {
+            if (b.dataset.value === value) return;
+            value = b.dataset.value;
+            paint();
+            remember(param, storage, value, fallback);
+            onChange(value);
+        }));
+        return value;
     };
 
-    // Что считают топы (?count=visitors): уникальные IP, просмотры страниц
-    // или запросы. Одна страница — это десятки запросов за CSS и картинками.
-    FC.initCount = function (select, onChange) {
-        const params = new URLSearchParams(window.location.search);
-        let saved = params.get('count');
-        try { saved = saved || localStorage.getItem('analytics_count'); } catch (e) { /* приватный режим */ }
-        if (saved && [...select.options].some(o => o.value === saved)) select.value = saved;
-        select.addEventListener('change', function () {
-            try { localStorage.setItem('analytics_count', select.value); } catch (e) { /* приватный режим */ }
-            const p = new URLSearchParams(window.location.search);
-            p.set('count', select.value);
-            history.replaceState(null, '', window.location.pathname + '?' + p.toString());
-            onChange(select.value);
-        });
-        return select.value;
-    };
-
-    const COUNT_UNITS = {
-        visits: ['visits', 'visits'], visitors: ['visitors', 'IP'],
-        views: ['views', 'views'], requests: ['requests', 'req'],
-    };
-
-    // Число справа в строке топа: выбранная метрика крупно, остальные мелко.
-    FC.countValue = function (metric, opts) {
+    // Изменение к прошлому периоду, коротко: «▲ 27%». invert — рост это
+    // плохо (отказы, ошибки, угрозы); points — в процентных пунктах.
+    FC.delta = function (value, opts) {
         opts = opts || {};
-        return function (item) {
-            const order = [metric].concat(['visits', 'visitors', 'views', 'requests'].filter(m => m !== metric))
-                .filter(m => !(opts.skip || []).includes(m) && item[COUNT_UNITS[m][0]] != null);
-            const one = { visits: 'visit', views: 'view' };
-            const text = m => {
-                const n = item[COUNT_UNITS[m][0]];
-                return FC.num(n) + ' ' + (n === 1 && one[m] ? one[m] : COUNT_UNITS[m][1]);
-            };
-            const rest = order.slice(1).map(text).join(' · ');
-            return text(order[0]) + (rest ? ' <span style="color:var(--text-muted);font-weight:400;font-size:12px;">· ' + rest + '</span>' : '');
-        };
+        if (value == null) return '<span class="delta delta--none" title="No data for the previous period">—</span>';
+        if (value === 0) return '<span class="delta delta--flat" title="vs previous period">0%</span>';
+        const up = value > 0;
+        const good = opts.invert ? !up : up;
+        const text = (up ? '▲ ' : '▼ ') + Math.abs(value).toFixed(1).replace(/\.0$/, '') + (opts.points ? ' pp' : '%');
+        return '<span class="delta ' + (good ? 'delta--up' : 'delta--down') + '" title="vs previous period">' + text + '</span>';
     };
 
     // Время визита «1:05» (секунды → минуты:секунды), как в Метрике.
@@ -306,25 +284,93 @@
         return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0');
     };
 
-    // Подпись под визитами: отказы, глубина, время — по сырым логам.
-    FC.visitStats = function (s) {
-        if (!s.visits) return 'Page views with less than 30 min between them';
-        return FC.pct(s.bounce_rate) + ' bounce · ' + (s.visit_depth || 0).toFixed(1) + ' pages · ' + FC.duration(s.visit_duration);
+    // Колонки отчётов. Посетитель — уникальный IP.
+    const COLS = {
+        visits: { title: 'Visits', value: i => i.visits },
+        visitors: { title: 'IPs', value: i => i.visitors },
+        views: { title: 'Views', value: i => i.views },
+        requests: { title: 'Req.', value: i => i.requests, wide: true },
+        bytes: { title: 'Traffic', value: i => i.bytes, fmt: FC.bytes, wide: true },
     };
 
-    // Строка топа «Who Visits»: люди — зелёные, боты — серые.
+    // Отчёт-таблица: имя, числа по колонкам и доля выбранной метрики с
+    // полоской. Длинные имена обрезаются, полное — в подсказке.
+    //   opts.name(item) → HTML имени, opts.sub(item) → вторая строка,
+    //   opts.columns — ключи COLS, opts.metric — по чему доля и полоска.
+    FC.renderReport = function (el, items, opts) {
+        opts = opts || {};
+        if (!el) return;
+        if (!items || !items.length) return FC.empty(el, opts.emptyText);
+        const columns = opts.columns || ['visits', 'visitors', 'views'];
+        const metric = columns.includes(opts.metric) ? opts.metric : columns[0];
+        const size = i => Number(COLS[metric].value(i)) || 0;
+        const max = Math.max(...items.map(size), 1);
+        const head = '<colgroup><col>' + columns.map(k => '<col class="' + (COLS[k].wide ? 'c-num-wide' : 'c-num') + '">').join('') +
+            '<col class="c-share"></colgroup><thead><tr><th>' + FC.escape(opts.label || '') + '</th>' +
+            columns.map(k => '<th class="num' + (k === metric ? ' is-active' : '') + '">' + COLS[k].title + '</th>').join('') +
+            '<th class="num">Share</th></tr></thead>';
+        const rows = items.map(item => {
+            const name = opts.name ? opts.name(item) : FC.escape(item.key == null ? '—' : item.key);
+            const sub = opts.sub ? opts.sub(item) : '';
+            const title = FC.escape(item.key == null ? '' : item.key);
+            const cells = columns.map(k => {
+                const v = COLS[k].value(item);
+                return '<td class="num' + (k === metric ? ' is-active' : '') + '">' + (v == null ? '—' : (COLS[k].fmt || FC.num)(v)) + '</td>';
+            }).join('');
+            const width = Math.max(1.5, size(item) / max * 100);
+            const share = '<td><div class="share"><span class="share__bar"><i style="width:' + width.toFixed(1) + '%"></i></span>' +
+                '<span class="share__pct">' + FC.pct(item.percentage) + '</span></div></td>';
+            return '<tr><td class="rt__name" title="' + title + '">' + name + (sub ? '<span class="rt__sub">' + sub + '</span>' : '') + '</td>' + cells + share + '</tr>';
+        }).join('');
+        el.innerHTML = '<div class="rt-wrap"><table class="rt">' + head + '<tbody>' + rows + '</tbody></table></div>' +
+            (opts.partial ? '<p class="rt__note">Raw logs are kept for 30 days — this list covers the last 30 days.</p>' : '');
+    };
+
+    // Люди против ботов одной полоской над «Who Visits».
+    FC.renderSplit = function (el, items, metric) {
+        if (!el) return;
+        const key = (COLS[metric] || COLS.visits).value;
+        let people = 0, bots = 0;
+        (items || []).forEach(i => { if (i.people) people += Number(key(i)) || 0; else bots += Number(key(i)) || 0; });
+        const total = people + bots;
+        if (!total) { el.innerHTML = ''; return; }
+        const c = themeColors();
+        const pct = n => (n / total * 100);
+        el.innerHTML = '<div class="split"><div class="split__bar">' +
+            (people ? '<i style="width:' + pct(people) + '%;background:var(--success)"></i>' : '') +
+            (bots ? '<i style="width:' + pct(bots) + '%;background:' + c.text + '"></i>' : '') +
+            '</div><div class="split__legend">' +
+            '<span><span class="swatch" style="background:var(--success)"></span>People <b>' + FC.num(people) + '</b> · ' + FC.pct(pct(people)) + '</span>' +
+            '<span><span class="swatch" style="background:' + c.text + '"></span>Bots <b>' + FC.num(bots) + '</b> · ' + FC.pct(pct(bots)) + '</span>' +
+            '</div></div>';
+    };
+
+    // Классы ответов одной полоской (2xx/3xx/4xx/5xx) с подписями.
+    FC.renderStatusSplit = function (el, s) {
+        if (!el) return;
+        const total = s.total_requests || 0;
+        const parts = [
+            ['2xx', s.status_2xx, 'var(--success)'], ['3xx', s.status_3xx, 'var(--info)'],
+            ['4xx', s.status_4xx, 'var(--warning)'], ['5xx', s.status_5xx, 'var(--error)'],
+        ];
+        if (!total) return FC.empty(el, 'No requests in this period');
+        el.innerHTML = '<div class="split"><div class="split__bar">' +
+            parts.filter(p => p[1]).map(p => '<i style="width:' + (p[1] / total * 100) + '%;background:' + p[2] + '"></i>').join('') +
+            '</div><div class="split__legend">' +
+            parts.map(p => '<span><span class="swatch" style="background:' + p[2] + '"></span>' + p[0] + ' <b>' + FC.num(p[1]) + '</b> · ' + FC.pct(p[1] / total * 100) + '</span>').join('') +
+            '</div></div>';
+    };
+
+    // Имя строки «Who Visits»: люди — зелёные, боты — серые.
     FC.trafficLabel = function (item) {
-        const icon = item.people
-            ? '<i class="fas fa-user" style="color:var(--success);width:16px;"></i>'
-            : '<i class="fas fa-robot" style="color:var(--text-muted);width:16px;"></i>';
-        return icon + ' ' + FC.escape(item.label || item.key);
+        return item.people
+            ? '<i class="fas fa-user who-icon who-icon--people"></i>' + FC.escape(item.label || item.key)
+            : '<i class="fas fa-robot who-icon who-icon--bots"></i>' + FC.escape(item.label || item.key);
     };
 
-    // Адрес с сетью и классом: «37.99.96.137 · Kar-Tel LLC · People».
-    FC.ipLabel = function (item) {
-        const parts = [item.network, item.traffic_label].filter(Boolean).map(FC.escape);
-        return '<span class="mono">' + FC.escape(item.key) + '</span>' +
-            (parts.length ? ' <span style="color:var(--text-muted);font-size:12px;">' + parts.join(' · ') + '</span>' : '');
+    // Вторая строка у адреса: сеть и класс («Kar-Tel LLC · People»).
+    FC.ipSub = function (item) {
+        return [item.network, item.traffic_label].filter(Boolean).map(FC.escape).join(' · ');
     };
 
     FC.trafficNote = function (traffic, partial) {

@@ -179,6 +179,29 @@ a.glass-card:hover {
     background: var(--accent-light);
 }
 
+/* На узком экране меню прокручивается внутри шапки, а не распирает страницу
+   вбок: до 25.09.2026 на телефоне вся панель ездила по горизонтали. */
+@media (max-width: 1024px) {
+    .header-content {
+        gap: 16px;
+    }
+
+    .nav {
+        min-width: 0;
+        overflow-x: auto;
+        scrollbar-width: none;
+    }
+
+    .nav::-webkit-scrollbar {
+        display: none;
+    }
+
+    .nav-link {
+        white-space: nowrap;
+        padding: 8px 12px;
+    }
+}
+
 /* Buttons */
 .btn {
     padding: 10px 20px;
@@ -460,6 +483,27 @@ a.glass-card:hover {
 .grid {
     display: grid;
     gap: 24px;
+}
+
+/* Длинный путь или название сети не распирают колонку сетки за контейнер. */
+.grid > * {
+    min-width: 0;
+}
+
+/* Страна — код в метке: флаги-эмодзи Windows рисует буквами. */
+.cc {
+    display: inline-block;
+    min-width: 24px;
+    padding: 1px 4px;
+    border-radius: 4px;
+    background: var(--bg-tertiary);
+    color: var(--text-secondary);
+    font-size: 10.5px;
+    font-weight: 700;
+    letter-spacing: .03em;
+    line-height: 1.5;
+    text-align: center;
+    vertical-align: 1px;
 }
 
 .grid-2 {

@@ -100,6 +100,12 @@ def test_visit_start_query():
     assert "request_logs.method = 'GET'" in sql
 
 
+def test_referrers_skip_own_site():
+    sql = _sql(aq._bare_host(aq.referrer_host_expr()) != aq._bare_host(aq.RequestLog.host))
+    # www.site и site — один сайт, переход между ними — не источник
+    assert "regexp_replace(lower(" in sql and r"'^www\.'" in sql
+
+
 def test_visit_quality_by_domain():
     from datetime import datetime
 

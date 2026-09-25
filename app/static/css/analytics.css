@@ -1,0 +1,162 @@
+/* Экраны аналитики (домен и общая). Всё на токенах style.css, поэтому
+   светлая и тёмная темы работают сами. Числа — моноширинными цифрами
+   (tabular-nums), чтобы колонки не прыгали; цвет у чисел только там, где
+   он что-то значит: рост/падение, угрозы, ошибки. */
+
+.an { --an-gap: 20px; }
+.an a:not(.btn) { color: inherit; text-decoration: none; }
+.an a:not(.btn):hover { color: var(--accent-primary); }
+.an .num, .an .kpi__value, .an .rt td.num { font-variant-numeric: tabular-nums; }
+
+/* ── Шапка экрана ─────────────────────────────────────────────── */
+.an-toolbar {
+    display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between;
+    gap: 16px; margin-bottom: var(--an-gap);
+}
+.an-toolbar h1, .an-toolbar h2 { font-size: 24px; font-weight: 700; line-height: 1.2; }
+.an-toolbar__note { font-size: 13px; color: var(--text-muted); margin-top: 4px; }
+.an-toolbar__controls { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.an-toolbar .form-select { width: auto; min-width: 170px; padding-top: 9px; padding-bottom: 9px; }
+
+/* Переключатель из нескольких кнопок: «All · People · Bots». */
+.seg {
+    display: inline-flex; padding: 3px; gap: 2px; border-radius: 10px;
+    background: var(--bg-tertiary); border: 1px solid var(--glass-border);
+}
+.seg button {
+    border: 0; background: transparent; color: var(--text-secondary);
+    font: inherit; font-size: 13px; font-weight: 600; line-height: 1;
+    padding: 8px 12px; border-radius: 7px; cursor: pointer; white-space: nowrap;
+    transition: background var(--transition-fast), color var(--transition-fast);
+}
+.seg button:hover { color: var(--text-primary); }
+.seg button[aria-pressed="true"] {
+    background: var(--bg-secondary); color: var(--text-primary);
+    box-shadow: 0 1px 3px var(--glass-shadow);
+}
+.seg button:focus-visible { outline: 2px solid var(--accent-primary); outline-offset: 1px; }
+.seg--sm button { font-size: 12px; padding: 6px 10px; }
+.seg__label { font-size: 12px; color: var(--text-muted); margin-right: 8px; }
+
+.icon-btns { display: inline-flex; gap: 6px; }
+.icon-btns .btn { padding: 8px 12px; font-size: 13px; }
+
+/* ── KPI ──────────────────────────────────────────────────────── */
+.kpi-group { padding: 20px 24px; margin-bottom: 16px; }
+.kpi-group__title {
+    font-size: 12px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase;
+    color: var(--text-muted); margin-bottom: 14px;
+}
+.kpi-row { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); }
+.kpi { padding: 0 20px; border-left: 1px solid var(--glass-border); min-width: 0; }
+.kpi:first-child { padding-left: 0; border-left: 0; }
+.kpi__label { font-size: 13px; color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.kpi__value { font-size: 30px; font-weight: 700; line-height: 1.25; margin-top: 4px; white-space: nowrap; }
+.kpi__value--bad { color: var(--error); }
+.kpi__sub { font-size: 12px; color: var(--text-muted); margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.kpi__delta { font-size: 12px; margin-top: 6px; min-height: 18px; }
+.kpi-group--compact .kpi__value { font-size: 22px; }
+.delta { font-weight: 600; }
+.delta--up { color: var(--success); }
+.delta--down { color: var(--error); }
+.delta--flat, .delta--none { color: var(--text-muted); font-weight: 400; }
+
+/* ── Карточки отчётов ─────────────────────────────────────────── */
+.an-section {
+    display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between;
+    gap: 12px; margin: 32px 0 14px;
+}
+.an-section h2 { font-size: 18px; font-weight: 700; }
+.an-section p { font-size: 13px; color: var(--text-muted); }
+.an-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--an-gap); margin-bottom: var(--an-gap); }
+.an-grid > * { min-width: 0; }
+.an-grid--wide { grid-template-columns: minmax(0, 1fr); }
+.report { padding: 20px 24px; min-width: 0; }
+.report__head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
+.report__head h3 { font-size: 16px; font-weight: 600; display: flex; align-items: center; gap: 8px; }
+.report__head h3 i { color: var(--text-muted); font-size: 14px; }
+.report__hint { font-size: 12px; color: var(--text-muted); margin-top: 12px; line-height: 1.5; }
+
+/* Таблица отчёта: имя, числа и доля с полоской. */
+.rt { width: 100%; border-collapse: collapse; table-layout: fixed; font-size: 13px; }
+.rt th {
+    font-size: 11px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase;
+    color: var(--text-muted); text-align: left; padding: 0 8px 8px; white-space: nowrap;
+    border-bottom: 1px solid var(--glass-border);
+}
+.rt th.num, .rt td.num { text-align: right; }
+.rt th.is-active { color: var(--text-primary); }
+.rt td { padding: 7px 8px; border-bottom: 1px solid var(--glass-border); vertical-align: middle; }
+.rt tr:last-child td { border-bottom: 0; }
+.rt tbody tr:hover td { background: var(--bg-tertiary); }
+.rt th:first-child, .rt td:first-child { padding-left: 0; }
+.rt th:last-child, .rt td:last-child { padding-right: 0; }
+.rt td.num { color: var(--text-secondary); white-space: nowrap; }
+.rt td.num.is-active { color: var(--text-primary); font-weight: 600; }
+.rt__name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rt__name .mono { font-size: 12.5px; }
+.rt__sub { display: block; font-size: 11.5px; color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rt col.c-num { width: 64px; }
+.rt col.c-num-wide { width: 84px; }
+.rt col.c-share { width: 120px; }
+.share { display: flex; align-items: center; gap: 8px; justify-content: flex-end; }
+.share__bar { flex: 1; height: 6px; border-radius: 3px; background: var(--bg-tertiary); overflow: hidden; }
+.share__bar i { display: block; height: 100%; border-radius: 3px; background: var(--accent-primary); opacity: .85; }
+.share__pct { width: 42px; text-align: right; font-size: 12px; color: var(--text-muted); font-variant-numeric: tabular-nums; }
+.rt__note { font-size: 12px; color: var(--text-muted); margin-top: 10px; }
+.rt-wrap { overflow-x: auto; }
+
+/* Люди и боты — одна полоска из двух частей над списком. */
+.split { margin-bottom: 14px; }
+.split__bar { display: flex; height: 10px; border-radius: 5px; overflow: hidden; background: var(--bg-tertiary); gap: 2px; }
+.split__bar i { display: block; height: 100%; }
+.split__legend { display: flex; flex-wrap: wrap; gap: 16px; margin-top: 8px; font-size: 12px; color: var(--text-secondary); }
+.split__legend b { color: var(--text-primary); font-variant-numeric: tabular-nums; }
+.swatch { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 6px; vertical-align: -1px; }
+.who-icon { width: 16px; text-align: center; margin-right: 6px; }
+.who-icon--people { color: var(--success); }
+.who-icon--bots { color: var(--text-muted); }
+
+/* Код ответа — цветная метка, текст остаётся текстом. */
+.code { display: inline-block; min-width: 34px; font-weight: 700; font-variant-numeric: tabular-nums; }
+
+/* ── Таблица доменов ──────────────────────────────────────────── */
+.dt { width: 100%; border-collapse: collapse; font-size: 13px; }
+.dt th {
+    font-size: 11px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase;
+    color: var(--text-muted); text-align: right; padding: 8px 10px; white-space: nowrap;
+    cursor: pointer; user-select: none; border-bottom: 1px solid var(--glass-border);
+}
+.dt th:first-child, .dt td:first-child { text-align: left; padding-left: 0; }
+.dt th.is-sorted { color: var(--text-primary); }
+.dt thead tr.dt__groups th { cursor: default; text-align: left; letter-spacing: .06em; padding-bottom: 4px; border-bottom: 0; }
+.dt thead tr.dt__groups th + th { border-left: 1px solid var(--glass-border); padding-left: 16px; }
+.dt td { padding: 10px; text-align: right; white-space: nowrap; border-bottom: 1px solid var(--glass-border); font-variant-numeric: tabular-nums; }
+.dt td.dt__start, .dt th.dt__start { border-left: 1px solid var(--glass-border); padding-left: 16px; }
+.dt tbody tr:hover td { background: var(--bg-tertiary); }
+.dt tbody tr.is-idle td { color: var(--text-muted); }
+.dt__name { font-weight: 600; font-size: 14px; }
+.dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 8px; background: var(--success); vertical-align: 1px; }
+.dot--off { background: var(--text-muted); }
+.muted { color: var(--text-muted); }
+.bad { color: var(--error); }
+
+@media (max-width: 1280px) {
+    .kpi-row { grid-template-columns: repeat(3, minmax(0, 1fr)); row-gap: 18px; }
+    .kpi:nth-child(3n + 1) { padding-left: 0; border-left: 0; }
+}
+@media (max-width: 1024px) {
+    .an-grid { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 640px) {
+    .report { padding: 16px; }
+    .report__head { flex-wrap: wrap; }
+    .seg { max-width: 100%; overflow-x: auto; scrollbar-width: none; }
+    .seg::-webkit-scrollbar { display: none; }
+    .rt { min-width: 440px; }
+    .kpi-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .kpi { padding-left: 14px; }
+    .kpi:nth-child(3n + 1) { padding-left: 14px; border-left: 1px solid var(--glass-border); }
+    .kpi:nth-child(2n + 1) { padding-left: 0; border-left: 0; }
+    .kpi__value { font-size: 24px; }
+}

@@ -1,10 +1,11 @@
 {% extends "base.html" %}
 {% block title %}{{ domain.name }} - Analytics - FlareCloud{% endblock %}
+{% block extra_css %}<link rel="stylesheet" href="/static/css/analytics.css?v={{ asset_v }}">{% endblock %}
 {% block content %}
-<div class="container" style="padding: 32px 24px;">
+<div class="container an" style="padding: 32px 24px;">
     <!-- Domain Header -->
     <div class="glass-card mb-4">
-        <div class="flex-between">
+        <div class="flex-between" style="flex-wrap: wrap; gap: 16px;">
             <div>
                 <h1><i class="fas fa-globe"></i> {{ domain.name }}</h1>
                 <div class="flex gap-2 mt-2">
@@ -16,7 +17,7 @@
                     <span class="badge badge-orange" id="proxied-badge"><i class="fas fa-cloud"></i> Proxied</span>
                 </div>
             </div>
-            <div class="flex gap-2">
+            <div class="flex gap-2" style="flex-wrap: wrap;">
                 <a href="/domains/{{ domain.id }}/dns" class="btn btn-secondary">DNS</a>
                 <a href="/domains/{{ domain.id }}/waf" class="btn btn-secondary">WAF</a>
                 <a href="/domains/{{ domain.id }}/settings" class="btn btn-secondary">Settings</a>
@@ -26,183 +27,158 @@
     </div>
 
     <!-- Controls -->
-    <div class="flex-between mb-4">
+    <div class="an-toolbar">
         <div>
-            <h2 style="font-size: 20px; font-weight: 600;">Traffic Overview</h2>
-            <div style="font-size: 13px; color: var(--text-muted);" id="period-note">—</div>
+            <h2>Traffic</h2>
+            <div class="an-toolbar__note" id="period-note">—</div>
         </div>
-        <div style="display: flex; gap: 12px;">
-            <select class="form-select" id="traffic" style="min-width: 130px; max-width: 160px;" title="Who sent the requests: people or bots">
-                <option value="all" selected>All traffic</option>
-                <option value="people">People</option>
-                <option value="bots">Bots</option>
+        <div class="an-toolbar__controls">
+            <div class="seg" id="traffic" role="group" aria-label="Who sent the requests">
+                <button type="button" data-value="all">All traffic</button>
+                <button type="button" data-value="people">People</button>
+                <button type="button" data-value="bots">Bots</button>
+            </div>
+            <select class="form-select" id="time-range" aria-label="Period">
+                <option value="1h">Last hour</option>
+                <option value="24h" selected>Last 24 hours</option>
+                <option value="7d">Last 7 days</option>
+                <option value="30d">Last 30 days</option>
+                <option value="90d">Last 90 days</option>
+                <option value="6m">Last 6 months</option>
             </select>
-            <select class="form-select" id="top-count" style="min-width: 190px; max-width: 210px;" title="What the top lists count">
-                <option value="visits" selected>Count visits</option>
-                <option value="visitors">Count unique IPs</option>
-                <option value="views">Count page views</option>
-                <option value="requests">Count requests</option>
-            </select>
-            <select class="form-select" id="time-range" style="min-width: 165px; max-width: 200px;">
-                <option value="1h">Last Hour</option>
-                <option value="24h" selected>Last 24 Hours</option>
-                <option value="7d">Last 7 Days</option>
-                <option value="30d">Last 30 Days</option>
-                <option value="90d">Last 90 Days</option>
-                <option value="6m">Last 6 Months</option>
-            </select>
-            <button class="btn btn-secondary" onclick="exportData('csv')"><i class="fas fa-download"></i> CSV</button>
-            <button class="btn btn-secondary" onclick="exportData('json')"><i class="fas fa-code"></i> JSON</button>
-        </div>
-    </div>
-
-    <!-- Key Metrics: traffic -->
-    <div class="grid grid-5 gap-3 mb-3">
-        <div class="glass-card metric">
-            <div class="metric-title"><i class="fas fa-route"></i> Visits</div>
-            <div class="metric-value" id="visits">-</div>
-            <div class="metric-sub" id="visits-sub">-</div>
-            <div class="metric-change" id="visits-change">-</div>
-        </div>
-        <div class="glass-card metric">
-            <div class="metric-title"><i class="fas fa-users"></i> Unique Visitors</div>
-            <div class="metric-value" id="unique-visitors">-</div>
-            <div class="metric-sub">Distinct client IPs</div>
-            <div class="metric-change" id="visitors-change">-</div>
-        </div>
-        <div class="glass-card metric">
-            <div class="metric-title"><i class="fas fa-file-alt"></i> Page Views</div>
-            <div class="metric-value" id="page-views">-</div>
-            <div class="metric-sub" id="page-views-sub">-</div>
-            <div class="metric-change" id="page-views-change">-</div>
-        </div>
-        <div class="glass-card metric">
-            <div class="metric-title"><i class="fas fa-exchange-alt"></i> Requests</div>
-            <div class="metric-value" id="total-requests">-</div>
-            <div class="metric-sub" id="requests-split">-</div>
-            <div class="metric-change" id="requests-change">-</div>
-        </div>
-        <div class="glass-card metric">
-            <div class="metric-title"><i class="fas fa-database"></i> Bandwidth</div>
-            <div class="metric-value" id="total-bandwidth">-</div>
-            <div class="metric-sub" id="bandwidth-split">-</div>
-            <div class="metric-change" id="bandwidth-change">-</div>
-        </div>
-    </div>
-
-    <!-- Key Metrics: quality -->
-    <div class="grid grid-5 gap-3 mb-4">
-        <div class="glass-card metric">
-            <div class="metric-title"><i class="fas fa-shield-alt"></i> Threats</div>
-            <div class="metric-value" style="color: var(--error);" id="threats-blocked">-</div>
-            <div class="metric-sub" id="threats-split">-</div>
-            <div class="metric-change" id="threats-change">-</div>
-        </div>
-        <div class="glass-card metric">
-            <div class="metric-title"><i class="fas fa-bolt"></i> Percent Cached</div>
-            <div class="metric-value" style="color: var(--success);" id="cache-ratio">-</div>
-            <div class="metric-sub" id="cacheable-ratio">-</div>
-            <div class="metric-change" id="cache-change">-</div>
-        </div>
-        <div class="glass-card metric">
-            <div class="metric-title"><i class="fas fa-leaf"></i> Bandwidth Saved</div>
-            <div class="metric-value" style="color: var(--success);" id="bandwidth-saved">-</div>
-            <div class="metric-sub" id="bandwidth-saved-bytes">-</div>
-        </div>
-        <div class="glass-card metric">
-            <div class="metric-title"><i class="fas fa-exclamation-circle"></i> Error Rate</div>
-            <div class="metric-value" id="error-rate">-</div>
-            <div class="metric-sub" id="error-split">-</div>
-            <div class="metric-change" id="errors-change">-</div>
-        </div>
-        <div class="glass-card metric">
-            <div class="metric-title"><i class="fas fa-stopwatch"></i> Response Time</div>
-            <div class="metric-value" id="avg-response">-</div>
-            <div class="metric-sub" id="response-percentiles">-</div>
-        </div>
-    </div>
-
-    <!-- Main Chart -->
-    <div class="glass-card mb-4">
-        <div class="flex-between mb-3">
-            <h2 style="font-size: 20px; font-weight: 600;">Traffic</h2>
-            <div class="flex gap-2">
-                <button id="btn-metric-visits" class="btn btn-sm btn-primary" onclick="changeChartMetric('visits')">Visits</button>
-                <button id="btn-metric-visitors" class="btn btn-sm btn-secondary" onclick="changeChartMetric('visitors')">Visitors</button>
-                <button id="btn-metric-page_views" class="btn btn-sm btn-secondary" onclick="changeChartMetric('page_views')">Page views</button>
-                <button id="btn-metric-requests" class="btn btn-sm btn-secondary" onclick="changeChartMetric('requests')">Requests</button>
-                <button id="btn-metric-bandwidth" class="btn btn-sm btn-secondary" onclick="changeChartMetric('bandwidth')">Bandwidth</button>
+            <div class="icon-btns">
+                <button class="btn btn-secondary" onclick="exportData('csv')" title="Download CSV"><i class="fas fa-download"></i> CSV</button>
+                <button class="btn btn-secondary" onclick="exportData('json')" title="Download JSON"><i class="fas fa-code"></i> JSON</button>
             </div>
         </div>
-        <div style="height: 300px; width: 100%;"><canvas id="traffic-chart"></canvas></div>
     </div>
 
-    <!-- Status & cache -->
-    <div class="grid grid-2 gap-3 mb-4">
-        <div class="glass-card">
-            <h3 class="card-title"><i class="fas fa-check-circle"></i> Response Status</h3>
-            <div id="status-classes"></div>
-            <h4 style="font-size: 14px; margin: 16px 0 8px; color: var(--text-secondary);">Top status codes</h4>
-            <div id="top-status-codes"></div>
-        </div>
-        <div class="glass-card">
-            <h3 class="card-title"><i class="fas fa-server"></i> Cache Status</h3>
-            <div id="cache-status"></div>
+    <!-- Audience KPIs -->
+    <div class="glass-card kpi-group">
+        <div class="kpi-group__title">Audience</div>
+        <div class="kpi-row">
+            <div class="kpi"><div class="kpi__label">Visits</div><div class="kpi__value" id="k-visits">—</div><div class="kpi__sub">Page views &lt; 30 min apart</div><div class="kpi__delta" id="d-visits"></div></div>
+            <div class="kpi"><div class="kpi__label">Unique visitors</div><div class="kpi__value" id="k-visitors">—</div><div class="kpi__sub">Distinct client IPs</div><div class="kpi__delta" id="d-visitors"></div></div>
+            <div class="kpi"><div class="kpi__label">Page views</div><div class="kpi__value" id="k-views">—</div><div class="kpi__sub">Pages, not files</div><div class="kpi__delta" id="d-views"></div></div>
+            <div class="kpi"><div class="kpi__label">Pages per visit</div><div class="kpi__value" id="k-depth">—</div><div class="kpi__sub">Visit depth</div><div class="kpi__delta" id="d-depth"></div></div>
+            <div class="kpi"><div class="kpi__label">Bounce rate</div><div class="kpi__value" id="k-bounce">—</div><div class="kpi__sub">Visits with one page</div><div class="kpi__delta" id="d-bounce"></div></div>
+            <div class="kpi"><div class="kpi__label">Visit time</div><div class="kpi__value" id="k-duration">—</div><div class="kpi__sub">First to last page</div><div class="kpi__delta" id="d-duration"></div></div>
         </div>
     </div>
 
-    <div class="grid grid-2 gap-3 mb-4">
-        <div class="glass-card">
-            <h3 class="card-title"><i class="fas fa-fire"></i> Top Pages</h3>
+    <!-- Delivery KPIs -->
+    <div class="glass-card kpi-group kpi-group--compact mb-4">
+        <div class="kpi-group__title">Delivery</div>
+        <div class="kpi-row">
+            <div class="kpi"><div class="kpi__label">Requests</div><div class="kpi__value" id="k-requests">—</div><div class="kpi__sub" id="s-requests">—</div><div class="kpi__delta" id="d-requests"></div></div>
+            <div class="kpi"><div class="kpi__label">Bandwidth</div><div class="kpi__value" id="k-bandwidth">—</div><div class="kpi__sub" id="s-bandwidth">—</div><div class="kpi__delta" id="d-bandwidth"></div></div>
+            <div class="kpi"><div class="kpi__label">Served from cache</div><div class="kpi__value" id="k-cache">—</div><div class="kpi__sub" id="s-cache">—</div><div class="kpi__delta" id="d-cache"></div></div>
+            <div class="kpi"><div class="kpi__label">Error rate</div><div class="kpi__value" id="k-errors">—</div><div class="kpi__sub" id="s-errors">—</div><div class="kpi__delta" id="d-errors"></div></div>
+            <div class="kpi"><div class="kpi__label">Response time</div><div class="kpi__value" id="k-response">—</div><div class="kpi__sub" id="s-response">—</div><div class="kpi__delta"></div></div>
+            <div class="kpi"><div class="kpi__label">Threats</div><div class="kpi__value" id="k-threats">—</div><div class="kpi__sub" id="s-threats">—</div><div class="kpi__delta" id="d-threats"></div></div>
+        </div>
+    </div>
+
+    <!-- Chart -->
+    <div class="glass-card report">
+        <div class="report__head">
+            <h3><i class="fas fa-chart-area"></i> Over time</h3>
+            <div class="seg seg--sm" id="chart-metric" role="group" aria-label="Chart metric">
+                <button type="button" data-value="visits">Visits</button>
+                <button type="button" data-value="visitors">Visitors</button>
+                <button type="button" data-value="page_views">Page views</button>
+                <button type="button" data-value="requests">Requests</button>
+                <button type="button" data-value="bandwidth">Bandwidth</button>
+            </div>
+        </div>
+        <div style="height: 280px; width: 100%;"><canvas id="traffic-chart"></canvas></div>
+    </div>
+
+    <!-- Audience reports -->
+    <div class="an-section">
+        <div>
+            <h2>Audience</h2>
+            <p>Who comes, from where and to which pages. A visit counts toward the row it started on.</p>
+        </div>
+        <div><span class="seg__label">Count</span><div class="seg seg--sm" id="top-count" role="group" aria-label="What the reports count">
+            <button type="button" data-value="visits">Visits</button>
+            <button type="button" data-value="visitors">Unique IPs</button>
+            <button type="button" data-value="views">Page views</button>
+            <button type="button" data-value="requests">Requests</button>
+        </div></div>
+    </div>
+
+    <div class="an-grid">
+        <div class="glass-card report">
+            <div class="report__head"><h3><i class="fas fa-user-check"></i> Who visits</h3></div>
+            <div id="who-split"></div>
+            <div id="top-traffic"></div>
+            <p class="report__hint">By user agent, network (ASN) and behaviour. Browsers in data centers are bots in disguise
+                or people on a VPN; those who browse like a person count as people.</p>
+        </div>
+        <div class="glass-card report">
+            <div class="report__head"><h3><i class="fas fa-link"></i> Referring sites</h3></div>
+            <div id="top-referrers"></div>
+        </div>
+    </div>
+
+    <div class="an-grid">
+        <div class="glass-card report">
+            <div class="report__head"><h3><i class="fas fa-file-alt"></i> Pages</h3></div>
             <div id="top-pages"></div>
         </div>
-        <div class="glass-card">
-            <h3 class="card-title"><i class="fas fa-globe"></i> Top Countries</h3>
+        <div class="glass-card report">
+            <div class="report__head"><h3><i class="fas fa-globe"></i> Countries</h3></div>
             <div id="geo-distribution"></div>
         </div>
     </div>
 
-    <div class="grid grid-2 gap-3 mb-4">
-        <div class="glass-card">
-            <h3 class="card-title"><i class="fas fa-link"></i> Top Referrers</h3>
-            <div id="top-referrers"></div>
+    <div class="an-grid">
+        <div class="glass-card report">
+            <div class="report__head"><h3><i class="fas fa-desktop"></i> Browsers &amp; clients</h3></div>
+            <div id="top-browsers"></div>
         </div>
-        <div class="glass-card">
-            <h3 class="card-title"><i class="fas fa-sitemap"></i> Top Hosts</h3>
+        <div class="glass-card report">
+            <div class="report__head"><h3><i class="fas fa-sitemap"></i> Hosts</h3></div>
             <div id="top-hosts"></div>
         </div>
     </div>
 
-    <div class="grid grid-2 gap-3 mb-4">
-        <div class="glass-card">
-            <h3 class="card-title"><i class="fas fa-user-check"></i> Who Visits</h3>
-            <div id="top-traffic"></div>
-            <p style="font-size: 12px; color: var(--text-muted); margin-top: 8px;">
-                By user agent, network (ASN) and behaviour. Browsers in data centers are bots
-                in disguise or people on a VPN; those who browse like a person count as people.
-            </p>
-        </div>
-        <div class="glass-card">
-            <h3 class="card-title"><i class="fas fa-desktop"></i> Browsers &amp; Clients</h3>
-            <div id="top-browsers"></div>
-        </div>
-    </div>
-
-    <div class="grid grid-2 gap-3 mb-4">
-        <div class="glass-card">
-            <h3 class="card-title"><i class="fas fa-network-wired"></i> Top Client IPs</h3>
+    <div class="an-grid an-grid--wide">
+        <div class="glass-card report">
+            <div class="report__head"><h3><i class="fas fa-network-wired"></i> Client IPs</h3></div>
             <div id="top-ips"></div>
         </div>
-        <div class="glass-card">
-            <h3 class="card-title"><i class="fas fa-exclamation-triangle"></i> Top Errors</h3>
-            <div id="top-errors"></div>
+    </div>
+
+    <!-- Delivery reports -->
+    <div class="an-section">
+        <div>
+            <h2>Delivery</h2>
+            <p>Responses, cache and errors. Counted by requests.</p>
         </div>
     </div>
 
-    <div class="mb-4">
-        <div class="glass-card">
-            <div class="flex-between" style="margin-bottom: 16px;">
-                <h3 class="card-title" style="margin: 0;"><i class="fas fa-user-shield"></i> Security Events</h3>
+    <div class="an-grid">
+        <div class="glass-card report">
+            <div class="report__head"><h3><i class="fas fa-check-circle"></i> Response status</h3></div>
+            <div id="status-split"></div>
+            <div id="top-status-codes"></div>
+        </div>
+        <div class="glass-card report">
+            <div class="report__head"><h3><i class="fas fa-server"></i> Cache status</h3></div>
+            <div id="cache-status"></div>
+        </div>
+    </div>
+
+    <div class="an-grid">
+        <div class="glass-card report">
+            <div class="report__head"><h3><i class="fas fa-exclamation-triangle"></i> Errors</h3></div>
+            <div id="top-errors"></div>
+        </div>
+        <div class="glass-card report">
+            <div class="report__head">
+                <h3><i class="fas fa-user-shield"></i> Security events</h3>
                 <a href="/domains/{{ domain.id }}/waf" class="btn btn-secondary btn-sm">WAF rules</a>
             </div>
             <div id="security-events"></div>
@@ -210,25 +186,23 @@
     </div>
 
     <!-- Recent Logs -->
-    <div class="glass-card">
-        <div class="flex-between mb-3">
-            <h3 class="card-title" style="margin: 0;"><i class="fas fa-file-alt"></i> Recent Requests</h3>
-            <a class="btn btn-secondary btn-sm" href="/domains/{{ domain.id }}/logs"><i class="fas fa-eye"></i> View All Logs</a>
+    <div class="glass-card report">
+        <div class="report__head">
+            <h3><i class="fas fa-stream"></i> Recent requests</h3>
+            <a class="btn btn-secondary btn-sm" href="/domains/{{ domain.id }}/logs"><i class="fas fa-eye"></i> View all logs</a>
         </div>
-        <div id="recent-logs"></div>
+        <div id="recent-logs" style="overflow-x: auto;"></div>
     </div>
 </div>
 
 <style>
-.metric-title { font-size: 14px; color: var(--text-secondary); margin-bottom: 8px; }
-.metric-value { font-size: 28px; font-weight: 700; }
-.metric-sub { font-size: 12px; color: var(--text-secondary); margin-top: 4px; }
-.metric-change { font-size: 12px; margin-top: 4px; }
-.card-title { font-size: 18px; font-weight: 600; margin-bottom: 16px; }
 .log-table { width: 100%; border-collapse: collapse; font-size: 13px; }
-.log-table th { text-align: left; color: var(--text-secondary); font-weight: 500; padding: 8px; border-bottom: 1px solid var(--glass-border); }
+.log-table th { text-align: left; color: var(--text-muted); font-size: 11px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; padding: 0 8px 8px; border-bottom: 1px solid var(--glass-border); white-space: nowrap; }
 .log-table td { padding: 8px; border-bottom: 1px solid var(--glass-border); vertical-align: top; }
+.log-table tr:last-child td { border-bottom: 0; }
 .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+.event { display: flex; justify-content: space-between; gap: 12px; padding: 8px 0; border-bottom: 1px solid var(--glass-border); font-size: 13px; }
+.event:last-child { border-bottom: 0; }
 </style>
 
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
@@ -243,55 +217,55 @@ let currentRange = '24h';
 let currentTraffic = 'all';
 let currentCount = 'visits';
 
+const STATUS_TEXT = {
+    200: 'OK', 204: 'No content', 206: 'Partial content', 301: 'Moved permanently', 302: 'Found',
+    304: 'Not modified', 400: 'Bad request', 401: 'Unauthorized', 403: 'Forbidden', 404: 'Not found',
+    405: 'Method not allowed', 429: 'Too many requests', 499: 'Client closed request', 500: 'Server error',
+    502: 'Bad gateway', 503: 'Unavailable', 504: 'Gateway timeout',
+};
+
 function setText(id, value) { const el = document.getElementById(id); if (el) el.textContent = value; }
 function setHtml(id, value) { const el = document.getElementById(id); if (el) el.innerHTML = value; }
+function markBad(id, bad) { const el = document.getElementById(id); if (el) el.classList.toggle('kpi__value--bad', !!bad); }
 
 async function loadOverview(range) {
     const s = await FC.get(`${DOMAIN_API}/stats/overview?range=${range}&traffic=${currentTraffic}`);
-    setText('total-requests', FC.num(s.total_requests));
-    setText('requests-split', `${FC.num(s.cached_requests)} cached · ${FC.num(s.uncached_requests)} uncached`);
-    setHtml('requests-change', FC.change(s.changes.requests));
-    setText('total-bandwidth', FC.bytes(s.total_bandwidth));
-    setText('bandwidth-split', `${FC.bytes(s.cached_bandwidth)} cached · ${FC.bytes(s.uncached_bandwidth)} uncached`);
-    setHtml('bandwidth-change', FC.change(s.changes.bandwidth));
-    setText('visits', FC.num(s.visits));
-    setText('visits-sub', FC.visitStats(s));
-    setHtml('visits-change', FC.change(s.changes.visits));
-    setText('unique-visitors', FC.num(s.unique_visitors));
-    setText('page-views', FC.num(s.page_views));
-    setText('page-views-sub', s.unique_visitors ? `${(s.page_views / s.unique_visitors).toFixed(1)} per visitor` : 'Pages, not files');
-    setHtml('page-views-change', FC.change(s.changes.page_views));
-    setHtml('visitors-change', FC.change(s.changes.visitors));
-    setText('threats-blocked', FC.num(s.threats_blocked));
-    setText('threats-split', `${FC.num(s.waf_blocked)} blocked · ${FC.num(s.waf_challenged)} challenged · ${FC.num(s.rate_limited)} rate-limited`);
-    setHtml('threats-change', FC.change(s.changes.threats, { invert: true }));
-    setText('cache-ratio', FC.pct(s.cache_hit_ratio));
-    setText('cacheable-ratio', `${FC.pct(s.cacheable_hit_ratio)} of cacheable requests`);
-    setHtml('cache-change', FC.change(s.changes.cache_hit_ratio, { points: true }));
-    setText('bandwidth-saved', FC.pct(s.bandwidth_saved_ratio));
-    setText('bandwidth-saved-bytes', `${FC.bytes(s.cached_bandwidth)} served by edge cache`);
-    setText('error-rate', FC.pct(s.error_rate));
-    setText('error-split', `${FC.num(s.status_4xx)} 4xx · ${FC.num(s.status_5xx)} 5xx`);
-    setHtml('errors-change', FC.change(s.changes.errors, { invert: true }));
-    setText('avg-response', FC.ms(s.avg_response_time));
-    setText('response-percentiles', `p50 ${FC.ms(s.p50_response_time)} · p95 ${FC.ms(s.p95_response_time)}`
-        + (s.avg_origin_time != null ? ` · origin ${FC.ms(s.avg_origin_time)}` : ''));
-    setText('period-note', `${FC.localTime(s.start)} — ${FC.localTime(s.end)} (your local time)${FC.trafficNote(s.traffic, s.partial)}`);
+    const c = s.changes;
+    setText('k-visits', FC.num(s.visits));
+    setHtml('d-visits', FC.delta(c.visits));
+    setText('k-visitors', FC.num(s.unique_visitors));
+    setHtml('d-visitors', FC.delta(c.visitors));
+    setText('k-views', FC.num(s.page_views));
+    setHtml('d-views', FC.delta(c.page_views));
+    setText('k-depth', s.visit_depth == null ? '—' : s.visit_depth.toFixed(1));
+    setHtml('d-depth', FC.delta(c.visit_depth));
+    setText('k-bounce', FC.pct(s.bounce_rate));
+    setHtml('d-bounce', FC.delta(c.bounce_rate, { invert: true, points: true }));
+    setText('k-duration', FC.duration(s.visit_duration));
+    setHtml('d-duration', FC.delta(c.visit_duration));
 
-    const total = s.total_requests || 0;
-    const classes = [
-        { key: '2xx Success', requests: s.status_2xx, color: 'var(--success)' },
-        { key: '3xx Redirect', requests: s.status_3xx, color: 'var(--info)' },
-        { key: '4xx Client error', requests: s.status_4xx, color: 'var(--warning)' },
-        { key: '5xx Server error', requests: s.status_5xx, color: 'var(--error)' },
-    ].map(c => ({ ...c, percentage: total ? c.requests / total * 100 : 0 }));
-    const el = document.getElementById('status-classes');
-    el.innerHTML = '';
-    classes.forEach(c => {
-        const row = document.createElement('div');
-        FC.renderTop(row, [c], { color: c.color });
-        el.appendChild(row);
-    });
+    setText('k-requests', FC.num(s.total_requests));
+    setText('s-requests', `${FC.num(s.cached_requests)} from cache`);
+    setHtml('d-requests', FC.delta(c.requests));
+    setText('k-bandwidth', FC.bytes(s.total_bandwidth));
+    setText('s-bandwidth', `${FC.bytes(s.cached_bandwidth)} from cache`);
+    setHtml('d-bandwidth', FC.delta(c.bandwidth));
+    setText('k-cache', FC.pct(s.cache_hit_ratio));
+    setText('s-cache', `${FC.pct(s.cacheable_hit_ratio)} of cacheable`);
+    setHtml('d-cache', FC.delta(c.cache_hit_ratio, { points: true }));
+    setText('k-errors', FC.pct(s.error_rate));
+    setText('s-errors', `${FC.num(s.status_4xx)} 4xx · ${FC.num(s.status_5xx)} 5xx`);
+    setHtml('d-errors', FC.delta(c.errors, { invert: true }));
+    markBad('k-errors', s.error_rate >= 5);
+    setText('k-response', FC.ms(s.avg_response_time));
+    setText('s-response', `p50 ${FC.ms(s.p50_response_time)} · p95 ${FC.ms(s.p95_response_time)}`);
+    setText('k-threats', FC.num(s.threats_blocked));
+    setText('s-threats', `${FC.num(s.waf_blocked)} blocked · ${FC.num(s.rate_limited)} limited`);
+    setHtml('d-threats', FC.delta(c.threats, { invert: true }));
+    markBad('k-threats', s.threats_blocked > 0);
+
+    setText('period-note', `${FC.localTime(s.start)} — ${FC.localTime(s.end)} (your local time)${FC.trafficNote(s.traffic, s.partial)}`);
+    FC.renderStatusSplit(document.getElementById('status-split'), s);
 }
 
 async function loadChart(range) {
@@ -299,23 +273,19 @@ async function loadChart(range) {
     trafficChart = FC.trafficChart(document.getElementById('traffic-chart'), trafficChart, lastSeries, chartMetric);
 }
 
-function changeChartMetric(metric) {
-    chartMetric = metric;
-    ['visits', 'visitors', 'page_views', 'requests', 'bandwidth'].forEach(m => {
-        document.getElementById('btn-metric-' + m).className = 'btn btn-sm ' + (metric === m ? 'btn-primary' : 'btn-secondary');
-    });
-    if (lastSeries) trafficChart = FC.trafficChart(document.getElementById('traffic-chart'), trafficChart, lastSeries, chartMetric);
-}
-
-async function loadTop(dimension, elementId, opts) {
+async function loadReport(dimension, elementId, opts) {
+    opts = opts || {};
     const el = document.getElementById(elementId);
     FC.loading(el);
     try {
-        const data = await FC.get(`${DOMAIN_API}/stats/top?dimension=${dimension}&range=${currentRange}&limit=${(opts && opts.limit) || 10}&traffic=${currentTraffic}&metric=${(opts && opts.count) ? currentCount : 'requests'}`);
-        const counted = opts && opts.count ? { metric: data.metric, value: opts.value || FC.countValue(data.metric) } : {};
-        FC.renderTop(el, data.items, { ...(opts || {}), ...counted, partial: data.partial });
+        const metric = opts.metric || currentCount;
+        const data = await FC.get(`${DOMAIN_API}/stats/top?dimension=${dimension}&range=${currentRange}&limit=${opts.limit || 10}&traffic=${currentTraffic}&metric=${metric}`);
+        if (opts.after) opts.after(data);
+        FC.renderReport(el, data.items, { ...opts, metric: data.metric, partial: data.partial });
     } catch (e) { FC.error(el, e); }
 }
+
+const codeName = code => `<span class="code" style="color:${FC.statusColor(code)}">${FC.escape(code)}</span>`;
 
 async function loadSecurityEvents(range) {
     const el = document.getElementById('security-events');
@@ -324,13 +294,13 @@ async function loadSecurityEvents(range) {
         const events = await FC.get(`${DOMAIN_API}/stats/security?range=${range}&limit=10`);
         if (!events.length) return FC.empty(el, 'No blocked or rate-limited requests in this period');
         el.innerHTML = events.map(e => `
-            <div class="flex-between" style="gap: 12px; padding: 8px 0; border-bottom: 1px solid var(--glass-border); font-size: 13px;">
+            <div class="event">
                 <div style="min-width: 0;">
                     <span class="badge ${e.action === 'blocked' ? 'badge-error' : 'badge-warning'}">${FC.escape(e.action)}</span>
                     <span class="mono">${FC.escape(e.method)} ${FC.escape(e.path)}</span>
-                    <div style="color: var(--text-muted);">${FC.country(e.country_code)} · <span class="mono">${FC.escape(e.client_ip)}</span>${e.rule_id ? ' · rule #' + e.rule_id : ''}</div>
+                    <div class="muted">${FC.country(e.country_code)} · <span class="mono">${FC.escape(e.client_ip)}</span>${e.rule_id ? ' · rule #' + e.rule_id : ''}</div>
                 </div>
-                <span style="color: var(--text-muted); white-space: nowrap;" title="${FC.escape(FC.localTime(e.timestamp))}">${FC.relative(e.timestamp)}</span>
+                <span class="muted" style="white-space: nowrap;" title="${FC.escape(FC.localTime(e.timestamp))}">${FC.relative(e.timestamp)}</span>
             </div>`).join('');
     } catch (e) { FC.error(el, e); }
 }
@@ -342,15 +312,15 @@ async function loadRecentLogs() {
         const logs = await FC.get(`${DOMAIN_API}/logs?limit=10`);
         if (!logs.length) return FC.empty(el, 'No requests logged yet');
         el.innerHTML = `<table class="log-table"><thead><tr>
-            <th>Time</th><th>Request</th><th>Status</th><th>Cache</th><th>Client</th><th>Size</th><th>Time</th>
+            <th>When</th><th>Request</th><th>Status</th><th>Cache</th><th>Client</th><th style="text-align:right;">Size</th><th style="text-align:right;">Time</th>
             </tr></thead><tbody>${logs.map(l => `<tr>
-            <td style="white-space:nowrap;" title="${FC.escape(FC.localTime(l.timestamp))}">${FC.relative(l.timestamp)}</td>
+            <td style="white-space:nowrap;" class="muted" title="${FC.escape(FC.localTime(l.timestamp))}">${FC.relative(l.timestamp)}</td>
             <td class="mono" style="word-break: break-all;"><strong>${FC.escape(l.method)}</strong> ${FC.escape(l.host || '')}${FC.escape(l.path)}</td>
-            <td style="color:${FC.statusColor(l.status)}; font-weight:600;">${FC.escape(l.status)}</td>
+            <td>${codeName(l.status)}</td>
             <td>${FC.cacheBadge(l.cache_status)}</td>
-            <td style="white-space:nowrap;">${FC.flag(l.country_code)} <span class="mono">${FC.escape(l.client_ip)}</span>${l.client_class ? ` <span class="badge" style="opacity:.75;" title="${FC.escape(l.traffic_label || '')}">${FC.escape(l.client_class)}</span>` : ''}</td>
-            <td style="white-space:nowrap;">${FC.bytes(l.bytes_sent)}</td>
-            <td style="white-space:nowrap;">${FC.ms(l.request_time)}</td>
+            <td style="white-space:nowrap;">${FC.flag(l.country_code)} <span class="mono">${FC.escape(l.client_ip)}</span>${l.traffic_label ? `<span class="rt__sub">${FC.escape(l.traffic_label)}</span>` : ''}</td>
+            <td style="white-space:nowrap; text-align:right;">${FC.bytes(l.bytes_sent)}</td>
+            <td style="white-space:nowrap; text-align:right;">${FC.ms(l.request_time)}</td>
             </tr>`).join('')}</tbody></table>`;
     } catch (e) { FC.error(el, e); }
 }
@@ -358,23 +328,34 @@ async function loadRecentLogs() {
 async function loadAnalytics(range) {
     currentRange = range;
     const guard = (p, id) => p.catch(e => { if (id) FC.error(document.getElementById(id), e); console.error(e); });
+    const whoSplit = document.getElementById('who-split');
     await Promise.all([
-        guard(loadOverview(range), 'status-classes'),
+        guard(loadOverview(range), 'status-split'),
         guard(loadChart(range)),
-        loadTop('status_codes', 'top-status-codes', {
-            format: i => `<span style="color:${FC.statusColor(i.key)}; font-weight:600;">${FC.escape(i.key)}</span>`,
+        loadReport('traffic', 'top-traffic', {
+            label: 'Who', limit: 15, name: FC.trafficLabel,
+            after: data => FC.renderSplit(whoSplit, data.items, data.metric),
         }),
-        loadTop('cache_status', 'cache-status', { format: i => FC.cacheBadge(i.key === 'DYNAMIC' ? null : i.key) }),
-        loadTop('paths', 'top-pages', { count: true, format: i => `<span class="mono">${FC.escape(i.key)}</span>` }),
-        loadTop('countries', 'geo-distribution', { count: true, format: i => FC.country(i.key) }),
-        loadTop('referrers', 'top-referrers', { count: true, emptyText: 'No referrer headers in this period' }),
-        loadTop('hosts', 'top-hosts', { count: true }),
-        loadTop('traffic', 'top-traffic', { count: true, limit: 15, format: FC.trafficLabel }),
-        loadTop('browsers', 'top-browsers', { count: true }),
-        loadTop('ips', 'top-ips', { count: true, format: FC.ipLabel, value: i => `${FC.num(i.visits)} visits · ${FC.num(i.views)} views · ${FC.num(i.requests)} req · ${FC.bytes(i.bytes)}` }),
-        loadTop('errors', 'top-errors', {
-            color: 'var(--error)',
-            format: i => `<span style="color:${FC.statusColor(i.status)}; font-weight:600;">${i.status}</span> <span class="mono">${FC.escape(i.path)}</span>`,
+        loadReport('referrers', 'top-referrers', { label: 'Site', emptyText: 'No visits from other sites in this period' }),
+        loadReport('paths', 'top-pages', { label: 'Page', name: i => `<span class="mono">${FC.escape(i.key)}</span>` }),
+        loadReport('countries', 'geo-distribution', { label: 'Country', name: i => FC.country(i.key) }),
+        loadReport('browsers', 'top-browsers', { label: 'Browser' }),
+        loadReport('hosts', 'top-hosts', { label: 'Host' }),
+        loadReport('ips', 'top-ips', {
+            label: 'Address', columns: ['visits', 'views', 'requests', 'bytes'],
+            name: i => `<span class="mono">${FC.escape(i.key)}</span>`, sub: FC.ipSub,
+        }),
+        loadReport('status_codes', 'top-status-codes', {
+            label: 'Code', metric: 'requests', columns: ['requests'],
+            name: i => `${codeName(i.key)} <span class="muted">${STATUS_TEXT[i.key] || ''}</span>`,
+        }),
+        loadReport('cache_status', 'cache-status', {
+            label: 'Result', metric: 'requests', columns: ['requests'],
+            name: i => FC.cacheBadge(i.key === 'DYNAMIC' ? null : i.key),
+        }),
+        loadReport('errors', 'top-errors', {
+            label: 'Response', metric: 'requests', columns: ['requests'],
+            name: i => `${codeName(i.status)} <span class="mono">${FC.escape(i.path)}</span>`,
             emptyText: 'No 4xx/5xx responses in this period',
         }),
         guard(loadSecurityEvents(range), 'security-events'),
@@ -389,16 +370,19 @@ function exportData(format) {
 }
 
 document.addEventListener('DOMContentLoaded', () => {
-    const select = document.getElementById('time-range');
-    currentTraffic = FC.initTraffic(document.getElementById('traffic'), (value) => {
+    currentTraffic = FC.initSeg(document.getElementById('traffic'), 'traffic', 'all', (value) => {
         currentTraffic = value;
         loadAnalytics(currentRange);
     });
-    currentCount = FC.initCount(document.getElementById('top-count'), (value) => {
+    currentCount = FC.initSeg(document.getElementById('top-count'), 'count', 'visits', (value) => {
         currentCount = value;
         loadAnalytics(currentRange);
     });
-    currentRange = FC.initRange(select, loadAnalytics);
+    chartMetric = FC.initSeg(document.getElementById('chart-metric'), 'chart', 'visits', (value) => {
+        chartMetric = value;
+        if (lastSeries) trafficChart = FC.trafficChart(document.getElementById('traffic-chart'), trafficChart, lastSeries, chartMetric);
+    });
+    currentRange = FC.initRange(document.getElementById('time-range'), loadAnalytics);
     loadAnalytics(currentRange);
     // Как у Cloudflare для коротких периодов: цифры обновляются сами.
     setInterval(() => { if (currentRange === '1h' || currentRange === '24h') loadAnalytics(currentRange); }, 60000);

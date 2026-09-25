@@ -468,7 +468,19 @@ async def overview(
         ),
     }
     data.update(range=range_str, start=iso(w.start), end=iso(w.end), bucket=w.bucket)
-    data.update(await visit_quality(db, w, domain_ids, traffic))
+    quality = await visit_quality(db, w, domain_ids, traffic)
+    quality_prev = await visit_quality(db, prev, domain_ids, traffic)
+    data.update(quality)
+    data["previous"].update(quality_prev)
+    # Отказы меняются в процентных пунктах, глубина и время — в процентах.
+    data["changes"].update(
+        bounce_rate=(
+            round(quality["bounce_rate"] - quality_prev["bounce_rate"], 1)
+            if quality["bounce_rate"] is not None and quality_prev["bounce_rate"] is not None else None
+        ),
+        visit_depth=_change(quality["visit_depth"] or 0, quality_prev["visit_depth"] or 0),
+        visit_duration=_change(quality["visit_duration"] or 0, quality_prev["visit_duration"] or 0),
+    )
     data["traffic"] = traffic or "all"
     # С фильтром всё считается по сырым логам — за 90 дней и полгода только 30.
     data["partial"] = _filtered(traffic) and w.start < raw_floor()
@@ -631,6 +643,11 @@ def referrer_host_expr():
     return func.substring(RequestLog.referer, literal_column("'^[a-zA-Z]+://([^/:?#]+)'"))
 
 
+def _bare_host(expr):
+    """Хост без www и регистра: www.lampwork.dev и lampwork.dev — один сайт."""
+    return func.regexp_replace(func.lower(expr), literal_column(r"'^www\.'"), literal_column("''"))
+
+
 def browser_expr():
     """Браузер по User-Agent; боты, скрипты и сканеры — по классу строки.
 
@@ -766,6 +783,9 @@ async def top(
         if dimension == "referrers":
             filters.append(RequestLog.referer.isnot(None))
             filters.append(RequestLog.referer != "")
+            # Переходы внутри сайта — не источник: до 25.09.2026 первым в
+            # источниках lampwork.dev стоял сам lampwork.dev.
+            filters.append(_bare_host(referrer_host_expr()) != _bare_host(RequestLog.host))
         if dimension == "paths" and metric != "requests":
             # Посетителей и просмотры считаем у страниц: у каждого шрифта и
             # скрипта тоже есть «уникальные IP», и топ состоял бы из файлов.
