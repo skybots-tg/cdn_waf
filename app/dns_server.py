@@ -26,6 +26,7 @@ from app.models.user import User
 from app.models.organization import Organization
 from app.schemas.sync import DNSSyncPayload
 from app.dns_node_sync import SnapshotRejected, replace_snapshot
+from app import geo_split
 
 # Configure logging
 logging.basicConfig(
@@ -128,16 +129,22 @@ class DBResolver(BaseResolver):
         
         domain_name = str(qname).rstrip('.').lower()
         
-        logger.info(f"DNS query: {domain_name} {qtype_name}")
-        
+        # Адрес резолвера — для разного ответа России и миру (app/geo_split.py).
+        client = getattr(handler, "client_address", None) if handler is not None else None
+        client_ip = client[0] if client else None
+
+        logger.info(f"DNS query: {domain_name} {qtype_name} from {client_ip}")
+
         try:
-            return self._do_resolve(reply, qname, qtype_name, domain_name)
+            result = self._do_resolve(reply, qname, qtype_name, domain_name, request, client_ip)
         except Exception:
             logger.exception(f"Error resolving {domain_name} {qtype_name}")
             reply.header.rcode = RCODE.SERVFAIL
             return reply
+        geo_split.echo_ecs(request, result)
+        return result
 
-    def _do_resolve(self, reply, qname, qtype_name, domain_name) -> DNSRecord:
+    def _do_resolve(self, reply, qname, qtype_name, domain_name, request=None, client_ip=None) -> DNSRecord:
         with SessionLocal() as db:
             parts = domain_name.split('.')
             zone = None
@@ -214,6 +221,18 @@ class DBResolver(BaseResolver):
                 is_proxied = True
             
             if is_proxied and qtype_name in ['A', 'AAAA']:
+                # Имена из GEO_SPLIT_NAMES: миру — сам origin из записи, России — ноды.
+                split = geo_split.decide(domain_name, request, client_ip) if request is not None else None
+                if split is not None and not split.russia:
+                    origin = [r for r in matching_records if r.type == qtype_name]
+                    if origin:
+                        for r in origin:
+                            rdata = A(r.content) if qtype_name == 'A' else AAAA(r.content)
+                            reply.add_answer(RR(qname, getattr(QTYPE, qtype_name), ttl=60, rdata=rdata))
+                        geo_split.add_ecs(reply, split)
+                        self._add_authority(reply, zone_qname, ns_list)
+                        return reply
+                geo_split.add_ecs(reply, split)
                 edge_ips = self.get_edge_nodes_ips(db)
                 if not edge_ips:
                     logger.warning("No active edge nodes found! Returning origin records.")
@@ -379,6 +398,9 @@ async def sync_data(
 
 def start_dns_server():
     resolver = DBResolver()
+    # Таблица российских сетей — заранее: разбор занимает полсекунды.
+    geo_split.warm()
+    logger.info(f"geo split names: {sorted(geo_split.names()) or 'нет'}")
     
     # Create UDP Server
     udp_server = DNSServer(resolver, port=53, address="0.0.0.0", tcp=False)
